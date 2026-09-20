@@ -1,0 +1,22 @@
+[Unit]
+Description=Office Attendance
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=attendance
+Group=attendance
+WorkingDirectory=/srv/attendance
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/attendance.env
+ExecStart=/usr/bin/node /srv/attendance/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/srv/attendance/.next
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

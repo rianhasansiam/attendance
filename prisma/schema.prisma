@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  EMPLOYEE
+}
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  HALF_DAY
+  LEAVE
+  HOLIDAY
+  WEEKEND
+}
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+enum ChallengePurpose {
+  REGISTRATION
+  CHECK_IN
+  CHECK_OUT
+}
+model User {
+  id String @id @default(cuid())
+  name String?
+  email String @unique
+  emailVerified DateTime?
+  image String?
+  googleAccountId String? @unique
+  role Role @default(EMPLOYEE)
+  status UserStatus @default(ACTIVE)
+  lastLoginAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  accounts Account[]
+  sessions Session[]
+  employee Employee?
+  auditLogs AuditLog[]
+}
+model Account {
+  id String @id @default(cuid())
+  userId String
+  type String
+  provider String
+  providerAccountId String
+  refresh_token String? @db.Text
+  access_token String? @db.Text
+  expires_at Int?
+  token_type String?
+  scope String?
+  id_token String? @db.Text
+  session_state String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+model Session {
+  id String @id @default(cuid())
+  sessionToken String @unique
+  userId String
+  expires DateTime
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expires])
+}
+model Employee {
+  id String @id @default(cuid())
+  employeeCode String @unique
+  userId String @unique
+  departmentId String?
+  officeId String
+  joinedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  office Office @relation(fields: [officeId], references: [id], onDelete: Restrict)
+  shifts EmployeeShift[]
+  credentials WebAuthnCredential[]
+  challenges WebAuthnChallenge[]
+  attendances Attendance[]
+  events AttendanceEvent[]
+  leaves Leave[]
+  @@index([officeId])
+  @@index([departmentId])
+}
+model Department {
+  id String @id @default(cuid())
+  name String @unique
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  employees Employee[]
+}
+model Office {
+  id String @id @default(cuid())
+  name String
+  address String
+  latitude Float
+  longitude Float
+  geofenceRadiusMeters Int @default(100)
+  timezone String @default("UTC")
+  active Boolean @default(true)
+  requireWebAuthn Boolean @default(true)
+  requireGeofence Boolean @default(true)
+  requireOfficeNetwork Boolean @default(true)
+  requireApprovedDevice Boolean @default(true)
+  maximumGpsAccuracyMeters Int @default(50)
+  weekendDays Int[] @default([0, 6])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  employees Employee[]
+  networks OfficeNetwork[]
+  attendances Attendance[]
+  holidays Holiday[]
+}
+model OfficeNetwork {
+  id String @id @default(cuid())
+  officeId String
+  publicIpOrCidr String
+  active Boolean @default(true)
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  office Office @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  @@unique([officeId, publicIpOrCidr])
+}
+model Shift {
+  id String @id @default(cuid())
+  name String
+  startTime String
+  endTime String
+  graceMinutes Int @default(15)
+  halfDayThreshold Int @default(240)
+  timezone String @default("UTC")
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  employees EmployeeShift[]
+  attendances Attendance[]
+}
+model EmployeeShift {
+  id String @id @default(cuid())
+  employeeId String
+  shiftId String
+  startDate DateTime @db.Date
+  endDate DateTime? @db.Date
+  createdAt DateTime @default(now())
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  @@unique([employeeId, startDate])
+  @@index([employeeId, endDate])
+}
+model WebAuthnCredential {
+  id String @id @default(cuid())
+  employeeId String
+  name String
+  credentialId String @unique
+  publicKey Bytes
+  counter BigInt @default(0)
+  transports String[]
+  deviceType String
+  backedUp Boolean @default(false)
+  approved Boolean @default(false)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  @@index([employeeId, revokedAt])
+}
+model WebAuthnChallenge {
+  id String @id @default(cuid())
+  employeeId String
+  sessionId String
+  challenge String @unique
+  purpose ChallengePurpose
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  @@index([employeeId, purpose])
+  @@index([expiresAt])
+}
+model Attendance {
+  id String @id @default(cuid())
+  employeeId String
+  officeId String
+  shiftId String
+  attendanceDate DateTime @db.Date
+  checkInAt DateTime?
+  checkOutAt DateTime?
+  checkInLatitude Float?
+  checkInLongitude Float?
+  checkInAccuracy Float?
+  checkInDistanceMeters Float?
+  checkInIp String?
+  checkOutLatitude Float?
+  checkOutLongitude Float?
+  checkOutAccuracy Float?
+  checkOutDistanceMeters Float?
+  checkOutIp String?
+  checkInCredentialId String?
+  checkOutCredentialId String?
+  status AttendanceStatus
+  lateMinutes Int @default(0)
+  workedMinutes Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  office Office @relation(fields: [officeId], references: [id], onDelete: Restrict)
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  events AttendanceEvent[]
+  @@unique([employeeId, attendanceDate])
+  @@index([officeId, attendanceDate])
+  @@index([status, attendanceDate])
+  @@index([shiftId, attendanceDate])
+}
+model AttendanceEvent {
+  id String @id @default(cuid())
+  employeeId String?
+  attendanceId String?
+  type String
+  reason String?
+  metadata Json?
+  createdAt DateTime @default(now())
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  @@index([employeeId, createdAt])
+  @@index([type, createdAt])
+}
+model Holiday {
+  id String @id @default(cuid())
+  name String
+  date DateTime @db.Date
+  officeId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  office Office? @relation(fields: [officeId], references: [id], onDelete: Restrict)
+  @@unique([officeId, date])
+  @@index([date])
+}
+model Leave {
+  id String @id @default(cuid())
+  employeeId String
+  startDate DateTime @db.Date
+  endDate DateTime @db.Date
+  reason String
+  status LeaveStatus @default(PENDING)
+  reviewedById String?
+  reviewNote String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  @@index([employeeId, startDate, endDate])
+  @@index([status])
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  action String
+  resource String
+  resourceId String?
+  previousState Json?
+  newState Json?
+  createdAt DateTime @default(now())
+  actor User? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@index([createdAt])
+  @@index([resource, resourceId])
+}
+model RateLimit {
+  key String @id
+  count Int
+  resetAt DateTime
+  @@index([resetAt])
+}
+model SystemSetting {
+  key String @id
+  value Json
+  updatedAt DateTime @updatedAt
+}

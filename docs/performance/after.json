@@ -1,0 +1,79 @@
+{
+  "fixture": {
+    "offices": 12,
+    "employees": 240,
+    "storedAttendance": 5400
+  },
+  "results": [
+    {
+      "name": "admin-dashboard-12-offices",
+      "median": {
+        "ms": 6.74,
+        "queries": 21,
+        "responseBytes": 7236
+      },
+      "samples": [
+        {
+          "ms": 5.67,
+          "queries": 21,
+          "responseBytes": 7236
+        },
+        {
+          "ms": 5.9,
+          "queries": 21,
+          "responseBytes": 7236
+        },
+        {
+          "ms": 6.74,
+          "queries": 21,
+          "responseBytes": 7236
+        },
+        {
+          "ms": 7.12,
+          "queries": 21,
+          "responseBytes": 7236
+        },
+        {
+          "ms": 8.51,
+          "queries": 21,
+          "responseBytes": 7236
+        }
+      ]
+    },
+    {
+      "name": "report-first-page-30-days",
+      "median": {
+        "ms": 31.2,
+        "queries": 18,
+        "responseBytes": 21520
+      },
+      "samples": [
+        {
+          "ms": 30.38,
+          "queries": 18,
+          "responseBytes": 21520
+        },
+        {
+          "ms": 31.17,
+          "queries": 18,
+          "responseBytes": 21520
+        },
+        {
+          "ms": 31.2,
+          "queries": 18,
+          "responseBytes": 21520
+        },
+        {
+          "ms": 32.02,
+          "queries": 18,
+          "responseBytes": 21520
+        },
+        {
+          "ms": 35.96,
+          "queries": 18,
+          "responseBytes": 21520
+        }
+      ]
+    }
+  ]
+}

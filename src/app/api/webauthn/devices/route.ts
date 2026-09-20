@@ -4,14 +4,25 @@ import { requireEmployee } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
 import { deviceSelect, revokeOwnCredential } from "@/modules/webauthn/service";
-export function GET() {
+import { paginationSchema } from "@/modules/management/validation";
+export function GET(request: Request) {
   return api(async () => {
     const actor = await requireEmployee();
-    return db.webAuthnCredential.findMany({
-      where: { employeeId: actor.employee.id },
-      select: deviceSelect,
-      orderBy: { createdAt: "desc" },
-    });
+    const { page, pageSize } = paginationSchema.parse(
+      Object.fromEntries(new URL(request.url).searchParams),
+    );
+    const where = { employeeId: actor.employee.id };
+    const [items, total] = await Promise.all([
+      db.webAuthnCredential.findMany({
+        where,
+        select: deviceSelect,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+      }),
+      db.webAuthnCredential.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
   });
 }
 export function DELETE(request: Request) {

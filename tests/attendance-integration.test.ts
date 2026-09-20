@@ -14,6 +14,7 @@ import type {
 import { db } from "../src/lib/db";
 import {
   attendanceEvidenceSchema,
+  employeeDashboard,
   recordAttendance,
 } from "../src/modules/attendance/service";
 import {
@@ -31,6 +32,12 @@ const hash = (data: string | Buffer) =>
   createHash("sha256").update(data).digest();
 const b64 = (data: Uint8Array | string) =>
   Buffer.from(data).toString("base64url");
+const proxySecret = "test-only-proxy-secret-with-at-least-32-characters";
+const officeHeaders = (ip = "192.0.2.10") =>
+  new Headers({
+    "x-real-ip": ip,
+    "x-attendance-proxy-secret": proxySecret,
+  });
 
 integration("PostgreSQL attendance and WebAuthn integration", () => {
   beforeAll(() => {
@@ -48,7 +55,8 @@ integration("PostgreSQL attendance and WebAuthn integration", () => {
       WEBAUTHN_RP_ID: "localhost",
       WEBAUTHN_RP_NAME: "Attendance tests",
       WEBAUTHN_ORIGIN: "http://localhost:3000",
-      TRUSTED_PROXY_MODE: "none",
+      TRUSTED_PROXY_MODE: "nginx",
+      TRUSTED_PROXY_SECRET: proxySecret,
     });
   });
   afterAll(async () => {
@@ -159,6 +167,171 @@ integration("PostgreSQL attendance and WebAuthn integration", () => {
     expect(
       await db.attendance.count({ where: { employeeId: actor.employee.id } }),
     ).toBe(0);
+  });
+
+  it("shows check-in and checkout immediately on successive dashboard reads", async () => {
+    const actor = await fixture();
+    const before = await employeeDashboard(actor, new Headers());
+    expect(before.today.checkInAt).toBeNull();
+
+    const checkIn = await recordAttendance(
+      actor,
+      "CHECK_IN",
+      {},
+      new Headers(),
+    );
+    const checkedIn = await employeeDashboard(actor, new Headers());
+    expect(checkedIn.today).toEqual(checkIn);
+    expect(checkedIn.recent).toContainEqual(checkIn);
+    await expect(
+      recordAttendance(actor, "CHECK_IN", {}, new Headers()),
+    ).rejects.toMatchObject({ code: "ALREADY_CHECKED_IN" });
+
+    const checkOut = await recordAttendance(
+      actor,
+      "CHECK_OUT",
+      {},
+      new Headers(),
+    );
+    const checkedOut = await employeeDashboard(actor, new Headers());
+    expect(checkedOut.today).toEqual(checkOut);
+    expect(checkedOut.today.checkOutAt).toBeInstanceOf(Date);
+    expect(checkedOut.today.workedMinutes).toBe(checkOut.workedMinutes);
+    expect(checkedOut.recent).toContainEqual(checkOut);
+    await expect(
+      recordAttendance(actor, "CHECK_OUT", {}, new Headers()),
+    ).rejects.toMatchObject({ code: "NOT_CHECKED_IN" });
+  });
+
+  it("rejects a deactivated employee after a previously authorized dashboard read", async () => {
+    const actor = await fixture();
+    await employeeDashboard(actor, new Headers());
+    await db.user.update({
+      where: { id: actor.id },
+      data: { status: "INACTIVE" },
+    });
+    await expect(
+      recordAttendance(actor, "CHECK_IN", {}, new Headers()),
+    ).rejects.toMatchObject({ code: "USER_INACTIVE" });
+    expect(
+      await db.attendance.count({ where: { employeeId: actor.employee.id } }),
+    ).toBe(0);
+  });
+
+  it("uses a changed office geofence after earlier dashboard and attendance reads", async () => {
+    const actor = await fixture();
+    await db.office.update({
+      where: { id: actor.employee.officeId },
+      data: { requireGeofence: true, geofenceRadiusMeters: 200 },
+    });
+    const evidence = {
+      location: { latitude: 0.001, longitude: 0, accuracy: 10 },
+    };
+    await employeeDashboard(actor, new Headers());
+    await recordAttendance(actor, "CHECK_IN", evidence, new Headers());
+
+    await db.office.update({
+      where: { id: actor.employee.officeId },
+      data: { geofenceRadiusMeters: 50 },
+    });
+    await expect(
+      recordAttendance(actor, "CHECK_OUT", evidence, new Headers()),
+    ).rejects.toMatchObject({ code: "OUTSIDE_GEOFENCE" });
+    expect(
+      (await employeeDashboard(actor, new Headers())).today.checkOutAt,
+    ).toBeNull();
+  });
+
+  it("verifies new location and accuracy evidence on every attendance attempt", async () => {
+    const actor = await fixture();
+    await db.office.update({
+      where: { id: actor.employee.officeId },
+      data: { requireGeofence: true },
+    });
+    const valid = { location: { latitude: 0, longitude: 0, accuracy: 10 } };
+    await recordAttendance(actor, "CHECK_IN", valid, new Headers());
+    await expect(
+      recordAttendance(
+        actor,
+        "CHECK_OUT",
+        {
+          location: { latitude: 1, longitude: 1, accuracy: 10 },
+        },
+        new Headers(),
+      ),
+    ).rejects.toMatchObject({ code: "OUTSIDE_GEOFENCE" });
+    await expect(
+      recordAttendance(
+        actor,
+        "CHECK_OUT",
+        {
+          location: { latitude: 0, longitude: 0, accuracy: 100 },
+        },
+        new Headers(),
+      ),
+    ).rejects.toMatchObject({ code: "GPS_ACCURACY_TOO_LOW" });
+    await expect(
+      recordAttendance(actor, "CHECK_OUT", valid, new Headers()),
+    ).resolves.toMatchObject({ checkOutAt: expect.any(Date) });
+  });
+
+  it("rechecks changed client IPs and revoked office networks after successful attendance", async () => {
+    const actor = await fixture();
+    await db.office.update({
+      where: { id: actor.employee.officeId },
+      data: { requireOfficeNetwork: true },
+    });
+    const network = await db.officeNetwork.create({
+      data: {
+        officeId: actor.employee.officeId,
+        publicIpOrCidr: "192.0.2.0/24",
+      },
+    });
+    expect(
+      (await employeeDashboard(actor, officeHeaders())).network.verified,
+    ).toBe(true);
+    await recordAttendance(actor, "CHECK_IN", {}, officeHeaders());
+
+    const outside = officeHeaders("198.51.100.10");
+    expect((await employeeDashboard(actor, outside)).network.verified).toBe(
+      false,
+    );
+    await expect(
+      recordAttendance(actor, "CHECK_OUT", {}, outside),
+    ).rejects.toMatchObject({ code: "WRONG_NETWORK" });
+
+    await db.officeNetwork.update({
+      where: { id: network.id },
+      data: { active: false },
+    });
+    expect(
+      (await employeeDashboard(actor, officeHeaders())).network.verified,
+    ).toBe(false);
+    await expect(
+      recordAttendance(actor, "CHECK_OUT", {}, officeHeaders()),
+    ).rejects.toMatchObject({ code: "WRONG_NETWORK" });
+    expect(
+      (await employeeDashboard(actor, officeHeaders())).today.checkOutAt,
+    ).toBeNull();
+  });
+
+  it("requires newly enabled passkey policy after earlier unprotected attendance", async () => {
+    const actor = await fixture();
+    expect(
+      (await employeeDashboard(actor, new Headers())).employee.office.policy
+        .requireWebAuthn,
+    ).toBe(false);
+    await recordAttendance(actor, "CHECK_IN", {}, new Headers());
+    await db.office.update({
+      where: { id: actor.employee.officeId },
+      data: { requireWebAuthn: true },
+    });
+    await expect(
+      recordAttendance(actor, "CHECK_OUT", {}, new Headers()),
+    ).rejects.toMatchObject({ code: "WEBAUTHN_REQUIRED" });
+    const refreshed = await employeeDashboard(actor, new Headers());
+    expect(refreshed.employee.office.policy.requireWebAuthn).toBe(true);
+    expect(refreshed.today.checkOutAt).toBeNull();
   });
 
   it("enforces geofence and trusted network before writing attendance", async () => {

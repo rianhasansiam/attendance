@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { api, readJson } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth";
+import { invalidateReferenceDisplay } from "@/lib/cache/invalidation";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
 import {
   getRecord,
@@ -30,12 +31,15 @@ export function PATCH(request: Request, context: Context) {
     const actor = await requireAdmin();
     await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const params = await context.params;
-    return updateRecord(
+    const resource = resourceSchema.parse(params.resource);
+    const result = await updateRecord(
       actor,
-      resourceSchema.parse(params.resource),
+      resource,
       idSchema.parse(params.id),
       await readJson(request, z.record(z.string(), z.unknown())),
     );
+    invalidateReferenceDisplay(resource);
+    return result;
   });
 }
 
@@ -45,10 +49,13 @@ export function DELETE(request: Request, context: Context) {
     const actor = await requireAdmin();
     await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const params = await context.params;
-    return removeRecord(
+    const resource = resourceSchema.parse(params.resource);
+    const result = await removeRecord(
       actor,
-      resourceSchema.parse(params.resource),
+      resource,
       idSchema.parse(params.id),
     );
+    invalidateReferenceDisplay(resource);
+    return result;
   });
 }

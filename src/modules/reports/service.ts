@@ -2,7 +2,6 @@ import { Prisma, type AttendanceStatus } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
-import { employeeInclude } from "@/modules/employees/service";
 import { reportFilterSchema, utcDate } from "@/modules/management/validation";
 import {
   addCalendarDays,
@@ -12,23 +11,69 @@ import {
 import { toCsv } from "./export";
 
 type Filters = z.infer<typeof reportFilterSchema>;
-const attendanceInclude = {
-  employee: { include: employeeInclude },
-  office: true,
-  shift: true,
-} satisfies Prisma.AttendanceInclude;
-export type ReportRecord = Pick<
-  Prisma.AttendanceGetPayload<{ include: typeof attendanceInclude }>,
-  | "employee"
-  | "office"
-  | "shift"
-  | "attendanceDate"
-  | "status"
-  | "checkInAt"
-  | "checkOutAt"
-  | "lateMinutes"
-  | "workedMinutes"
-> & { id: string; derived: boolean };
+const officeSelect = {
+  id: true,
+  name: true,
+  timezone: true,
+  weekendDays: true,
+} satisfies Prisma.OfficeSelect;
+const shiftSelect = {
+  id: true,
+  name: true,
+  startTime: true,
+  endTime: true,
+  graceMinutes: true,
+  halfDayThreshold: true,
+  timezone: true,
+  active: true,
+} satisfies Prisma.ShiftSelect;
+const employeeSelect = {
+  id: true,
+  employeeCode: true,
+  userId: true,
+  departmentId: true,
+  officeId: true,
+  joinedAt: true,
+  user: { select: { id: true, name: true, email: true, status: true } },
+  office: { select: officeSelect },
+  department: { select: { id: true, name: true } },
+} satisfies Prisma.EmployeeSelect;
+const attendanceSelect = {
+  id: true,
+  attendanceDate: true,
+  status: true,
+  checkInAt: true,
+  checkOutAt: true,
+  lateMinutes: true,
+  workedMinutes: true,
+  employee: { select: employeeSelect },
+  office: { select: officeSelect },
+  shift: { select: shiftSelect },
+} satisfies Prisma.AttendanceSelect;
+// Sorting, derivation and live counts do not require detailed employee/office data.
+const candidateSelect = {
+  id: true,
+  employeeId: true,
+  officeId: true,
+  attendanceDate: true,
+  status: true,
+  checkInAt: true,
+  checkOutAt: true,
+  lateMinutes: true,
+  workedMinutes: true,
+  employee: { select: { employeeCode: true } },
+  shift: { select: shiftSelect },
+} satisfies Prisma.AttendanceSelect;
+type Candidate = Prisma.AttendanceGetPayload<{
+  select: typeof candidateSelect;
+}>;
+export type ReportRecord = Prisma.AttendanceGetPayload<{
+  select: typeof attendanceSelect;
+}> & { derived: boolean };
+type Entry =
+  | { derived: false; record: Candidate }
+  | { derived: true; record: ReportRecord };
+type OfficeScope = { id: string; from: string; to: string };
 
 function sanitizedEmployee(
   employee: ReportRecord["employee"],
@@ -40,14 +85,11 @@ function sanitizedEmployee(
     departmentId: employee.departmentId,
     officeId: employee.officeId,
     joinedAt: employee.joinedAt,
-    createdAt: employee.createdAt,
-    updatedAt: employee.updatedAt,
     user: employee.user,
     office: employee.office,
     department: employee.department,
   };
 }
-
 function sanitizedRecord(
   record: Omit<ReportRecord, "derived">,
   derived: boolean,
@@ -66,11 +108,19 @@ function sanitizedRecord(
     derived,
   };
 }
+function tooLarge(): never {
+  throw new DomainError(
+    "REPORT_TOO_LARGE",
+    "Narrow the report using an employee, department, office, or date filter.",
+  );
+}
 
-export async function reportRecords(
+/** All inputs and derived state are local to this invocation, never cached. */
+async function reportEntries(
   filters: Filters,
   now = new Date(),
-): Promise<ReportRecord[]> {
+  scopes?: OfficeScope[],
+): Promise<Entry[]> {
   const to = filters.to ?? now.toISOString().slice(0, 10);
   const from = filters.from ?? addCalendarDays(to, -29);
   if (
@@ -82,70 +132,174 @@ export async function reportRecords(
       "Choose a date range of 93 days or fewer.",
     );
   const dateRange = { gte: utcDate(from), lte: utcDate(to) };
+  const attendanceWhere: Prisma.AttendanceWhereInput = {
+    attendanceDate: dateRange,
+    ...(filters.employeeId ? { employeeId: filters.employeeId } : {}),
+    ...(filters.departmentId
+      ? { employee: { departmentId: filters.departmentId } }
+      : {}),
+    ...(filters.officeId ? { officeId: filters.officeId } : {}),
+    ...(filters.shiftId ? { shiftId: filters.shiftId } : {}),
+    ...(scopes
+      ? {
+          OR: scopes.map((scope) => ({
+            officeId: scope.id,
+            attendanceDate: {
+              gte: utcDate(scope.from),
+              lte: utcDate(scope.to),
+            },
+          })),
+        }
+      : {}),
+  };
+  const employeeWhere: Prisma.EmployeeWhereInput = {
+    ...(filters.employeeId ? { id: filters.employeeId } : {}),
+    ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
+    ...(filters.officeId ? { officeId: filters.officeId } : {}),
+    ...(scopes ? { officeId: { in: scopes.map((scope) => scope.id) } } : {}),
+  };
+  const scheduleSelect = {
+    ...employeeSelect,
+    shifts: {
+      where: {
+        startDate: { lte: dateRange.lte },
+        OR: [{ endDate: null }, { endDate: { gte: dateRange.gte } }],
+      },
+      select: {
+        shiftId: true,
+        startDate: true,
+        endDate: true,
+        shift: { select: shiftSelect },
+      },
+      orderBy: [{ startDate: "desc" }, { id: "asc" }],
+    },
+    leaves: {
+      where: {
+        status: "APPROVED",
+        startDate: { lte: dateRange.lte },
+        endDate: { gte: dateRange.gte },
+      },
+      select: { startDate: true, endDate: true },
+    },
+  } satisfies Prisma.EmployeeSelect;
+  const rowCounts = new Map<string, number>();
+  function countRow(officeId: string) {
+    const count = (rowCounts.get(officeId) ?? 0) + 1;
+    rowCounts.set(officeId, count);
+    if (scopes && count > 50000) tooLarge();
+  }
+  // Bounded cursor batches preserve the old per-office limits without adding a
+  // new organization-wide 1,000 employee limit to the dashboard.
+  async function candidates() {
+    if (!scopes)
+      return db.attendance.findMany({
+        where: attendanceWhere,
+        select: candidateSelect,
+        take: 50001,
+      });
+    const result: Candidate[] = [];
+    let cursor: string | undefined;
+    while (true) {
+      const batch: Candidate[] = await db.attendance.findMany({
+        where: attendanceWhere,
+        select: candidateSelect,
+        orderBy: { id: "asc" },
+        take: 500,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      for (const record of batch) countRow(record.officeId);
+      result.push(...batch);
+      if (batch.length < 500) return result;
+      cursor = batch[batch.length - 1].id;
+    }
+  }
+  async function scheduledEmployees() {
+    if (!scopes)
+      return db.employee.findMany({
+        where: employeeWhere,
+        select: scheduleSelect,
+        take: 1001,
+      });
+    type Scheduled = Prisma.EmployeeGetPayload<{
+      select: typeof scheduleSelect;
+    }>;
+    const result: Scheduled[] = [];
+    const employeeCounts = new Map<string, number>();
+    let cursor: string | undefined;
+    while (true) {
+      const batch: Scheduled[] = await db.employee.findMany({
+        where: employeeWhere,
+        select: scheduleSelect,
+        orderBy: { id: "asc" },
+        take: 250,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      for (const employee of batch) {
+        const count = (employeeCounts.get(employee.officeId) ?? 0) + 1;
+        employeeCounts.set(employee.officeId, count);
+        if (count > 1000) tooLarge();
+      }
+      result.push(...batch);
+      if (batch.length < 250) return result;
+      cursor = batch[batch.length - 1].id;
+    }
+  }
   const [records, employees, holidays] = await Promise.all([
-    db.attendance.findMany({
+    candidates(),
+    scheduledEmployees(),
+    db.holiday.findMany({
       where: {
-        attendanceDate: dateRange,
-        ...(filters.employeeId ? { employeeId: filters.employeeId } : {}),
-        ...(filters.departmentId
-          ? { employee: { departmentId: filters.departmentId } }
+        date: dateRange,
+        ...(scopes
+          ? {
+              OR: [
+                { officeId: null },
+                { officeId: { in: scopes.map((scope) => scope.id) } },
+              ],
+            }
           : {}),
-        ...(filters.officeId ? { officeId: filters.officeId } : {}),
-        ...(filters.shiftId ? { shiftId: filters.shiftId } : {}),
       },
-      include: attendanceInclude,
-      orderBy: [{ attendanceDate: "desc" }, { employeeId: "asc" }],
-      take: 50001,
+      select: { date: true, officeId: true },
     }),
-    db.employee.findMany({
-      where: {
-        ...(filters.employeeId ? { id: filters.employeeId } : {}),
-        ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
-        ...(filters.officeId ? { officeId: filters.officeId } : {}),
-      },
-      include: {
-        ...employeeInclude,
-        shifts: {
-          where: {
-            startDate: { lte: dateRange.lte },
-            OR: [{ endDate: null }, { endDate: { gte: dateRange.gte } }],
-          },
-          include: { shift: true },
-        },
-        leaves: {
-          where: {
-            status: "APPROVED",
-            startDate: { lte: dateRange.lte },
-            endDate: { gte: dateRange.gte },
-          },
-        },
-      },
-      take: 1001,
-    }),
-    db.holiday.findMany({ where: { date: dateRange } }),
   ]);
-  if (employees.length > 1000 || records.length > 50000)
-    throw new DomainError(
-      "REPORT_TOO_LARGE",
-      "Narrow the report using an employee, department, office, or date filter.",
-    );
-  const rows: ReportRecord[] = records.map((record) =>
-    sanitizedRecord(record, false),
-  );
+  if (!scopes && (employees.length > 1000 || records.length > 50000))
+    tooLarge();
+  const scoped = new Map(scopes?.map((scope) => [scope.id, scope]));
+  const key = (employeeId: string, day: string, officeId: string) =>
+    `${scopes ? officeId + ":" : ""}${employeeId}:${day}`;
   const recorded = new Set(
-    records.map(
-      (record) =>
-        `${record.employeeId}:${record.attendanceDate.toISOString().slice(0, 10)}`,
+    records.map((record) =>
+      key(
+        record.employeeId,
+        record.attendanceDate.toISOString().slice(0, 10),
+        record.officeId,
+      ),
     ),
   );
+  const rows: Entry[] = records.map((record) => ({
+    derived: false,
+    record,
+  }));
+  const holidayDays = new Set(
+    holidays.map(
+      (holiday) => `${holiday.date.valueOf()}:${holiday.officeId ?? "*"}`,
+    ),
+  );
+  // Reuse pure date calculations inside this request, never validation evidence.
+  const windows = new Map<string, ReturnType<typeof getShiftWindow>>();
+  const currentDates = new Map<string, string>();
   for (const employee of employees) {
-    for (let day = from; day <= to; day = addCalendarDays(day, 1)) {
-      const attendanceDate = utcDate(day);
+    const scope = scoped.get(employee.officeId);
+    const firstDay = scope?.from ?? from,
+      lastDay = scope?.to ?? to;
+    const joined = shiftDate(employee.joinedAt, employee.office.timezone);
+    for (let day = firstDay; day <= lastDay; day = addCalendarDays(day, 1)) {
       if (
-        recorded.has(`${employee.id}:${day}`) ||
-        day < shiftDate(employee.joinedAt, employee.office.timezone)
+        day < joined ||
+        recorded.has(key(employee.id, day, employee.officeId))
       )
         continue;
+      const attendanceDate = utcDate(day);
       const assignment = employee.shifts.find(
         (item) =>
           item.startDate <= attendanceDate &&
@@ -156,8 +310,12 @@ export async function reportRecords(
         (filters.shiftId && assignment.shiftId !== filters.shiftId)
       )
         continue;
-      const window = getShiftWindow(now, assignment.shift, day);
-      // An unstarted shift is not an absence. Historic scheduled days remain reportable even if the shift is later disabled.
+      const windowKey = `${assignment.shiftId}:${day}`;
+      let window = windows.get(windowKey);
+      if (!window) {
+        window = getShiftWindow(now, assignment.shift, day);
+        windows.set(windowKey, window);
+      }
       if (window.startsAt > now) continue;
       let status: AttendanceStatus = "ABSENT";
       if (
@@ -169,30 +327,29 @@ export async function reportRecords(
       )
         status = "LEAVE";
       else if (
-        holidays.some(
-          (holiday) =>
-            holiday.date.valueOf() === attendanceDate.valueOf() &&
-            (!holiday.officeId || holiday.officeId === employee.officeId),
-        )
+        holidayDays.has(`${attendanceDate.valueOf()}:*`) ||
+        holidayDays.has(`${attendanceDate.valueOf()}:${employee.officeId}`)
       )
         status = "HOLIDAY";
       else if (employee.office.weekendDays.includes(attendanceDate.getUTCDay()))
         status = "WEEKEND";
-      // Until grace has elapsed, a scheduled employee can still arrive on time.
       if (
         status === "ABSENT" &&
         window.startsAt.valueOf() + assignment.shift.graceMinutes * 60000 >=
           now.valueOf()
       )
         continue;
-      // Keep historical rows after deactivation, but do not generate today's absence for an inactive account.
-      if (
-        employee.user.status !== "ACTIVE" &&
-        day >= shiftDate(now, assignment.shift.timezone)
-      )
-        continue;
-      rows.push(
-        sanitizedRecord(
+      if (employee.user.status !== "ACTIVE") {
+        let current = currentDates.get(assignment.shift.timezone);
+        if (!current) {
+          current = shiftDate(now, assignment.shift.timezone);
+          currentDates.set(assignment.shift.timezone, current);
+        }
+        if (day >= current) continue;
+      }
+      rows.push({
+        derived: true,
+        record: sanitizedRecord(
           {
             id: `scheduled:${employee.id}:${day}`,
             employee,
@@ -207,21 +364,151 @@ export async function reportRecords(
           },
           true,
         ),
-      );
-      if (rows.length > 50000)
-        throw new DomainError(
-          "REPORT_TOO_LARGE",
-          "Narrow the report using an employee, department, office, or date filter.",
-        );
+      });
+      countRow(employee.officeId);
+      if (!scopes && rows.length > 50000) tooLarge();
     }
   }
   return rows
-    .filter((row) => !filters.status || row.status === filters.status)
+    .filter(
+      (entry) => !filters.status || entry.record.status === filters.status,
+    )
     .sort(
       (a, b) =>
-        b.attendanceDate.valueOf() - a.attendanceDate.valueOf() ||
-        a.employee.employeeCode.localeCompare(b.employee.employeeCode),
+        b.record.attendanceDate.valueOf() - a.record.attendanceDate.valueOf() ||
+        a.record.employee.employeeCode.localeCompare(
+          b.record.employee.employeeCode,
+        ) ||
+        a.record.id.localeCompare(b.record.id),
     );
+}
+
+async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
+  const ids = entries
+    .filter((entry) => !entry.derived)
+    .map((entry) => entry.record.id);
+  const records = ids.length
+    ? await db.attendance.findMany({
+        where: { id: { in: ids } },
+        select: attendanceSelect,
+      })
+    : [];
+  const byId = new Map(records.map((record) => [record.id, record]));
+  return entries.map((entry) => {
+    if (entry.derived) return entry.record;
+    const detail = byId.get(entry.record.id);
+    if (!detail)
+      throw new DomainError(
+        "REPORT_CHANGED",
+        "Attendance changed while loading. Refresh the report.",
+        409,
+      );
+    // Retain the scanned attendance values so a concurrent correction between
+    // scanning and page hydration cannot disagree with the page's totals/order.
+    const {
+      id,
+      attendanceDate,
+      status,
+      checkInAt,
+      checkOutAt,
+      lateMinutes,
+      workedMinutes,
+      shift,
+    } = entry.record;
+    return sanitizedRecord(
+      {
+        ...detail,
+        id,
+        attendanceDate,
+        status,
+        checkInAt,
+        checkOutAt,
+        lateMinutes,
+        workedMinutes,
+        shift,
+      },
+      false,
+    );
+  });
+}
+export async function reportRecords(
+  filters: Filters,
+  now = new Date(),
+): Promise<ReportRecord[]> {
+  return hydrateEntries(await reportEntries(filters, now));
+}
+
+export async function getAdminDashboard(now = new Date()) {
+  const summary = Promise.all([
+    db.employee.count({ where: { user: { status: "ACTIVE" } } }),
+    db.attendance.count({
+      where: { checkInAt: { not: null }, checkOutAt: null },
+    }),
+    db.attendance.findMany({
+      select: attendanceSelect,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 8,
+    }),
+  ]);
+  const todayPromise = (async () => {
+    const offices = await db.office.findMany({
+      where: { active: true },
+      select: { id: true, timezone: true },
+    });
+    if (!offices.length) return [];
+    const scopes = offices.map((office) => {
+      const day = shiftDate(now, office.timezone);
+      return {
+        id: office.id,
+        from: addCalendarDays(day, -1),
+        to: addCalendarDays(day, 1),
+      };
+    });
+    const from = scopes.reduce(
+      (value, scope) => (scope.from < value ? scope.from : value),
+      scopes[0].from,
+    );
+    const to = scopes.reduce(
+      (value, scope) => (scope.to > value ? scope.to : value),
+      scopes[0].to,
+    );
+    const rows = await reportEntries(
+      { from, to, format: "json", page: 1, pageSize: 100 },
+      now,
+      scopes,
+    );
+    const shiftDays = new Map<string, number>();
+    return rows.filter(({ record }) => {
+      let day = shiftDays.get(record.shift.id);
+      if (day === undefined) {
+        day = getShiftWindow(now, record.shift).attendanceDate.valueOf();
+        shiftDays.set(record.shift.id, day);
+      }
+      return record.attendanceDate.valueOf() === day;
+    });
+  })();
+  const [[totalEmployees, currentlyCheckedIn, recentAttendance], today] =
+    await Promise.all([summary, todayPromise]);
+  const totals = {
+    presentToday: 0,
+    lateToday: 0,
+    absentToday: 0,
+    checkedOut: 0,
+  };
+  for (const { record } of today) {
+    if (record.checkInAt !== null) totals.presentToday++;
+    if (record.lateMinutes > 0) totals.lateToday++;
+    if (record.status === "ABSENT") totals.absentToday++;
+    if (record.checkOutAt !== null) totals.checkedOut++;
+  }
+  return {
+    totalEmployees,
+    ...totals,
+    currentlyCheckedIn,
+    recentAttendance: recentAttendance.map((record) =>
+      sanitizedRecord(record, false),
+    ),
+  };
 }
 
 const columns = [
@@ -258,18 +545,21 @@ function exportRows(records: ReportRecord[]) {
 }
 
 export async function getReport(filters: Filters) {
-  const records = await reportRecords(filters);
+  const entries = await reportEntries(filters);
   if (filters.format === "json") {
     return {
-      items: records.slice(
-        (filters.page - 1) * filters.pageSize,
-        filters.page * filters.pageSize,
+      items: await hydrateEntries(
+        entries.slice(
+          (filters.page - 1) * filters.pageSize,
+          filters.page * filters.pageSize,
+        ),
       ),
-      total: records.length,
+      total: entries.length,
       page: filters.page,
       pageSize: filters.pageSize,
     };
   }
+  const records = await hydrateEntries(entries);
   const filename = `attendance-${new Date().toISOString().slice(0, 10)}`;
   if (filters.format === "csv")
     return new Response(toCsv(columns, exportRows(records)), {
@@ -307,58 +597,4 @@ export async function getReport(filters: Filters) {
       "Content-Disposition": `attachment; filename="${filename}.xlsx"`,
     },
   });
-}
-
-export async function getAdminDashboard(now = new Date()) {
-  const offices = await db.office.findMany({
-    where: { active: true },
-    select: { id: true, timezone: true },
-  });
-  const officeRecords = await Promise.all(
-    offices.map((office) => {
-      const day = shiftDate(now, office.timezone);
-      const records = reportRecords(
-        {
-          officeId: office.id,
-          from: addCalendarDays(day, -1),
-          to: addCalendarDays(day, 1),
-          format: "json",
-          page: 1,
-          pageSize: 100,
-        },
-        now,
-      );
-      return records.then((rows) =>
-        rows.filter(
-          (row) =>
-            row.attendanceDate.valueOf() ===
-            getShiftWindow(now, row.shift).attendanceDate.valueOf(),
-        ),
-      );
-    }),
-  );
-  const today = officeRecords.flat();
-  const [totalEmployees, currentlyCheckedIn, recentAttendance] =
-    await Promise.all([
-      db.employee.count({ where: { user: { status: "ACTIVE" } } }),
-      db.attendance.count({
-        where: { checkInAt: { not: null }, checkOutAt: null },
-      }),
-      db.attendance.findMany({
-        include: attendanceInclude,
-        orderBy: { updatedAt: "desc" },
-        take: 8,
-      }),
-    ]);
-  return {
-    totalEmployees,
-    presentToday: today.filter((row) => row.checkInAt !== null).length,
-    lateToday: today.filter((row) => row.lateMinutes > 0).length,
-    absentToday: today.filter((row) => row.status === "ABSENT").length,
-    currentlyCheckedIn,
-    checkedOut: today.filter((row) => row.checkOutAt !== null).length,
-    recentAttendance: recentAttendance.map((record) =>
-      sanitizedRecord(record, false),
-    ),
-  };
 }

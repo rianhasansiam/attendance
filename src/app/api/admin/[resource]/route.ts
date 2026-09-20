@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { api, readJson } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth";
+import { invalidateReferenceDisplay } from "@/lib/cache/invalidation";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
 import {
   createRecord,
@@ -31,10 +32,12 @@ export function POST(request: Request, context: Context) {
     const actor = await requireAdmin();
     await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const resource = resourceSchema.parse((await context.params).resource);
-    return createRecord(
+    const result = await createRecord(
       actor,
       resource,
       await readJson(request, z.record(z.string(), z.unknown())),
     );
+    invalidateReferenceDisplay(resource);
+    return result;
   });
 }

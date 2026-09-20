@@ -2,6 +2,8 @@
 
 A modular Next.js application for Google-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, CSV/Excel reports, and append-only audit history.
 
+See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results.
+
 Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).
 
 ## Local setup

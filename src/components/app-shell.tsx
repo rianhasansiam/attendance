@@ -55,8 +55,9 @@ export function Brand() {
       <span className="brand-icon">
         <CheckCheck size={24} strokeWidth={2.5} />
       </span>
+
       <span>
-        attend<span className="brand-dot">.</span>
+        BangBuy
       </span>
     </div>
   );

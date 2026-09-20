@@ -278,6 +278,39 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
 });
 
 describe("backend session and role guards", () => {
+  it.each([
+    ["account deactivation", "USER_INACTIVE"],
+    ["identity reset", "USER_NOT_AUTHORIZED"],
+    ["session revocation", "UNAUTHENTICATED"],
+  ])(
+    "rechecks %s after the same user was successfully authorized",
+    async (change, code) => {
+      await expect(requireUser()).resolves.toMatchObject({ id: user.id });
+      if (change === "session revocation") {
+        mocks.db.session.findFirst.mockResolvedValue(null);
+      } else {
+        mocks.db.user.findUnique.mockResolvedValue({
+          ...user,
+          ...(change === "account deactivation"
+            ? { status: "INACTIVE" }
+            : { googleAccountId: null }),
+        });
+      }
+      // Auth.js still returns the previous identity; the guard must read current
+      // database state instead of reusing its earlier successful authorization.
+      await expect(requireUser()).rejects.toMatchObject({ code });
+    },
+  );
+  it("rejects a demoted administrator on the next authorization check", async () => {
+    mocks.auth.mockResolvedValue({
+      user: { id: user.id, role: "ADMIN" },
+      sessionId: "session-id",
+    });
+    mocks.db.user.findUnique.mockResolvedValue({ ...user, role: "ADMIN" });
+    await expect(requireAdmin()).resolves.toMatchObject({ role: "ADMIN" });
+    mocks.db.user.findUnique.mockResolvedValue(user);
+    await expect(requireAdmin()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
   it("requires a live persisted session even after Auth.js resolved an identity", async () => {
     mocks.db.session.findFirst.mockResolvedValue(null);
     await expect(requireUser()).rejects.toMatchObject({

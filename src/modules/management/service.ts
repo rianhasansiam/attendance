@@ -100,7 +100,7 @@ export async function listRecords(
       result = await Promise.all([
         db.department.findMany({
           where: named,
-          orderBy: { name: "asc" },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
           ...window,
         }),
         db.department.count({ where: named }),
@@ -110,7 +110,7 @@ export async function listRecords(
       result = await Promise.all([
         db.office.findMany({
           where: named,
-          orderBy: { name: "asc" },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
           ...window,
         }),
         db.office.count({ where: named }),
@@ -124,7 +124,7 @@ export async function listRecords(
         db.officeNetwork.findMany({
           where,
           include: { office: true },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.officeNetwork.count({ where }),
@@ -135,7 +135,7 @@ export async function listRecords(
       result = await Promise.all([
         db.shift.findMany({
           where: named,
-          orderBy: { name: "asc" },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
           ...window,
         }),
         db.shift.count({ where: named }),
@@ -147,7 +147,7 @@ export async function listRecords(
         db.employeeShift.findMany({
           where,
           include: { employee: { include: employeeInclude }, shift: true },
-          orderBy: { startDate: "desc" },
+          orderBy: [{ startDate: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.employeeShift.count({ where }),
@@ -160,7 +160,7 @@ export async function listRecords(
         db.webAuthnCredential.findMany({
           where,
           select: deviceSelect,
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.webAuthnCredential.count({ where }),
@@ -173,7 +173,7 @@ export async function listRecords(
         db.leave.findMany({
           where,
           include: { employee: { include: employeeInclude } },
-          orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+          orderBy: [{ status: "asc" }, { createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.leave.count({ where }),
@@ -185,7 +185,7 @@ export async function listRecords(
         db.holiday.findMany({
           where: named,
           include: { office: true },
-          orderBy: { date: "desc" },
+          orderBy: [{ date: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.holiday.count({ where: named }),
@@ -204,7 +204,7 @@ export async function listRecords(
         db.user.findMany({
           where,
           select: publicUserSelect,
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.user.count({ where }),
@@ -230,7 +230,7 @@ export async function listRecords(
         db.auditLog.findMany({
           where,
           include: { actor: { select: publicUserSelect } },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.auditLog.count({ where }),
@@ -250,7 +250,7 @@ export async function listRecords(
         db.attendanceEvent.findMany({
           where,
           include: { employee: { include: employeeInclude } },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
         db.attendanceEvent.count({ where }),

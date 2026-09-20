@@ -227,6 +227,7 @@ model Attendance {
   @@index([officeId, attendanceDate])
   @@index([status, attendanceDate])
   @@index([shiftId, attendanceDate])
+  @@index([updatedAt(sort: Desc), id(sort: Desc)])
 }
 model AttendanceEvent {
   id String @id @default(cuid())

@@ -1,4 +1,5 @@
 import { ZodError, type ZodType } from "zod";
+import { unstable_rethrow } from "next/navigation";
 import { DomainError } from "@/lib/errors";
 
 export async function api(handler: () => Promise<unknown>): Promise<Response> {
@@ -9,6 +10,8 @@ export async function api(handler: () => Promise<unknown>): Promise<Response> {
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
+    // Preserve framework control flow during Cache Components prerendering.
+    unstable_rethrow(error);
     let safe = error instanceof DomainError ? error : undefined;
     if (error instanceof ZodError)
       safe = new DomainError(

@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { requireEmployee } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sanitizeAttendance } from "@/modules/attendance/service";
+import { attendanceDisplaySelect } from "@/modules/attendance/queries";
 const filters = z
   .object({
     from: z.iso.date().optional(),
@@ -28,6 +29,7 @@ export function GET(request: Request) {
     const [records, total] = await Promise.all([
       db.attendance.findMany({
         where,
+        select: attendanceDisplaySelect,
         orderBy: { attendanceDate: "desc" },
         take: 50,
         skip: (query.page - 1) * 50,

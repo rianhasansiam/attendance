@@ -1,6 +1,4 @@
-"use client";
-
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -9,47 +7,6 @@ import {
 } from "lucide-react";
 
 export type DataRow = Record<string, unknown>;
-export async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-  const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.success)
-    throw new Error(
-      body?.error?.message ||
-        "Unable to complete this request. Please try again.",
-    );
-  return body.data as T;
-}
-export function useResource<T>(url: string) {
-  const [state, setState] = useState<{
-    data: T | null;
-    error: string;
-    loading: boolean;
-  }>({ data: null, error: "", loading: true });
-  const [version, setVersion] = useState(0);
-  useEffect(() => {
-    let current = true;
-    api<T>(url)
-      .then((data) => {
-        if (current) setState({ data, error: "", loading: false });
-      })
-      .catch((error: Error) => {
-        if (current)
-          setState({ data: null, error: error.message, loading: false });
-      });
-    return () => {
-      current = false;
-    };
-  }, [url, version]);
-  const refresh = useCallback(() => {
-    setState((previous) => ({ ...previous, loading: true }));
-    setVersion((previous) => previous + 1);
-  }, []);
-  return { ...state, refresh };
-}
 export function PageHeader({
   eyebrow,
   title,
@@ -268,6 +225,40 @@ export function Pagination({
           Next
         </button>
       </div>
+    </div>
+  );
+}
+
+export function Metric({
+  title,
+  value,
+  note,
+  icon,
+  featured = false,
+}: {
+  title: string;
+  value: ReactNode;
+  note: string;
+  icon: ReactNode;
+  featured?: boolean;
+}) {
+  return (
+    <div className={`stat-card ${featured ? "featured" : ""}`}>
+      <div className="stat-top">
+        <span>{title}</span>
+        <span className="stat-icon">{icon}</span>
+      </div>
+      <div
+        className="stat-value"
+        style={
+          typeof value === "string" && value.length > 14
+            ? { fontSize: 19, padding: "6px 0" }
+            : undefined
+        }
+      >
+        {value}
+      </div>
+      <p className="stat-note">{note}</p>
     </div>
   );
 }

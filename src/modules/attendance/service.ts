@@ -1,3 +1,4 @@
+import { attendanceDisplaySelect } from "./queries";
 import { Prisma, type Shift, type EmployeeShift } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -337,9 +338,12 @@ export async function employeeDashboard(
       where: { employeeId: employee.id },
       orderBy: { attendanceDate: "desc" },
       take: 14,
+      select: attendanceDisplaySelect,
     }),
     db.webAuthnCredential.findMany({
-      where: { employeeId: employee.id },
+      // The dashboard only displays the approved-device count. Registration
+      // caps non-revoked credentials at ten; revoked history is paginated separately.
+      where: { employeeId: employee.id, approved: true, revokedAt: null },
       select: deviceSelect,
       orderBy: { createdAt: "desc" },
     }),
@@ -358,6 +362,7 @@ export async function employeeDashboard(
       },
     }),
     db.attendance.findFirst({
+      select: attendanceDisplaySelect,
       where: {
         employeeId: employee.id,
         checkInAt: { not: null },

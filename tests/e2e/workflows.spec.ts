@@ -192,3 +192,153 @@ test("super administrator manages departments and downloads both report formats"
   });
   expect(crossOrigin.status()).toBe(403);
 });
+
+// Exercise the real Next cache, not a mock of cacheTag/cacheLife.
+test("display lookup cache expires on writes and never authorizes an inactive user", async ({
+  context,
+}) => {
+  const fixture = await session(context, "SUPER_ADMIN");
+  for (const resource of ["departments", "offices", "shifts"] as const) {
+    const name = `Cache ${resource} ${randomUUID()}`;
+    const payload =
+      resource === "departments"
+        ? { name }
+        : resource === "offices"
+          ? {
+              name,
+              address: "Cache test",
+              latitude: 0,
+              longitude: 0,
+              geofenceRadiusMeters: 100,
+              timezone: "UTC",
+            }
+          : { name, startTime: "09:00", endTime: "17:00", timezone: "UTC" };
+    const created = await context.request.post(`/api/admin/${resource}`, {
+      data: payload,
+      headers: { origin: "http://localhost:3100" },
+    });
+    expect(created.ok()).toBe(true);
+    const id = (await created.json()).data.id as string;
+    const url = `/api/admin/lookups/${resource}?pageSize=100`;
+    const warm = await context.request.get(url);
+    expect(warm.ok()).toBe(true);
+    expect(warm.headers()["cache-control"]).toBe("no-store");
+    const labels = (await warm.json()).data.items as {
+      id: string;
+      name: string;
+    }[];
+    expect(labels.find((row) => row.id === id)?.name).toBe(name);
+    expect(Object.keys(labels.find((row) => row.id === id)!).sort()).toEqual([
+      "id",
+      "name",
+    ]);
+    const changed = `${name} renamed`;
+    // Direct fixture writes bypass invalidation, proving the next request
+    // actually reuses Next's server cache rather than simply querying again.
+    if (resource === "departments")
+      await db.department.update({ where: { id }, data: { name: changed } });
+    else if (resource === "offices")
+      await db.office.update({ where: { id }, data: { name: changed } });
+    else await db.shift.update({ where: { id }, data: { name: changed } });
+    const cached = await context.request.get(url);
+    expect(
+      (await cached.json()).data.items.find(
+        (row: { id: string }) => row.id === id,
+      ).name,
+    ).toBe(name);
+    const updated = await context.request.patch(
+      `/api/admin/${resource}/${id}`,
+      { data: { name: changed }, headers: { origin: "http://localhost:3100" } },
+    );
+    expect(updated.ok()).toBe(true);
+    const fresh = await context.request.get(url);
+    expect(
+      (await fresh.json()).data.items.find(
+        (row: { id: string }) => row.id === id,
+      ).name,
+    ).toBe(changed);
+  }
+  await db.user.update({
+    where: { id: fixture.user.id },
+    data: { status: "INACTIVE" },
+  });
+  expect(
+    (
+      await context.request.get("/api/admin/lookups/offices?pageSize=100")
+    ).status(),
+  ).toBeGreaterThanOrEqual(401);
+});
+
+test("returning to employee dashboard refreshes attendance and profile renders without an API waterfall", async ({
+  page,
+  context,
+}) => {
+  await session(context);
+  const profileRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/employee/profile"))
+      profileRequests.push(request.url());
+  });
+  await page.goto("/employee/dashboard");
+  await expect(
+    page.getByRole("button", { name: "Check in", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("link", { name: "My profile", exact: true })
+    .first()
+    .click();
+  await expect(page.getByRole("heading", { name: "My profile" })).toBeVisible();
+  expect(profileRequests).toHaveLength(0);
+  const checkedIn = await context.request.post("/api/attendance/check-in", {
+    data: {},
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(checkedIn.ok()).toBe(true);
+  const response = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/attendance/me") && response.ok(),
+  );
+  await page.getByRole("link", { name: "My day", exact: true }).first().click();
+  await response;
+  await expect(
+    page.getByRole("button", { name: "Check out", exact: true }),
+  ).toBeEnabled();
+});
+
+test("device history is paginated without exposing credential material", async ({
+  page,
+  context,
+}) => {
+  const fixture = await session(context);
+  const prefix = randomUUID();
+  await db.webAuthnCredential.createMany({
+    data: Array.from({ length: 31 }, (_, i) => ({
+      id: `${prefix}-${String(i).padStart(2, "0")}`,
+      employeeId: fixture.user.employee!.id,
+      name: `Past device ${i}`,
+      credentialId: `private-${prefix}-${i}`,
+      publicKey: new Uint8Array([1, 2, 3]),
+      transports: [],
+      deviceType: "singleDevice",
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+      revokedAt: i ? new Date("2025-02-01T00:00:00Z") : null,
+    })),
+  });
+  const first = await context.request.get("/api/webauthn/devices?page=1");
+  const firstText = await first.text();
+  expect(firstText).not.toContain("credentialId");
+  expect(firstText).not.toContain("publicKey");
+  expect(firstText).not.toContain("counter");
+  const a = JSON.parse(firstText).data;
+  const b = (
+    await (await context.request.get("/api/webauthn/devices?page=2")).json()
+  ).data;
+  expect(a.total).toBe(31);
+  expect(a.items).toHaveLength(25);
+  expect(b.items).toHaveLength(6);
+  expect(new Set([...a.items, ...b.items].map((row) => row.id)).size).toBe(31);
+  await page.goto("/employee/devices");
+  await expect(page.locator(".device-row")).toHaveCount(25);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.locator(".device-row")).toHaveCount(6);
+});

@@ -1,12 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useState, type FormEvent } from "react";
-import {
-  startAuthentication,
-  startRegistration,
-} from "@simplewebauthn/browser";
+import type { startAuthentication } from "@simplewebauthn/browser";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -24,7 +20,6 @@ import {
   Wifi,
 } from "lucide-react";
 import {
-  api,
   Badge,
   date,
   duration,
@@ -33,6 +28,7 @@ import {
   items,
   label,
   Loading,
+  Metric,
   nested,
   Notice,
   PageHeader,
@@ -40,9 +36,9 @@ import {
   Refresh,
   Table,
   time,
-  useResource,
   type DataRow,
 } from "./ui";
+import { api, useResource } from "./use-resource";
 
 type EmployeeState = {
   employee: DataRow;
@@ -128,6 +124,7 @@ export function EmployeeDashboard() {
       let response;
       if (challenge.required !== false && challenge.options) {
         setBusy("Verify with your registered device…");
+        const { startAuthentication } = await import("@simplewebauthn/browser");
         response = await startAuthentication({
           optionsJSON: challenge.options,
         });
@@ -378,39 +375,6 @@ function Verification({
     </div>
   );
 }
-export function Metric({
-  title,
-  value,
-  note,
-  icon,
-  featured = false,
-}: {
-  title: string;
-  value: React.ReactNode;
-  note: string;
-  icon: React.ReactNode;
-  featured?: boolean;
-}) {
-  return (
-    <div className={`stat-card ${featured ? "featured" : ""}`}>
-      <div className="stat-top">
-        <span>{title}</span>
-        <span className="stat-icon">{icon}</span>
-      </div>
-      <div
-        className="stat-value"
-        style={
-          typeof value === "string" && value.length > 14
-            ? { fontSize: 19, padding: "6px 0" }
-            : undefined
-        }
-      >
-        {value}
-      </div>
-      <p className="stat-note">{note}</p>
-    </div>
-  );
-}
 export function EmployeeHistory() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -480,9 +444,12 @@ export function EmployeeHistory() {
   );
 }
 export function EmployeeDevices() {
-  const { data, error, loading, refresh } = useResource<unknown>(
-    "/api/webauthn/devices",
-  );
+  const [page, setPage] = useState(1);
+  const { data, error, loading, refresh } = useResource<{
+    items: DataRow[];
+    total: number;
+    pageSize: number;
+  }>(`/api/webauthn/devices?page=${page}`);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -497,6 +464,7 @@ export function EmployeeDevices() {
         challengeId: string;
         options: Parameters<typeof startRegistration>[0]["optionsJSON"];
       }>("/api/webauthn/register/options", { method: "POST", body: "{}" });
+      const { startRegistration } = await import("@simplewebauthn/browser");
       const response = await startRegistration({
         optionsJSON: challenge.options,
       });
@@ -512,6 +480,7 @@ export function EmployeeDevices() {
         "Device registered. Your administrator may need to approve it before you record attendance.",
       );
       setName("");
+      setPage(1);
       refresh();
     } catch (error) {
       setActionError(friendlyError(error));
@@ -603,7 +572,7 @@ export function EmployeeDevices() {
       <section className="card">
         <div className="card-header">
           <h2>Registered devices</h2>
-          <span className="muted">{devices.length}</span>
+          <span className="muted">{data?.total ?? 0}</span>
         </div>
         {loading ? (
           <Loading />
@@ -650,72 +619,14 @@ export function EmployeeDevices() {
             </div>
           ))
         )}
+        <Pagination
+          page={page}
+          total={data?.total ?? 0}
+          pageSize={data?.pageSize ?? 25}
+          loading={loading}
+          onPage={setPage}
+        />
       </section>
-    </>
-  );
-}
-export function EmployeeProfile() {
-  const { data, error, loading } = useResource<DataRow>(
-    "/api/employee/profile",
-  );
-  if (loading) return <Loading />;
-  const employee = (data?.employee || data || {}) as DataRow;
-  const user = (employee.user || data?.user || data || {}) as DataRow;
-  return (
-    <>
-      <PageHeader
-        eyebrow="YOUR WORKSPACE"
-        title="My profile"
-        description="Your details, connected to your Google account."
-      />
-      <ErrorNotice message={error} />
-      {data && (
-        <section className="card">
-          <div className="card-body">
-            <div className="profile-banner">
-              {user.image ? (
-                <Image
-                  unoptimized
-                  src={String(user.image)}
-                  alt="Google profile"
-                  width={64}
-                  height={64}
-                  style={{ borderRadius: "50%" }}
-                />
-              ) : (
-                <span className="avatar">
-                  {String(user.name || user.email || "")
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </span>
-              )}
-              <div>
-                <h2>{label(user.name)}</h2>
-                <p>{label(user.email)}</p>
-              </div>
-              <Badge value={user.status} />
-            </div>
-            <dl className="detail-list">
-              {[
-                ["Employee ID", employee.employeeCode],
-                ["Department", nested(employee, "department.name")],
-                ["Office", nested(employee, "office.name")],
-                ["Office timezone", nested(employee, "office.timezone")],
-                ["Joined", date(employee.joinedAt)],
-                ["Account role", user.role],
-              ].map(([key, value]) => (
-                <div className="detail-item" key={String(key)}>
-                  <dt>{String(key)}</dt>
-                  <dd>{label(value)}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="muted" style={{ marginTop: 35, fontSize: 12 }}>
-              Need to update your information? Contact your administrator.
-            </p>
-          </div>
-        </section>
-      )}
     </>
   );
 }

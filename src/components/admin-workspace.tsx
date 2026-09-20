@@ -16,19 +16,18 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { Metric } from "./employee-workspace";
 import {
-  api,
   ErrorNotice,
   items,
   Loading,
+  Metric,
   Notice,
   PageHeader,
   Refresh,
   Table,
-  useResource,
   type DataRow,
 } from "./ui";
+import { api, useResource } from "./use-resource";
 import { FormField, Modal } from "./resource-workspace";
 
 type DashboardData = {

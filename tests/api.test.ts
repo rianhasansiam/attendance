@@ -2,8 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { api, readJson } from "@/lib/api";
 import { DomainError } from "@/lib/errors";
+import { redirect } from "next/navigation";
 
 describe("API boundary", () => {
+  it("preserves framework control-flow errors instead of converting them to JSON", async () => {
+    await expect(api(async () => redirect("/login"))).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
+  });
   it("wraps success and prevents response caching", async () => {
     const response = await api(async () => ({ id: "123" }));
     expect(await response.json()).toEqual({

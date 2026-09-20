@@ -1,12 +1,24 @@
 import { auth, signIn } from "@/auth";
 import { redirect } from "next/navigation";
 import { CheckCheck } from "lucide-react";
-export const dynamic = "force-dynamic";
-export default async function Login({
+import { connection } from "next/server";
+import { Suspense } from "react";
+import LoadingWorkspace from "@/app/loading";
+
+type Props = { searchParams: Promise<{ error?: string }> };
+export default function Login(props: Props) {
+  return (
+    <Suspense fallback={<LoadingWorkspace />}>
+      <LoginContent {...props} />
+    </Suspense>
+  );
+}
+async function LoginContent({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  await connection();
   const session =
     process.env.DATABASE_URL && process.env.AUTH_SECRET ? await auth() : null;
   if (session?.user?.id)

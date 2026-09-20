@@ -20,7 +20,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  api,
   ErrorNotice,
   items,
   label,
@@ -29,9 +28,9 @@ import {
   Notice,
   PageHeader,
   Table,
-  useResource,
   type DataRow,
 } from "./ui";
+import { api, useDebouncedValue, useResource } from "./use-resource";
 import { fieldValue, resourceConfigs, type Field } from "./resource-config";
 
 type ResourceData = {
@@ -111,8 +110,12 @@ export function Modal({
 }
 function ReferenceField({ field, value }: { field: Field; value: string }) {
   const [query, setQuery] = useState("");
+  const search = useDebouncedValue(query);
+  const [pagination, setPagination] = useState({ query: "", page: 1 });
+  const page = pagination.query === search ? pagination.page : 1;
+  const [selection, setSelection] = useState(value);
   const { data, loading, error } = useResource<ResourceData>(
-    `/api/admin/${field.resource}?pageSize=100&q=${encodeURIComponent(query)}`,
+    `/api/admin/lookups/${field.resource}?page=${page}&pageSize=100&q=${encodeURIComponent(search)}`,
   );
   const rows = items(data);
   return (
@@ -125,17 +128,17 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
         onChange={(event) => setQuery(event.target.value)}
       />
       <select
-        key={value}
         id={field.name}
         name={field.name}
         required={field.required}
-        defaultValue={value}
+        value={selection}
+        onChange={(event) => setSelection(event.target.value)}
       >
         <option value="">
           {loading ? "Loading options…" : `Select ${field.label.toLowerCase()}`}
         </option>
-        {value && !rows.some((row) => row.id === value) && (
-          <option value={value}>Current selection</option>
+        {selection && !rows.some((row) => row.id === selection) && (
+          <option value={selection}>Current selection</option>
         )}
         {rows.map((row) => (
           <option key={String(row.id)} value={String(row.id)}>
@@ -144,6 +147,26 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
           </option>
         ))}
       </select>
+      {(page > 1 || (data?.total || 0) > 100) && (
+        <div className="buttons">
+          <button
+            type="button"
+            className="button small secondary"
+            disabled={loading || page <= 1}
+            onClick={() => setPagination({ query: search, page: page - 1 })}
+          >
+            Previous options
+          </button>
+          <button
+            type="button"
+            className="button small secondary"
+            disabled={loading || page * 100 >= (data?.total || 0)}
+            onClick={() => setPagination({ query: search, page: page + 1 })}
+          >
+            Next options
+          </button>
+        </div>
+      )}
       {error && <small role="alert">{error}</small>}
     </>
   );
@@ -235,15 +258,20 @@ export function FormField({ field, row }: { field: Field; row: DataRow }) {
 }
 export function AdminResource({ resource }: { resource: string }) {
   const config = resourceConfigs[resource];
-  const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
+  const search = useDebouncedValue(query);
+  const [pagination, setPagination] = useState({ query: "", page: 1 });
+  const page = pagination.query === search ? pagination.page : 1;
+  function setPage(next: number) {
+    setPagination({ query: search, page: next });
+  }
   const [editing, setEditing] = useState<DataRow | null>(null);
   const [viewing, setViewing] = useState<DataRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
   const { data, error, loading, refresh } = useResource<ResourceData>(
-    `/api/admin/${resource}?page=${page}&pageSize=25&q=${encodeURIComponent(query)}`,
+    `/api/admin/${resource}?page=${page}&pageSize=25&q=${encodeURIComponent(search)}`,
   );
   if (!config) return null;
   const fields = config.fields
@@ -358,7 +386,6 @@ export function AdminResource({ resource }: { resource: string }) {
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
-                setPage(1);
               }}
             />
           </div>

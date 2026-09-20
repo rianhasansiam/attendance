@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
+import { cacheProfiles } from "./src/lib/cache/profiles";
 const nextConfig: NextConfig = {
+  cacheComponents: true,
+  cacheLife: cacheProfiles,
+  // Isolate browser tests from a running developer server's build directory.
+  distDir: process.env.NEXT_TEST_DIST_DIR || ".next",
   poweredByHeader: false,
   output: "standalone",
   serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg"],

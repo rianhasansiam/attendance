@@ -1,0 +1,27 @@
+[
+  {
+    "route": "/login",
+    "raw": 19476,
+    "gzip": 5801
+  },
+  {
+    "route": "/admin/dashboard",
+    "raw": 93675,
+    "gzip": 28855
+  },
+  {
+    "route": "/admin/reports",
+    "raw": 93675,
+    "gzip": 28855
+  },
+  {
+    "route": "/employee/dashboard",
+    "raw": 77523,
+    "gzip": 25321
+  },
+  {
+    "route": "/employee/profile",
+    "raw": 54229,
+    "gzip": 17955
+  }
+]

@@ -21,6 +21,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
+      NEXT_TEST_DIST_DIR: ".next-e2e",
       DATABASE_URL: database,
       AUTH_SECRET: "e2e-only-auth-secret-never-for-production-1234567890",
       AUTH_URL: "http://localhost:3100",

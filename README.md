@@ -8,6 +8,8 @@ Late check-ins prompt the employee to enter a reason after attendance is recorde
 
 Only super administrators can correct attendance records or create manual attendance corrections for employees. Administrators can view and export attendance reports. Every correction requires a reason and is recorded in the audit log.
 
+Delayed checkout automatically records overtime: full minutes actually worked after the scheduled shift end, shown as hours and minutes in employee/admin attendance tables and decimal hours in CSV/Excel exports. Arrival lateness does not reduce overtime. The scheduled end is captured at check-in, including overnight shifts, so later Shift edits do not change it. Corrections recalculate overtime from that saved end; removing checkout resets overtime to zero. Previously completed records without a historical schedule snapshot show `—` (blank in exports), including after corrections. Legacy open records use their linked shift and original business date to establish the end at checkout. Apply `20260922000000_attendance_overtime` with `pnpm db:migrate`, then run `pnpm db:generate` before starting the updated application. This records time only; it does not calculate overtime pay or approval.
+
 Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).
 
 ## Local setup

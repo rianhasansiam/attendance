@@ -84,6 +84,7 @@ function attendance(target = employee(), day = "2025-01-06") {
     lateMinutes: 30,
     lateReason: "Train service was delayed.",
     workedMinutes: 450,
+    overtimeMinutes: 0,
     employee: target,
     office: target.office,
     shift,
@@ -147,6 +148,57 @@ describe("dynamic report derivation", () => {
     );
     expect(mocks.attendances.mock.calls[1][0].select.lateReason).toBe(true);
     expect(JSON.stringify(rows)).not.toContain("private-test-address");
+  });
+
+  it("preserves stored overtime and gives derived days zero overtime", async () => {
+    const record = {
+      ...attendance(),
+      checkOutAt: new Date("2025-01-06T18:30:00Z"),
+      workedMinutes: 540,
+      overtimeMinutes: 90,
+    };
+    mocks.attendances.mockResolvedValue([record]);
+    const rows = await reportRecords(filters, now);
+    expect(rows.find((row) => row.id === record.id)).toMatchObject({
+      workedMinutes: 540,
+      overtimeMinutes: 90,
+    });
+    expect(
+      rows.filter((row) => row.derived).map((row) => row.overtimeMinutes),
+    ).toEqual(Array(6).fill(0));
+    expect(mocks.attendances.mock.calls[0][0].select.overtimeMinutes).toBe(
+      true,
+    );
+    expect(mocks.attendances.mock.calls[1][0].select.overtimeMinutes).toBe(
+      true,
+    );
+  });
+
+  it("keeps overtime consistent with punches when a correction occurs during hydration", async () => {
+    const scanned = {
+      ...attendance(),
+      checkOutAt: new Date("2025-01-06T18:30:00Z"),
+      workedMinutes: 540,
+      overtimeMinutes: 90,
+    };
+    mocks.attendances
+      .mockResolvedValueOnce([scanned])
+      .mockResolvedValueOnce([attendance()]);
+    const rows = await reportRecords(filters, now);
+    expect(rows.find((row) => row.id === scanned.id)).toMatchObject({
+      checkOutAt: scanned.checkOutAt,
+      workedMinutes: 540,
+      overtimeMinutes: 90,
+    });
+  });
+
+  it("preserves unknown overtime for historical attendance", async () => {
+    const record = { ...attendance(), overtimeMinutes: null };
+    mocks.attendances.mockResolvedValue([record]);
+    const rows = await reportRecords(filters, now);
+    expect(
+      rows.find((row) => row.id === record.id)?.overtimeMinutes,
+    ).toBeNull();
   });
 
   it("does not derive an absence inside grace, before joining, or for a deactivated account today", async () => {
@@ -250,9 +302,77 @@ describe("late reason exports", () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await result.arrayBuffer());
     const sheet = workbook.worksheets[0];
-    expect(sheet.getCell("N1").value).toBe("Late reason");
-    expect(sheet.getCell("N2").value).toBe(reason);
-    expect(sheet.getCell("N2").type).toBe(ExcelJS.ValueType.String);
+    expect(sheet.getCell("O1").value).toBe("Late reason");
+    expect(sheet.getCell("O2").value).toBe(reason);
+    expect(sheet.getCell("O2").type).toBe(ExcelJS.ValueType.String);
+  });
+});
+
+describe("overtime exports", () => {
+  it("exports overtime as decimal hours in CSV", async () => {
+    mocks.attendances.mockResolvedValue([
+      { ...attendance(), overtimeMinutes: 90 },
+    ]);
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      format: "csv",
+    });
+    if (!(result instanceof Response)) throw new Error("Expected CSV export");
+    const [header, row] = (await result.text()).split("\r\n");
+    expect(header).toContain('"Worked minutes","Overtime hours","Derived"');
+    expect(row).toContain('"450","1.5","No"');
+  });
+
+  it("leaves unknown historical overtime blank in CSV", async () => {
+    mocks.attendances.mockResolvedValue([
+      { ...attendance(), overtimeMinutes: null },
+    ]);
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      format: "csv",
+    });
+    if (!(result instanceof Response)) throw new Error("Expected CSV export");
+    const [, row] = (await result.text()).split("\r\n");
+    expect(row).toContain('"450","","No"');
+  });
+
+  it("exports numeric overtime hours in Excel and zero for derived days", async () => {
+    vi.useRealTimers();
+    mocks.attendances.mockResolvedValue([
+      { ...attendance(), overtimeMinutes: 91 },
+    ]);
+    const result = await getReport({ ...filters, format: "xlsx" });
+    if (!(result instanceof Response)) throw new Error("Expected Excel export");
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await result.arrayBuffer());
+    const sheet = workbook.worksheets[0];
+    expect(sheet.getCell("M1").value).toBe("Overtime hours");
+    expect(sheet.getCell("M2").value).toBe(0);
+    expect(sheet.getCell("M3").value).toBe(1.52);
+    expect(sheet.getCell("M3").type).toBe(ExcelJS.ValueType.Number);
+  });
+
+  it("leaves unknown historical overtime blank in Excel", async () => {
+    vi.useRealTimers();
+    mocks.attendances.mockResolvedValue([
+      { ...attendance(), overtimeMinutes: null },
+    ]);
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      format: "xlsx",
+    });
+    if (!(result instanceof Response)) throw new Error("Expected Excel export");
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await result.arrayBuffer());
+    expect(workbook.worksheets[0].getCell("M2").value).toBe("");
   });
 });
 

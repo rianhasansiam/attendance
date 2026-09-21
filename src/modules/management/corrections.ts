@@ -14,6 +14,7 @@ export function calculateCorrection(
     checkInAt: Date | null;
     checkOutAt: Date | null;
     attendanceDate: Date;
+    scheduledEndAt?: Date | null;
     shift: ShiftDefinition;
   },
   input: z.infer<typeof correctionSchema>,
@@ -67,6 +68,11 @@ export function calculateCorrection(
   const arrival = checkInAt
     ? calculateCheckIn(checkInAt, window.startsAt, previous.shift.graceMinutes)
     : { lateMinutes: 0, status: "ABSENT" as const };
+  // A completed legacy row has no historical schedule evidence. Editing its
+  // punches/status must not silently turn today's Shift into a known snapshot.
+  const legacyCompleted = previous.checkInAt && previous.checkOutAt;
+  const scheduledEndAt =
+    previous.scheduledEndAt ?? (legacyCompleted ? null : window.endsAt);
   const departure =
     checkInAt && checkOutAt
       ? calculateCheckOut(
@@ -74,6 +80,7 @@ export function calculateCorrection(
           checkOutAt,
           previous.shift.halfDayThreshold,
           arrival.lateMinutes,
+          scheduledEndAt,
         )
       : null;
   const status: AttendanceStatus =
@@ -97,5 +104,7 @@ export function calculateCorrection(
     status,
     lateMinutes: arrival.lateMinutes,
     workedMinutes: departure?.workedMinutes ?? 0,
+    scheduledEndAt,
+    overtimeMinutes: departure ? departure.overtimeMinutes : 0,
   };
 }

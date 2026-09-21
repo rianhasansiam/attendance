@@ -47,6 +47,7 @@ const attendanceSelect = {
   lateMinutes: true,
   lateReason: true,
   workedMinutes: true,
+  overtimeMinutes: true,
   employee: { select: employeeSelect },
   office: { select: officeSelect },
   shift: { select: shiftSelect },
@@ -62,6 +63,7 @@ const candidateSelect = {
   checkOutAt: true,
   lateMinutes: true,
   workedMinutes: true,
+  overtimeMinutes: true,
   employee: { select: { employeeCode: true } },
   shift: { select: shiftSelect },
 } satisfies Prisma.AttendanceSelect;
@@ -107,6 +109,7 @@ function sanitizedRecord(
     lateMinutes: record.lateMinutes,
     lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
+    overtimeMinutes: record.overtimeMinutes,
     derived,
   };
 }
@@ -364,6 +367,7 @@ async function reportEntries(
             lateMinutes: 0,
             lateReason: null,
             workedMinutes: 0,
+            overtimeMinutes: 0,
           },
           true,
         ),
@@ -416,6 +420,7 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
       checkOutAt,
       lateMinutes,
       workedMinutes,
+      overtimeMinutes,
       shift,
     } = entry.record;
     return sanitizedRecord(
@@ -428,6 +433,7 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
         checkOutAt,
         lateMinutes,
         workedMinutes,
+        overtimeMinutes,
         shift,
       },
       false,
@@ -527,6 +533,7 @@ const columns = [
   "Check-out (UTC)",
   "Late minutes",
   "Worked minutes",
+  "Overtime hours",
   "Derived",
   "Late reason",
 ];
@@ -544,6 +551,9 @@ function exportRows(records: ReportRecord[]) {
     row.checkOutAt?.toISOString() ?? "",
     row.lateMinutes,
     row.workedMinutes,
+    row.overtimeMinutes === null
+      ? ""
+      : Number((row.overtimeMinutes / 60).toFixed(2)),
     row.derived ? "Yes" : "No",
     row.lateReason ?? "",
   ]);

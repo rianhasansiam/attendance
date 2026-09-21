@@ -138,7 +138,8 @@ export function Table({
   columns: {
     key: string;
     label: string;
-    format?: "date" | "time" | "badge" | "duration" | "text";
+    format?:
+      "date" | "time" | "badge" | "duration" | "nullable-duration" | "text";
   }[];
   actions?: (row: DataRow) => ReactNode;
 }) {
@@ -167,8 +168,13 @@ export function Table({
                       date(value)
                     ) : column.format === "time" ? (
                       time(value)
-                    ) : column.format === "duration" ? (
-                      duration(value)
+                    ) : column.format === "duration" ||
+                      column.format === "nullable-duration" ? (
+                      column.format === "nullable-duration" && value == null ? (
+                        "—"
+                      ) : (
+                        duration(value)
+                      )
                     ) : column.format === "text" ? (
                       <span
                         style={{

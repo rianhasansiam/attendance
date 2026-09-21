@@ -31,6 +31,7 @@ const record = {
   lateMinutes: 20,
   lateReason: null,
   workedMinutes: 0,
+  overtimeMinutes: 0,
 };
 const input = { attendanceId: record.id, reason: "  Train delayed.  " };
 const tx = {

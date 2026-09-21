@@ -56,6 +56,11 @@ const attendanceColumns = [
   { key: "checkInAt", label: "Check in", format: "time" as const },
   { key: "checkOutAt", label: "Check out", format: "time" as const },
   { key: "workedMinutes", label: "Worked", format: "duration" as const },
+  {
+    key: "overtimeMinutes",
+    label: "Overtime",
+    format: "nullable-duration" as const,
+  },
   { key: "lateMinutes", label: "Late (min)" },
   { key: "lateReason", label: "Late reason", format: "text" as const },
   { key: "status", label: "Status", format: "badge" as const },

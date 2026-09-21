@@ -59,6 +59,7 @@ export function calculateCheckOut(
   checkOutAt: Date,
   halfDayThreshold: number,
   lateMinutes: number,
+  scheduledEndAt: Date | null,
 ) {
   const workedMinutes = Math.max(
     0,
@@ -66,6 +67,18 @@ export function calculateCheckOut(
   );
   return {
     workedMinutes,
+    // Only time actually worked after scheduled end counts. Arriving after
+    // scheduled end must not credit the time before check-in as overtime.
+    overtimeMinutes: scheduledEndAt
+      ? Math.max(
+          0,
+          Math.floor(
+            (checkOutAt.getTime() -
+              Math.max(checkInAt.getTime(), scheduledEndAt.getTime())) /
+              60_000,
+          ),
+        )
+      : null,
     status:
       workedMinutes < halfDayThreshold
         ? ("HALF_DAY" as const)

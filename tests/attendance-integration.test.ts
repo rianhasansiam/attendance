@@ -5,7 +5,7 @@ import {
   createHash,
   sign,
 } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isoCBOR } from "@simplewebauthn/server/helpers";
 import type {
   AuthenticationResponseJSON,
@@ -219,6 +219,119 @@ integration("PostgreSQL attendance and WebAuthn integration", () => {
     });
     expect(record.checkOutAt).toBeInstanceOf(Date);
     expect(record.workedMinutes).toBeGreaterThanOrEqual(0);
+    expect(record.overtimeMinutes).toBe(0);
+  });
+
+  it("persists overnight overtime using the end captured at check-in despite a later Shift edit", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-21T16:00:00Z")); // 22:00 Dhaka
+      const actor = await fixture();
+      const assignment = await db.employeeShift.findFirstOrThrow({
+        where: { employeeId: actor.employee.id },
+      });
+      await db.shift.update({
+        where: { id: assignment.shiftId },
+        data: {
+          startTime: "22:00",
+          endTime: "06:00",
+          timezone: "Asia/Dhaka",
+        },
+      });
+      await db.session.update({
+        where: { id: actor.sessionId },
+        data: {
+          expires: new Date("2026-09-23T00:00:00Z"),
+        },
+      });
+      const checkedIn = await recordAttendance(
+        actor,
+        "CHECK_IN",
+        {},
+        new Headers(),
+      );
+      expect(checkedIn.overtimeMinutes).toBe(0);
+      expect(
+        await db.attendance.findUniqueOrThrow({ where: { id: checkedIn.id } }),
+      ).toMatchObject({
+        attendanceDate: new Date("2026-09-21T00:00:00Z"),
+        scheduledEndAt: new Date("2026-09-22T00:00:00Z"),
+      });
+      await db.shift.update({
+        where: { id: assignment.shiftId },
+        data: { endTime: "08:00" },
+      });
+      vi.setSystemTime(new Date("2026-09-22T01:30:45Z")); // 07:30:45 Dhaka
+      const checkedOut = await recordAttendance(
+        actor,
+        "CHECK_OUT",
+        {},
+        new Headers(),
+      );
+      expect(checkedOut).toMatchObject({
+        attendanceDate: checkedIn.attendanceDate,
+        overtimeMinutes: 90,
+        workedMinutes: 570,
+      });
+      const stored = await db.attendance.findUniqueOrThrow({
+        where: { id: checkedIn.id },
+      });
+      expect(stored.overtimeMinutes).toBe(90);
+      expect(stored.scheduledEndAt).toEqual(new Date("2026-09-22T00:00:00Z"));
+      expect(
+        (await employeeDashboard(actor, new Headers())).recent,
+      ).toContainEqual(checkedOut);
+      expect(
+        await db.attendanceEvent.count({
+          where: { attendanceId: stored.id, type: "CHECK_OUT_SUCCESS" },
+        }),
+      ).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("establishes a missing legacy scheduled end using its original business date on delayed checkout", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-22T01:30:00Z"));
+      const actor = await fixture();
+      const assignment = await db.employeeShift.findFirstOrThrow({
+        where: { employeeId: actor.employee.id },
+      });
+      await db.shift.update({
+        where: { id: assignment.shiftId },
+        data: {
+          startTime: "22:00",
+          endTime: "06:00",
+          timezone: "Asia/Dhaka",
+        },
+      });
+      const open = await db.attendance.create({
+        data: {
+          employeeId: actor.employee.id,
+          officeId: actor.employee.officeId,
+          shiftId: assignment.shiftId,
+          attendanceDate: new Date("2026-09-21T00:00:00Z"),
+          checkInAt: new Date("2026-09-21T16:00:00Z"),
+          status: "PRESENT",
+        },
+      });
+      expect(open.scheduledEndAt).toBeNull();
+      const checkedOut = await recordAttendance(
+        actor,
+        "CHECK_OUT",
+        {},
+        new Headers(),
+      );
+      expect(checkedOut.overtimeMinutes).toBe(90);
+      expect(
+        (await db.attendance.findUniqueOrThrow({ where: { id: open.id } }))
+          .scheduledEndAt,
+      ).toEqual(new Date("2026-09-22T00:00:00Z"));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rechecks database authorization after the route has resolved its session", async () => {

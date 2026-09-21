@@ -2,7 +2,7 @@
 // Run: node docs/schema-review/validation.mjs
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import pg from 'pg';
@@ -95,7 +95,12 @@ try {
   const version = (await client.query('SHOW server_version')).rows[0].server_version;
   log.push(`PostgreSQL ${version}; private Unix socket; TCP disabled; no application credentials.`);
   const migrationDir = join(root, 'prisma/migrations');
-  const migrationNames = readdirSync(migrationDir).filter((name) => /^\d/.test(name)).sort();
+  // This archived review targets the schema before the overtime feature.
+  const migrationNames = [
+    '20260919000000_initial',
+    '20260920000000_attendance_recent_index',
+    '20260921000000_attendance_late_reason',
+  ];
   for (const name of migrationNames) {
     await client.query(readFileSync(join(migrationDir, name, 'migration.sql'), 'utf8'));
     record(`existing migration ${name}`);

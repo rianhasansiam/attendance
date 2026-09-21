@@ -305,6 +305,8 @@ export async function recordAttendance(
           const data = {
             officeId: employee.officeId,
             shiftId: shift.id,
+            scheduledEndAt: window.endsAt,
+            overtimeMinutes: 0,
             checkInAt: now,
             checkInLatitude: location?.latitude,
             checkInLongitude: location?.longitude,
@@ -328,6 +330,9 @@ export async function recordAttendance(
             where: { id: existing!.id },
             data: {
               checkOutAt: now,
+              // Legacy open rows have no snapshot; establish it once using
+              // that row's original business date and linked shift.
+              scheduledEndAt: existing!.scheduledEndAt ?? window.endsAt,
               checkOutLatitude: location?.latitude,
               checkOutLongitude: location?.longitude,
               checkOutAccuracy: location?.accuracy,
@@ -339,6 +344,7 @@ export async function recordAttendance(
                 now,
                 shift.halfDayThreshold,
                 existing!.lateMinutes,
+                existing!.scheduledEndAt ?? window.endsAt,
               ),
             },
           });
@@ -398,6 +404,7 @@ export function sanitizeAttendance<
     lateMinutes: number;
     lateReason: string | null;
     workedMinutes: number;
+    overtimeMinutes: number | null;
   },
 >(record: T) {
   return {
@@ -409,6 +416,7 @@ export function sanitizeAttendance<
     lateMinutes: record.lateMinutes,
     lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
+    overtimeMinutes: record.overtimeMinutes,
   };
 }
 
@@ -515,6 +523,7 @@ export async function employeeDashboard(
           lateMinutes: 0,
           lateReason: null,
           workedMinutes: 0,
+          overtimeMinutes: 0,
         },
     recent: records.map(sanitizeAttendance),
     devices,

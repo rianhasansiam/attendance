@@ -132,8 +132,84 @@ describe("attendance corrections", () => {
         },
         now,
       ),
-    ).toMatchObject({ status: "LATE", lateMinutes: 30, workedMinutes: 510 });
+    ).toMatchObject({
+      status: "LATE",
+      lateMinutes: 30,
+      workedMinutes: 510,
+      overtimeMinutes: 0,
+    });
   });
+  it("recalculates overtime after an overnight checkout correction", () => {
+    expect(
+      calculateCorrection(
+        previous,
+        {
+          reason: "Verified delayed checkout",
+          checkInAt: "2025-01-06T20:00:00Z",
+          checkOutAt: "2025-01-07T06:30:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      overtimeMinutes: 90,
+      workedMinutes: 630,
+      scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+    });
+  });
+  it("preserves the original scheduled end after a Shift edit", () => {
+    expect(
+      calculateCorrection(
+        {
+          ...previous,
+          shift: { ...previous.shift, endTime: "07:00" },
+          scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+        },
+        {
+          reason: "Verified delayed checkout",
+          checkInAt: "2025-01-06T20:00:00Z",
+          checkOutAt: "2025-01-07T06:30:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      overtimeMinutes: 90,
+      scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+    });
+  });
+  it("clears overtime when an administrator removes checkout", () => {
+    expect(
+      calculateCorrection(
+        {
+          ...previous,
+          checkInAt: new Date("2025-01-06T20:00:00Z"),
+          checkOutAt: new Date("2025-01-07T06:30:00Z"),
+          scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+        },
+        { reason: "Reopen attendance", checkOutAt: null },
+        now,
+      ),
+    ).toMatchObject({ overtimeMinutes: 0, workedMinutes: 0, checkOutAt: null });
+  });
+  it.each([
+    { reason: "Verified status", status: "PRESENT" as const },
+    { reason: "Verified checkout", checkOutAt: "2025-01-07T07:00:00Z" },
+  ])(
+    "preserves unknown overtime when correcting a completed legacy row",
+    (input) => {
+      expect(
+        calculateCorrection(
+          {
+            ...previous,
+            checkInAt: new Date("2025-01-06T20:00:00Z"),
+            checkOutAt: new Date("2025-01-07T06:30:00Z"),
+            scheduledEndAt: null,
+          },
+          input,
+          now,
+        ),
+      ).toMatchObject({ scheduledEndAt: null, overtimeMinutes: null });
+    },
+  );
   it("rejects invalid chronology, unrelated dates, future punches, and contradictory status", () => {
     expect(() =>
       calculateCorrection(

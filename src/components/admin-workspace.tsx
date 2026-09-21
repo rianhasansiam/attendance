@@ -194,6 +194,11 @@ export function AdminDashboard() {
                 { key: "office.name", label: "Office" },
                 { key: "checkInAt", label: "Check in", format: "time" },
                 { key: "checkOutAt", label: "Check out", format: "time" },
+                {
+                  key: "overtimeMinutes",
+                  label: "Overtime",
+                  format: "nullable-duration",
+                },
                 { key: "status", label: "Status", format: "badge" },
                 { key: "lateReason", label: "Late reason", format: "text" },
               ]}
@@ -214,6 +219,11 @@ const reportColumns = [
   { key: "checkInAt", label: "Check in", format: "time" as const },
   { key: "checkOutAt", label: "Check out", format: "time" as const },
   { key: "workedMinutes", label: "Worked", format: "duration" as const },
+  {
+    key: "overtimeMinutes",
+    label: "Overtime",
+    format: "nullable-duration" as const,
+  },
   { key: "lateMinutes", label: "Late (min)" },
   { key: "status", label: "Status", format: "badge" as const },
   { key: "lateReason", label: "Late reason", format: "text" as const },

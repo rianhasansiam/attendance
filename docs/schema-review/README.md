@@ -1,5 +1,11 @@
 # Production schema review proposal
 
+This is the historical proposal against the three migrations ending in
+`20260921000000_attendance_late_reason`. The application has since added overtime
+and `scheduledEndAt` through `20260922000000_attendance_overtime`; rebase this
+proposal before implementing it so those fields and behavior are preserved.
+Its standalone rehearsal intentionally uses only the original three migrations.
+
 This directory contains a reviewed target schema and a coordinated migration
 proposal. The running application's `prisma/schema.prisma` is not replaced by
 these files. All 18 existing models, current attendance statuses, authentication

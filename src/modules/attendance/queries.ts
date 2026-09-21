@@ -10,4 +10,5 @@ export const attendanceDisplaySelect = {
   lateMinutes: true,
   lateReason: true,
   workedMinutes: true,
+  overtimeMinutes: true,
 } satisfies Prisma.AttendanceSelect;

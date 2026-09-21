@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DomainError } from "@/lib/errors";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, requireSuperAdmin } from "@/lib/auth";
 import { GET as list, POST as create } from "@/app/api/admin/[resource]/route";
 import {
   GET as detail,
@@ -13,7 +13,10 @@ import { GET as defaults } from "@/app/api/admin/office-defaults/route";
 import { POST as createCorrection } from "@/app/api/admin/attendance/route";
 import { PATCH as correction } from "@/app/api/admin/attendance/[id]/route";
 
-vi.mock("@/lib/auth", () => ({ requireAdmin: vi.fn() }));
+vi.mock("@/lib/auth", () => ({
+  requireAdmin: vi.fn(),
+  requireSuperAdmin: vi.fn(),
+}));
 vi.mock("@/lib/security", () => ({
   assertSameOrigin: vi.fn(),
   rateLimit: vi.fn(),
@@ -23,6 +26,13 @@ describe("admin API authorization", () => {
   beforeEach(() => {
     vi.mocked(requireAdmin).mockRejectedValue(
       new DomainError("FORBIDDEN", "Administrator access is required.", 403),
+    );
+    vi.mocked(requireSuperAdmin).mockRejectedValue(
+      new DomainError(
+        "FORBIDDEN",
+        "Super administrator access is required.",
+        403,
+      ),
     );
   });
   const context = {
@@ -53,6 +63,21 @@ describe("admin API authorization", () => {
         success: false,
         error: { code: "FORBIDDEN" },
       });
+    },
+  );
+
+  it.each([
+    ["new correction", () => createCorrection(request("POST"))],
+    ["existing correction", () => correction(request("PATCH"), context)],
+  ] as const)(
+    "requires super administrator access for %s",
+    async (_name, action) => {
+      vi.mocked(requireAdmin).mockClear();
+      vi.mocked(requireSuperAdmin).mockClear();
+      const response = await action();
+      expect(response.status).toBe(403);
+      expect(requireSuperAdmin).toHaveBeenCalledOnce();
+      expect(requireAdmin).not.toHaveBeenCalled();
     },
   );
 });

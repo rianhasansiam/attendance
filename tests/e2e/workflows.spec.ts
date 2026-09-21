@@ -399,6 +399,164 @@ test("super administrator manages departments and downloads both report formats"
   expect(crossOrigin.status()).toBe(403);
 });
 
+test.describe("attendance correction permissions", () => {
+  test.use({ timezoneId: "UTC" });
+
+  async function recordedAttendance(context: BrowserContext) {
+    const target = await session(context);
+    const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const record = await db.attendance.create({
+      data: {
+        employeeId: target.user.employee!.id,
+        officeId: target.office.id,
+        shiftId: target.shift.id,
+        attendanceDate: new Date(`${day}T00:00:00Z`),
+        checkInAt: new Date(`${day}T09:00:00Z`),
+        checkOutAt: new Date(`${day}T17:00:00Z`),
+        status: "PRESENT",
+        workedMinutes: 480,
+      },
+    });
+    return { target, record, day };
+  }
+
+  for (const role of ["ADMIN", "EMPLOYEE"] as const) {
+    test(`${role} cannot create or edit another employee's attendance`, async ({
+      page,
+      context,
+    }) => {
+      const { target, record, day } = await recordedAttendance(context);
+      await session(context, role);
+      if (role === "ADMIN") {
+        const records = await context.request.get(
+          `/api/admin/attendance?employeeId=${target.user.employee!.id}&from=${day}&to=${day}`,
+        );
+        expect(records.ok()).toBe(true);
+        expect((await records.json()).data.items).toEqual([
+          expect.objectContaining({ id: record.id, status: "PRESENT" }),
+        ]);
+        await page.goto(
+          `/admin/attendance?employeeId=${target.user.employee!.id}`,
+        );
+        await expect(
+          page
+            .getByRole("cell", { name: target.office.name, exact: true })
+            .first(),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Correct attendance", exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("columnheader", { name: "Actions", exact: true }),
+        ).toHaveCount(0);
+      }
+
+      const payload = {
+        checkInAt: null,
+        checkOutAt: null,
+        status: "ABSENT",
+        reason: "An unauthorized attendance correction.",
+      };
+      const create = await context.request.post("/api/admin/attendance", {
+        data: {
+          ...payload,
+          employeeId: target.user.employee!.id,
+          attendanceDate: new Date(Date.now() - 2 * 86_400_000)
+            .toISOString()
+            .slice(0, 10),
+        },
+        headers: { origin: "http://localhost:3100" },
+      });
+      expect(create.status()).toBe(403);
+      const update = await context.request.patch(
+        `/api/admin/attendance/${record.id}`,
+        {
+          data: payload,
+          headers: { origin: "http://localhost:3100" },
+        },
+      );
+      expect(update.status()).toBe(403);
+      expect(
+        await db.attendance.findUniqueOrThrow({ where: { id: record.id } }),
+      ).toEqual(record);
+      expect(
+        await db.attendance.count({
+          where: { employeeId: target.user.employee!.id },
+        }),
+      ).toBe(1);
+      expect(
+        await db.auditLog.count({ where: { resourceId: record.id } }),
+      ).toBe(0);
+    });
+  }
+
+  test("SUPER_ADMIN can correct another employee's attendance with a required audit reason", async ({
+    page,
+    context,
+  }) => {
+    const { target, record, day } = await recordedAttendance(context);
+    const actor = await session(context, "SUPER_ADMIN");
+    await page.goto(`/admin/attendance?employeeId=${target.user.employee!.id}`);
+    await page.getByLabel("From date", { exact: true }).fill(day);
+    await page.getByLabel("To date", { exact: true }).fill(day);
+    await page
+      .getByRole("button", { name: "Apply filters", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Correct attendance", exact: true }),
+    ).toHaveCount(1);
+    await page
+      .getByRole("button", { name: "Correct attendance", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Correct attendance" });
+    await dialog.getByLabel("Check in", { exact: true }).fill(`${day}T09:30`);
+    await dialog
+      .getByRole("button", { name: "Save correction", exact: true })
+      .click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Reason for correction")).toBeFocused();
+    expect(
+      (await db.attendance.findUniqueOrThrow({ where: { id: record.id } }))
+        .checkInAt,
+    ).toEqual(record.checkInAt);
+
+    const reason = "Manager verified the employee's arrival.";
+    await dialog.getByLabel("Reason for correction").fill(reason);
+    await dialog
+      .getByRole("button", { name: "Save correction", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(
+      page.getByRole("status").filter({
+        hasText:
+          "Attendance updated. The correction has been added to the audit log.",
+      }),
+    ).toBeVisible();
+    const corrected = await db.attendance.findUniqueOrThrow({
+      where: { id: record.id },
+    });
+    expect(corrected.employeeId).toBe(target.user.employee!.id);
+    expect(corrected.checkInAt).toEqual(new Date(`${day}T09:30:00Z`));
+    expect(corrected.workedMinutes).toBe(450);
+    const audit = await db.auditLog.findFirstOrThrow({
+      where: { resourceId: record.id, action: "ATTENDANCE_CORRECTED" },
+    });
+    expect(audit.actorId).toBe(actor.user.id);
+    expect(audit.previousState).toMatchObject({
+      checkInAt: record.checkInAt!.toISOString(),
+    });
+    expect(audit.newState).toMatchObject({
+      checkInAt: corrected.checkInAt!.toISOString(),
+      reason,
+    });
+    expect(
+      await db.attendanceEvent.findFirstOrThrow({
+        where: { attendanceId: record.id, type: "ADMIN_CORRECTION" },
+      }),
+    ).toMatchObject({ reason, metadata: { actorId: actor.user.id } });
+  });
+});
+
 // Exercise the real Next cache, not a mock of cacheTag/cacheLife.
 test("display lookup cache expires on writes and never authorizes an inactive user", async ({
   context,

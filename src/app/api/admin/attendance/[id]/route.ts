@@ -1,5 +1,5 @@
 import { api, readJson } from "@/lib/api";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
 import { correctionSchema, idSchema } from "@/modules/management/validation";
 import { correctAttendance } from "@/modules/management/workflows";
@@ -10,7 +10,7 @@ export function PATCH(
 ) {
   return api(async () => {
     assertSameOrigin(request);
-    const actor = await requireAdmin();
+    const actor = await requireSuperAdmin();
     await rateLimit(`admin-write:${actor.id}`, 120, 60);
     return correctAttendance(
       actor,

@@ -237,7 +237,7 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       shiftId,
       startDate: "2025-01-01",
     });
-    const result = await createAttendanceCorrection(admin, {
+    const result = await createAttendanceCorrection(superAdmin, {
       employeeId: target.id,
       attendanceDate: "2025-01-06",
       checkInAt: "2025-01-06T09:30:00Z",
@@ -249,7 +249,32 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       lateMinutes: 30,
       workedMinutes: 450,
     });
-    const corrected = await correctAttendance(admin, result.id, {
+    for (const actor of [
+      admin,
+      { id: target.userId, role: "EMPLOYEE" } as const,
+    ]) {
+      await expect(
+        createAttendanceCorrection(actor, {
+          employeeId: target.id,
+          attendanceDate: "2025-01-07",
+          checkInAt: "2025-01-07T09:00:00Z",
+          reason: "Attempted unauthorized correction",
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+      await expect(
+        correctAttendance(actor, result.id, {
+          checkInAt: "2025-01-06T08:00:00Z",
+          reason: "Attempted unauthorized correction",
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    }
+    expect(
+      await db.attendance.count({ where: { employeeId: target.id } }),
+    ).toBe(1);
+    expect(
+      await db.attendance.findUnique({ where: { id: result.id } }),
+    ).toEqual(result);
+    const corrected = await correctAttendance(superAdmin, result.id, {
       checkInAt: "2025-01-06T09:00:00Z",
       reason: "Manager corrected arrival time",
     });
@@ -292,7 +317,7 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       reason: "Sensitive personal reason",
     });
     await reviewLeave(admin, leave.id, { status: "APPROVED" });
-    await createAttendanceCorrection(admin, {
+    await createAttendanceCorrection(superAdmin, {
       employeeId: target.id,
       attendanceDate: "2025-01-06",
       checkInAt: "2025-01-06T09:30:00Z",
@@ -355,7 +380,7 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
     });
     const now = new Date("2025-01-07T03:00:00Z");
     const before = await getAdminDashboard(now);
-    await createAttendanceCorrection(admin, {
+    await createAttendanceCorrection(superAdmin, {
       employeeId: target.id,
       attendanceDate: "2025-01-06",
       checkInAt: "2025-01-06T20:00:00Z",

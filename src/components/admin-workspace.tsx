@@ -221,9 +221,11 @@ const reportColumns = [
 export function AdminReports({
   attendance = false,
   employeeId = "",
+  canCorrectAttendance = false,
 }: {
   attendance?: boolean;
   employeeId?: string;
+  canCorrectAttendance?: boolean;
 }) {
   const [filters, setFilters] = useState<Record<string, string>>(
     employeeId ? { employeeId } : {},
@@ -256,6 +258,7 @@ export function AdminReports({
   }
   async function correct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canCorrectAttendance) return;
     setBusy(true);
     setActionError("");
     const form = new FormData(event.currentTarget);
@@ -420,7 +423,7 @@ export function AdminReports({
             rows={items(data)}
             columns={reportColumns}
             actions={
-              attendance
+              attendance && canCorrectAttendance
                 ? (row) => (
                     <button
                       aria-label="Correct attendance"
@@ -459,7 +462,7 @@ export function AdminReports({
           </div>
         </div>
       </section>
-      {editing && (
+      {canCorrectAttendance && editing && (
         <Modal
           title="Correct attendance"
           close={() => {

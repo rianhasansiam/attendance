@@ -327,13 +327,32 @@ export async function saveSetting(actor: Actor, raw: unknown) {
   });
 }
 
+async function assertCurrentCorrectionAccess(
+  actor: Actor,
+  tx: Prisma.TransactionClient,
+) {
+  const currentActor = await tx.user.findUnique({
+    where: { id: actor.id },
+    select: { id: true, role: true, status: true },
+  });
+  if (!currentActor || currentActor.status !== "ACTIVE")
+    throw new DomainError(
+      "FORBIDDEN",
+      "An active super administrator account is required to correct attendance.",
+      403,
+    );
+  assertSuperAdmin(currentActor);
+}
+
 export async function correctAttendance(
   actor: Actor,
   id: string,
   input: z.infer<typeof correctionSchema>,
 ) {
+  assertSuperAdmin(actor);
   return db.$transaction(
     async (tx) => {
+      await assertCurrentCorrectionAccess(actor, tx);
       const previous = await tx.attendance.findUnique({
         where: { id },
         include: { shift: true },
@@ -372,9 +391,11 @@ export async function createAttendanceCorrection(
   actor: Actor,
   input: z.infer<typeof newCorrectionSchema>,
 ) {
+  assertSuperAdmin(actor);
   const attendanceDate = utcDate(input.attendanceDate);
   return db.$transaction(
     async (tx) => {
+      await assertCurrentCorrectionAccess(actor, tx);
       const employee = await tx.employee.findUnique({
         where: { id: input.employeeId },
       });

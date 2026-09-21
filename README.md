@@ -4,6 +4,8 @@ A modular Next.js application for Google-authorized employees, passkey-confirmed
 
 See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results.
 
+Late check-ins prompt the employee to enter a reason after attendance is recorded. The prompt uses the shift's existing grace period, preserves the check-in time, and returns on the dashboard until a reason is saved. Reasons appear in employee history, administrator attendance records, and CSV/Excel reports. Apply the included `20260921000000_attendance_late_reason` migration with `pnpm db:migrate` before running this version against an existing database.
+
 Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).
 
 ## Local setup

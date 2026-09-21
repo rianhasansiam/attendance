@@ -7,13 +7,15 @@ import { assertSameOrigin, rateLimit } from "@/lib/security";
 import type { EmployeeActor } from "@/modules/webauthn/service";
 import {
   attendanceEvidenceSchema,
+  lateReasonSchema,
   recordAttendance,
+  saveLateReason,
   type AttendanceAction,
   type AttendanceEvidence,
 } from "./service";
 
-async function logPreflightRejection(
-  action: AttendanceAction,
+async function logAttendanceRejection(
+  action: AttendanceAction | "LATE_REASON",
   actor: EmployeeActor | undefined,
   error: unknown,
 ) {
@@ -67,11 +69,27 @@ export function handleAttendanceRequest(
       await rateLimit(`attendance:${actor.id}`, 15, 60);
       evidence = await readJson(request, attendanceEvidenceSchema);
     } catch (error) {
-      await logPreflightRejection(action, actor, error);
+      await logAttendanceRejection(action, actor, error);
       throw error;
     }
     // The domain service owns its transactional success/rejection events. Keeping
     // this call outside the catch ensures those failures are never double logged.
     return recordAttendance(actor, action, evidence, request.headers);
+  });
+}
+
+export function handleLateReasonRequest(request: Request) {
+  return api(async () => {
+    let actor: EmployeeActor | undefined;
+    try {
+      assertSameOrigin(request);
+      actor = await requireEmployee();
+      await rateLimit(`attendance-late-reason:${actor.id}`, 15, 60);
+      const input = await readJson(request, lateReasonSchema);
+      return await saveLateReason(actor, input);
+    } catch (error) {
+      await logAttendanceRejection("LATE_REASON", actor, error);
+      throw error;
+    }
   });
 }

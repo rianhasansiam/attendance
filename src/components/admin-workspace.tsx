@@ -195,6 +195,7 @@ export function AdminDashboard() {
                 { key: "checkInAt", label: "Check in", format: "time" },
                 { key: "checkOutAt", label: "Check out", format: "time" },
                 { key: "status", label: "Status", format: "badge" },
+                { key: "lateReason", label: "Late reason", format: "text" },
               ]}
             />
           </section>
@@ -215,6 +216,7 @@ const reportColumns = [
   { key: "workedMinutes", label: "Worked", format: "duration" as const },
   { key: "lateMinutes", label: "Late (min)" },
   { key: "status", label: "Status", format: "badge" as const },
+  { key: "lateReason", label: "Late reason", format: "text" as const },
 ];
 export function AdminReports({
   attendance = false,

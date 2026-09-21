@@ -82,6 +82,7 @@ function attendance(target = employee(), day = "2025-01-06") {
     checkInAt: new Date(`${day}T09:30:00Z`),
     checkOutAt: new Date(`${day}T17:00:00Z`),
     lateMinutes: 30,
+    lateReason: "Train service was delayed.",
     workedMinutes: 450,
     employee: target,
     office: target.office,
@@ -128,6 +129,24 @@ describe("dynamic report derivation", () => {
     expect(JSON.stringify(rows)).not.toContain("checkInLatitude");
     expect(JSON.stringify(rows)).not.toContain("private-test-address");
     expect(JSON.stringify(rows)).not.toContain('"leaves"');
+  });
+
+  it("includes submitted late reasons only in hydrated attendance details", async () => {
+    const record = { ...attendance(), status: "HALF_DAY" };
+    mocks.attendances.mockResolvedValue([record]);
+    const rows = await reportRecords(filters, now);
+    expect(rows.find((row) => row.id === record.id)).toMatchObject({
+      status: "HALF_DAY",
+      lateReason: "Train service was delayed.",
+    });
+    expect(
+      rows.filter((row) => row.derived).map((row) => row.lateReason),
+    ).toEqual(Array(6).fill(null));
+    expect(mocks.attendances.mock.calls[0][0].select).not.toHaveProperty(
+      "lateReason",
+    );
+    expect(mocks.attendances.mock.calls[1][0].select.lateReason).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain("private-test-address");
   });
 
   it("does not derive an absence inside grace, before joining, or for a deactivated account today", async () => {
@@ -195,6 +214,45 @@ describe("dynamic report derivation", () => {
       reportRecords({ ...filters, from: "2024-01-01" }, now),
     ).rejects.toThrow("93 days");
     expect(mocks.attendances).not.toHaveBeenCalled();
+  });
+});
+
+describe("late reason exports", () => {
+  it("exports quoted, multiline reasons safely in CSV", async () => {
+    mocks.attendances.mockResolvedValue([
+      {
+        ...attendance(),
+        lateReason: '=Train delay, "signal issue"\nNo service.',
+      },
+    ]);
+    const result = await getReport({ ...filters, format: "csv" });
+    if (!(result instanceof Response)) throw new Error("Expected CSV export");
+    const csv = await result.text();
+    expect(csv.split("\r\n")[0]).toContain('"Derived","Late reason"');
+    expect(csv).toContain('"\'=Train delay, ""signal issue""\nNo service."');
+    expect(csv).not.toContain("private-test-address");
+  });
+
+  it("keeps formula-like reasons as text in Excel", async () => {
+    vi.useRealTimers();
+    const reason = '=HYPERLINK("https://example.test", "Train delay")';
+    mocks.attendances.mockResolvedValue([
+      { ...attendance(), lateReason: reason },
+    ]);
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      format: "xlsx",
+    });
+    if (!(result instanceof Response)) throw new Error("Expected Excel export");
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await result.arrayBuffer());
+    const sheet = workbook.worksheets[0];
+    expect(sheet.getCell("N1").value).toBe("Late reason");
+    expect(sheet.getCell("N2").value).toBe(reason);
+    expect(sheet.getCell("N2").type).toBe(ExcelJS.ValueType.String);
   });
 });
 

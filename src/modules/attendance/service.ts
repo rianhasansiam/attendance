@@ -34,6 +34,101 @@ export const attendanceEvidenceSchema = z
 export type AttendanceEvidence = z.infer<typeof attendanceEvidenceSchema>;
 export type AttendanceAction = "CHECK_IN" | "CHECK_OUT";
 
+export const lateReasonSchema = z
+  .object({
+    attendanceId: z.string().trim().min(1).max(100),
+    reason: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+
+export async function saveLateReason(
+  actor: EmployeeActor,
+  input: z.infer<typeof lateReasonSchema>,
+) {
+  const { attendanceId, reason } = lateReasonSchema.parse(input);
+  return db.$transaction(
+    async (tx) => {
+      // Serialize with check-in and checkout so the reason belongs to the same
+      // authorized attendance record throughout the update and audit event.
+      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${actor.employee.id} FOR UPDATE`;
+      const employee = await tx.employee.findUnique({
+        where: { id: actor.employee.id },
+        select: {
+          id: true,
+          user: { select: { id: true, status: true, googleAccountId: true } },
+        },
+      });
+      if (employee?.user.status !== "ACTIVE")
+        throw new DomainError(
+          "USER_INACTIVE",
+          "Your account is not active.",
+          403,
+        );
+      const session = await tx.session.findFirst({
+        where: {
+          id: actor.sessionId,
+          userId: actor.id,
+          expires: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+      if (
+        !session ||
+        employee.user.id !== actor.id ||
+        !employee.user.googleAccountId ||
+        employee.user.googleAccountId !== actor.googleAccountId
+      )
+        throw new DomainError(
+          "USER_NOT_AUTHORIZED",
+          "Your authorization has changed. Sign in again.",
+          403,
+        );
+      const record = await tx.attendance.findFirst({
+        where: { id: attendanceId, employeeId: employee.id },
+        select: attendanceDisplaySelect,
+      });
+      if (!record)
+        throw new DomainError(
+          "ATTENDANCE_NOT_FOUND",
+          "Attendance was not found.",
+          404,
+        );
+      if (!record.checkInAt || record.lateMinutes <= 0)
+        throw new DomainError(
+          "ATTENDANCE_NOT_LATE",
+          "A late reason is only needed for a late check-in.",
+          409,
+        );
+      if (record.lateReason !== null) {
+        // Retrying a successful request must not create another audit event.
+        if (record.lateReason === reason) return sanitizeAttendance(record);
+        throw new DomainError(
+          "LATE_REASON_ALREADY_SUBMITTED",
+          "A reason has already been submitted for this attendance.",
+          409,
+        );
+      }
+      const updated = await tx.attendance.update({
+        where: { id: record.id },
+        data: { lateReason: reason },
+        select: attendanceDisplaySelect,
+      });
+      await tx.attendanceEvent.create({
+        data: {
+          employeeId: employee.id,
+          attendanceId: record.id,
+          type: "LATE_REASON_SUBMITTED",
+        },
+      });
+      return sanitizeAttendance(updated);
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 15_000,
+    },
+  );
+}
+
 export function assertAttendanceState(
   action: AttendanceAction,
   existing: { checkInAt: Date | null; checkOutAt: Date | null } | null,
@@ -301,6 +396,7 @@ export function sanitizeAttendance<
     checkOutAt: Date | null;
     status: string;
     lateMinutes: number;
+    lateReason: string | null;
     workedMinutes: number;
   },
 >(record: T) {
@@ -311,6 +407,7 @@ export function sanitizeAttendance<
     checkOutAt: record.checkOutAt,
     status: record.status,
     lateMinutes: record.lateMinutes,
+    lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
   };
 }
@@ -416,6 +513,7 @@ export async function employeeDashboard(
           checkInAt: null,
           checkOutAt: null,
           lateMinutes: 0,
+          lateReason: null,
           workedMinutes: 0,
         },
     recent: records.map(sanitizeAttendance),

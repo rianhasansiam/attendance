@@ -16,6 +16,7 @@ import {
   attendanceEvidenceSchema,
   employeeDashboard,
   recordAttendance,
+  saveLateReason,
 } from "../src/modules/attendance/service";
 import {
   authenticationOptions,
@@ -136,6 +137,68 @@ integration("PostgreSQL attendance and WebAuthn integration", () => {
         where: { employeeId: actor.employee.id, type: "CHECK_IN_REJECTED" },
       }),
     ).toBe(1);
+  });
+
+  it("persists a late reason once and exposes it in fresh dashboard reads", async () => {
+    const actor = await fixture();
+    const checkedIn = await recordAttendance(
+      actor,
+      "CHECK_IN",
+      {},
+      new Headers(),
+    );
+    await db.attendance.update({
+      where: { id: checkedIn.id },
+      data: { lateMinutes: 20, status: "LATE" },
+    });
+    const input = { attendanceId: checkedIn.id, reason: "  Train delayed.  " };
+    const saved = await saveLateReason(actor, input);
+    expect(saved.lateReason).toBe("Train delayed.");
+    expect(await saveLateReason(actor, input)).toEqual(saved);
+    expect(
+      (await employeeDashboard(actor, new Headers())).today.lateReason,
+    ).toBe("Train delayed.");
+    expect(
+      await db.attendanceEvent.count({
+        where: { attendanceId: checkedIn.id, type: "LATE_REASON_SUBMITTED" },
+      }),
+    ).toBe(1);
+    await expect(
+      saveLateReason(actor, { ...input, reason: "Different reason." }),
+    ).rejects.toMatchObject({
+      code: "LATE_REASON_ALREADY_SUBMITTED",
+    });
+    expect(
+      (await db.attendance.findUniqueOrThrow({ where: { id: checkedIn.id } }))
+        .lateReason,
+    ).toBe("Train delayed.");
+  });
+
+  it("prevents another employee or revoked session from adding a late reason", async () => {
+    const owner = await fixture();
+    const other = await fixture();
+    const checkedIn = await recordAttendance(
+      owner,
+      "CHECK_IN",
+      {},
+      new Headers(),
+    );
+    await db.attendance.update({
+      where: { id: checkedIn.id },
+      data: { lateMinutes: 20 },
+    });
+    const input = { attendanceId: checkedIn.id, reason: "Traffic." };
+    await expect(saveLateReason(other, input)).rejects.toMatchObject({
+      code: "ATTENDANCE_NOT_FOUND",
+    });
+    await db.session.delete({ where: { id: owner.sessionId } });
+    await expect(saveLateReason(owner, input)).rejects.toMatchObject({
+      code: "USER_NOT_AUTHORIZED",
+    });
+    expect(
+      (await db.attendance.findUniqueOrThrow({ where: { id: checkedIn.id } }))
+        .lateReason,
+    ).toBeNull();
   });
 
   it("serializes simultaneous checkouts and rejects checkout with no check-in", async () => {

@@ -138,7 +138,7 @@ export function Table({
   columns: {
     key: string;
     label: string;
-    format?: "date" | "time" | "badge" | "duration";
+    format?: "date" | "time" | "badge" | "duration" | "text";
   }[];
   actions?: (row: DataRow) => ReactNode;
 }) {
@@ -169,6 +169,18 @@ export function Table({
                       time(value)
                     ) : column.format === "duration" ? (
                       duration(value)
+                    ) : column.format === "text" ? (
+                      <span
+                        style={{
+                          display: "block",
+                          minWidth: 180,
+                          maxWidth: 320,
+                          whiteSpace: "pre-wrap",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {label(value)}
+                      </span>
                     ) : (
                       label(value)
                     )}

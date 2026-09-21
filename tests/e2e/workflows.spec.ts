@@ -7,7 +7,11 @@ const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: database }),
 });
 
-async function session(context: BrowserContext, role: Role = "EMPLOYEE") {
+async function session(
+  context: BrowserContext,
+  role: Role = "EMPLOYEE",
+  arrival: "on-time" | "late" = "on-time",
+) {
   const suffix = randomUUID();
   const office = await db.office.create({
     data: {
@@ -22,11 +26,20 @@ async function session(context: BrowserContext, role: Role = "EMPLOYEE") {
       timezone: "UTC",
     },
   });
+  const now = Date.now();
   const shift = await db.shift.create({
     data: {
       name: `Browser shift ${suffix}`,
-      startTime: "00:00",
-      endTime: "23:59",
+      // Relative boundaries also cover a late arrival just after midnight.
+      startTime:
+        arrival === "late"
+          ? new Date(now - 30 * 60_000).toISOString().slice(11, 16)
+          : "00:00",
+      endTime:
+        arrival === "late"
+          ? new Date(now + 8 * 60 * 60_000).toISOString().slice(11, 16)
+          : "23:59",
+      graceMinutes: arrival === "late" ? 15 : 1440,
       timezone: "UTC",
     },
   });
@@ -111,6 +124,9 @@ test("employee can check in and out, request leave, and cannot access admin", as
   await expect(
     page.getByRole("button", { name: "Check out", exact: true }),
   ).toBeEnabled();
+  await expect(
+    page.getByRole("dialog", { name: "Reason for late attendance" }),
+  ).toHaveCount(0);
   await page.screenshot({
     path: "test-results/employee-mobile.png",
     fullPage: true,
@@ -124,6 +140,8 @@ test("employee can check in and out, request leave, and cannot access admin", as
   });
   expect(record.checkInAt).not.toBeNull();
   expect(record.checkOutAt).not.toBeNull();
+  expect(record.lateMinutes).toBe(0);
+  expect(record.lateReason).toBeNull();
   const forbidden = await context.request.get("/api/admin/dashboard");
   expect(forbidden.status()).toBe(403);
   const sessionResponse = await context.request.get("/api/auth/session");
@@ -150,6 +168,194 @@ test("employee can check in and out, request leave, and cannot access admin", as
   expect(
     (await context.request.get("/api/attendance/me")).status(),
   ).toBeGreaterThanOrEqual(401);
+});
+
+test("late check-in asks for a reason and preserves the draft when saving fails", async ({
+  page,
+  context,
+}) => {
+  const fixture = await session(context, "EMPLOYEE", "late");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/employee/dashboard");
+  await page.getByRole("button", { name: "Check in", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Reason for late attendance",
+  });
+  await expect(dialog).toBeVisible();
+  const checkedIn = await db.attendance.findFirstOrThrow({
+    where: { employeeId: fixture.user.employee!.id },
+  });
+  expect(checkedIn.checkInAt).not.toBeNull();
+  expect(checkedIn.lateMinutes).toBeGreaterThan(15);
+  expect(checkedIn.lateReason).toBeNull();
+
+  let attempts = 0;
+  await page.route("**/api/attendance/late-reason", async (route) => {
+    attempts += 1;
+    expect(route.request().postDataJSON()).toEqual({
+      attendanceId: checkedIn.id,
+      reason: "Train service was delayed.",
+    });
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "UNAVAILABLE",
+            message: "Unable to save right now. Please try again.",
+          },
+        }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await dialog
+    .getByLabel("Reason", { exact: true })
+    .fill("Train service was delayed.");
+  await page.screenshot({
+    path: "test-results/late-reason-mobile.png",
+    fullPage: true,
+  });
+  await dialog.getByRole("button", { name: "Submit reason" }).click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Unable to save right now",
+  );
+  await expect(dialog.getByLabel("Reason", { exact: true })).toHaveValue(
+    "Train service was delayed.",
+  );
+  await expect(dialog.getByLabel("Reason", { exact: true })).toBeFocused();
+  expect(
+    (await db.attendance.findUniqueOrThrow({ where: { id: checkedIn.id } }))
+      .lateReason,
+  ).toBeNull();
+
+  await dialog.getByRole("button", { name: "Submit reason" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Your late attendance reason has been saved.",
+    }),
+  ).toBeVisible();
+  expect(attempts).toBe(2);
+  const saved = await db.attendance.findUniqueOrThrow({
+    where: { id: checkedIn.id },
+  });
+  expect(saved.lateReason).toBe("Train service was delayed.");
+  expect(saved.checkInAt).toEqual(checkedIn.checkInAt);
+  expect(
+    await db.attendance.count({
+      where: { employeeId: fixture.user.employee!.id },
+    }),
+  ).toBe(1);
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Check out", exact: true }),
+  ).toBeEnabled();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Add late reason" }),
+  ).toHaveCount(0);
+  await page.goto("/employee/history");
+  await expect(
+    page.getByRole("columnheader", { name: "Late reason", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "Train service was delayed.", exact: true }),
+  ).toBeVisible();
+});
+
+test("an unfinished late reason can be reopened and survives reload after checking out", async ({
+  page,
+  context,
+}) => {
+  const fixture = await session(context, "EMPLOYEE", "late");
+  await page.goto("/employee/dashboard");
+  await page.getByRole("button", { name: "Check in", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Reason for late attendance",
+  });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Later", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Add late reason" }).click();
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await page.reload();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Later", exact: true }).click();
+  await page.getByRole("button", { name: "Check out", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "You’re checked out" }),
+  ).toBeVisible();
+  const checkedOut = await db.attendance.findFirstOrThrow({
+    where: { employeeId: fixture.user.employee!.id },
+  });
+  expect(checkedOut.status).toBe("HALF_DAY");
+  expect(checkedOut.lateMinutes).toBeGreaterThan(15);
+  expect(checkedOut.lateReason).toBeNull();
+  await page.reload();
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByLabel("Reason", { exact: true })
+    .fill("Road closure on my commute.");
+  await dialog.getByRole("button", { name: "Submit reason" }).click();
+  await expect(dialog).toHaveCount(0);
+  const saved = await db.attendance.findUniqueOrThrow({
+    where: { id: checkedOut.id },
+  });
+  expect(saved.status).toBe("HALF_DAY");
+  expect(saved.checkOutAt).toEqual(checkedOut.checkOutAt);
+  expect(saved.lateReason).toBe("Road closure on my commute.");
+  expect(
+    await db.attendance.count({
+      where: { employeeId: fixture.user.employee!.id },
+    }),
+  ).toBe(1);
+});
+
+test("refresh clears a late reason reminder after the reason is saved in another tab", async ({
+  page,
+  context,
+}) => {
+  const fixture = await session(context, "EMPLOYEE", "late");
+  await page.goto("/employee/dashboard");
+  await page.getByRole("button", { name: "Check in", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Reason for late attendance",
+  });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Later", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Add late reason" }),
+  ).toBeVisible();
+  const attendance = await db.attendance.findFirstOrThrow({
+    where: { employeeId: fixture.user.employee!.id },
+  });
+  const saved = await context.request.post("/api/attendance/late-reason", {
+    data: {
+      attendanceId: attendance.id,
+      reason: "Saved from my other browser tab.",
+    },
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(saved.ok()).toBe(true);
+
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(
+    page.getByRole("cell", {
+      name: "Saved from my other browser tab.",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Add late reason" }),
+  ).toHaveCount(0);
 });
 
 test("super administrator manages departments and downloads both report formats", async ({

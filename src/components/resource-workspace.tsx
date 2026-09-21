@@ -1,13 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -17,7 +11,6 @@ import {
   Plus,
   Search,
   Trash2,
-  X,
 } from "lucide-react";
 import {
   ErrorNotice,
@@ -31,6 +24,8 @@ import {
   type DataRow,
 } from "./ui";
 import { api, useDebouncedValue, useResource } from "./use-resource";
+import { Modal } from "./modal";
+export { Modal } from "./modal";
 import { fieldValue, resourceConfigs, type Field } from "./resource-config";
 
 type ResourceData = {
@@ -39,75 +34,6 @@ type ResourceData = {
   page: number;
   pageSize: number;
 };
-export function Modal({
-  title,
-  children,
-  close,
-}: {
-  title: string;
-  children: ReactNode;
-  close: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const container = ref.current;
-    container
-      ?.querySelector<HTMLElement>(
-        "button, input, select, textarea, [tabindex]",
-      )
-      ?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-      if (event.key !== "Tab") return;
-      const focusable = container?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
-      );
-      if (!focusable?.length) return;
-      const first = focusable[0],
-        last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = overflow;
-      previous?.focus();
-    };
-  }, [close]);
-  return (
-    <div className="modal-backdrop">
-      <div
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="modal"
-      >
-        <div className="card-header">
-          <h2>{title}</h2>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Close dialog"
-            onClick={close}
-          >
-            <X size={19} />
-          </button>
-        </div>
-        <div className="card-body">{children}</div>
-      </div>
-    </div>
-  );
-}
 function ReferenceField({ field, value }: { field: Field; value: string }) {
   const [query, setQuery] = useState("");
   const search = useDebouncedValue(query);

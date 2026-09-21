@@ -45,6 +45,7 @@ const attendanceSelect = {
   checkInAt: true,
   checkOutAt: true,
   lateMinutes: true,
+  lateReason: true,
   workedMinutes: true,
   employee: { select: employeeSelect },
   office: { select: officeSelect },
@@ -104,6 +105,7 @@ function sanitizedRecord(
     checkInAt: record.checkInAt,
     checkOutAt: record.checkOutAt,
     lateMinutes: record.lateMinutes,
+    lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
     derived,
   };
@@ -360,6 +362,7 @@ async function reportEntries(
             checkInAt: null,
             checkOutAt: null,
             lateMinutes: 0,
+            lateReason: null,
             workedMinutes: 0,
           },
           true,
@@ -525,6 +528,7 @@ const columns = [
   "Late minutes",
   "Worked minutes",
   "Derived",
+  "Late reason",
 ];
 function exportRows(records: ReportRecord[]) {
   return records.map((row) => [
@@ -541,6 +545,7 @@ function exportRows(records: ReportRecord[]) {
     row.lateMinutes,
     row.workedMinutes,
     row.derived ? "Yes" : "No",
+    row.lateReason ?? "",
   ]);
 }
 
@@ -583,8 +588,19 @@ export async function getReport(filters: Filters) {
     fgColor: { argb: "FF163C36" },
   };
   sheet.columns.forEach((column, index) => {
-    column.width = index === 3 ? 32 : index === 8 || index === 9 ? 26 : 20;
+    column.width =
+      columns[index] === "Late reason"
+        ? 48
+        : index === 3
+          ? 32
+          : index === 8 || index === 9
+            ? 26
+            : 20;
   });
+  sheet.getColumn(columns.indexOf("Late reason") + 1).alignment = {
+    wrapText: true,
+    vertical: "top",
+  };
   sheet.autoFilter = {
     from: { row: 1, column: 1 },
     to: { row: Math.max(records.length + 1, 1), column: columns.length },

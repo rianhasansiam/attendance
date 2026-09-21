@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import type { startAuthentication } from "@simplewebauthn/browser";
 import {
   ArrowRight,
@@ -39,6 +39,7 @@ import {
   type DataRow,
 } from "./ui";
 import { api, useResource } from "./use-resource";
+import { LateReasonDialog } from "./late-reason-dialog";
 
 type EmployeeState = {
   employee: DataRow;
@@ -56,6 +57,7 @@ const attendanceColumns = [
   { key: "checkOutAt", label: "Check out", format: "time" as const },
   { key: "workedMinutes", label: "Worked", format: "duration" as const },
   { key: "lateMinutes", label: "Late (min)" },
+  { key: "lateReason", label: "Late reason", format: "text" as const },
   { key: "status", label: "Status", format: "badge" as const },
 ];
 function getLocation(): Promise<{
@@ -102,6 +104,41 @@ export function EmployeeDashboard() {
   const [busy, setBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
+  const [submittedAttendance, setSubmittedAttendance] =
+    useState<DataRow | null>(null);
+  const [dismissedReasonId, setDismissedReasonId] = useState("");
+  const [savedReasonId, setSavedReasonId] = useState("");
+  const reasonAttendance = data?.today ?? submittedAttendance;
+  const pendingReason =
+    reasonAttendance?.id &&
+    reasonAttendance.checkInAt &&
+    Number(reasonAttendance.lateMinutes) > 0 &&
+    !reasonAttendance.lateReason &&
+    reasonAttendance.id !== savedReasonId
+      ? reasonAttendance
+      : null;
+  const pendingReasonId = String(pendingReason?.id || "");
+  const closeReason = useCallback(() => {
+    setDismissedReasonId(pendingReasonId);
+  }, [pendingReasonId]);
+  const saveReason = useCallback(
+    (record: DataRow) => {
+      setSavedReasonId(String(record.id));
+      setSubmittedAttendance(null);
+      setSuccess("Your late attendance reason has been saved.");
+      refresh();
+    },
+    [refresh],
+  );
+  const reasonDialog =
+    pendingReason && dismissedReasonId !== pendingReasonId ? (
+      <LateReasonDialog
+        key={pendingReasonId}
+        attendance={pendingReason}
+        onClose={closeReason}
+        onSaved={saveReason}
+      />
+    ) : null;
   async function attend(action: "CHECK_IN" | "CHECK_OUT") {
     setActionError("");
     setSuccess("");
@@ -137,7 +174,7 @@ export function EmployeeDashboard() {
         location = await getLocation();
       }
       setBusy("Recording your attendance…");
-      await api(
+      const record = await api<DataRow>(
         `/api/attendance/${action === "CHECK_IN" ? "check-in" : "check-out"}`,
         {
           method: "POST",
@@ -148,6 +185,8 @@ export function EmployeeDashboard() {
           }),
         },
       );
+      setSubmittedAttendance(record);
+      if (action === "CHECK_IN") setDismissedReasonId("");
       setSuccess(
         action === "CHECK_IN"
           ? "You’re checked in. Have a good workday!"
@@ -160,13 +199,20 @@ export function EmployeeDashboard() {
       setBusy("");
     }
   }
-  if (loading && !data) return <Loading />;
+  if (loading && !data)
+    return (
+      <>
+        {reasonDialog}
+        <Loading />
+      </>
+    );
   if (!data)
     return (
       <>
         <PageHeader title="My day" description="Your workday, at a glance." />
         <ErrorNotice message={error} />
         <Refresh onClick={refresh} />
+        {reasonDialog}
       </>
     );
   const office = data.employee.office as DataRow;
@@ -191,6 +237,20 @@ export function EmployeeDashboard() {
           {success}
         </Notice>
       )}
+      {pendingReason && (
+        <div className="notice" role="status">
+          <Clock3 size={17} />
+          <span>Please add a reason for your late attendance.</span>
+          <button
+            type="button"
+            className="button small secondary"
+            onClick={() => setDismissedReasonId("")}
+          >
+            Add late reason
+          </button>
+        </div>
+      )}
+      {reasonDialog}
       <div className="content-grid">
         <div className="checkin-card">
           <p className="eyebrow">

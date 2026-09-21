@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   rateLimit: vi.fn(),
   createEvent: vi.fn(),
   recordAttendance: vi.fn(),
+  saveLateReason: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({ requireEmployee: mocks.requireEmployee }));
 vi.mock("@/lib/security", () => ({
@@ -19,10 +20,15 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/modules/attendance/service", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../src/modules/attendance/service")>();
-  return { ...original, recordAttendance: mocks.recordAttendance };
+  return {
+    ...original,
+    recordAttendance: mocks.recordAttendance,
+    saveLateReason: mocks.saveLateReason,
+  };
 });
 import { POST as checkIn } from "../src/app/api/attendance/check-in/route";
 import { POST as checkOut } from "../src/app/api/attendance/check-out/route";
+import { POST as lateReason } from "../src/app/api/attendance/late-reason/route";
 
 const actor = {
   id: "user",
@@ -43,6 +49,91 @@ beforeEach(() => {
   mocks.requireEmployee.mockResolvedValue(actor);
   mocks.createEvent.mockResolvedValue({});
   mocks.recordAttendance.mockResolvedValue({ id: "record" });
+  mocks.saveLateReason.mockResolvedValue({
+    id: "record",
+    lateReason: "Traffic.",
+  });
+});
+
+describe("late reason HTTP endpoint", () => {
+  it("requires authentication before reading or saving a reason", async () => {
+    mocks.requireEmployee.mockRejectedValue(
+      new DomainError("UNAUTHENTICATED", "Sign in.", 401),
+    );
+    const response = await lateReason(
+      request(JSON.stringify({ attendanceId: "record", reason: "Traffic." })),
+    );
+    expect(response.status).toBe(401);
+    expect(mocks.saveLateReason).not.toHaveBeenCalled();
+  });
+
+  it("checks the origin before evaluating the session", async () => {
+    mocks.assertSameOrigin.mockImplementation(() => {
+      throw new DomainError("INVALID_ORIGIN", "Invalid origin.", 403);
+    });
+    const response = await lateReason(request());
+    expect(response.status).toBe(403);
+    expect(mocks.requireEmployee).not.toHaveBeenCalled();
+    expect(mocks.saveLateReason).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { attendanceId: "record" },
+    { attendanceId: "record", reason: "  " },
+    { attendanceId: "record", reason: "a".repeat(1001) },
+    { attendanceId: "record", reason: "Traffic.", employeeId: "other" },
+  ])(
+    "rejects invalid input without exposing the submitted text in events",
+    async (body) => {
+      const response = await lateReason(request(JSON.stringify(body)));
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("VALIDATION_ERROR");
+      expect(mocks.saveLateReason).not.toHaveBeenCalled();
+      expect(mocks.createEvent).toHaveBeenCalledExactlyOnceWith({
+        data: {
+          employeeId: "employee",
+          type: "LATE_REASON_REJECTED",
+          reason: "VALIDATION_ERROR",
+        },
+      });
+    },
+  );
+
+  it("rate limits submissions independently of check-in", async () => {
+    mocks.rateLimit.mockImplementation(async (key: string) => {
+      if (key === "attendance-late-reason:user")
+        throw new DomainError("RATE_LIMITED", "Wait.", 429);
+    });
+    const response = await lateReason(
+      request(JSON.stringify({ attendanceId: "record", reason: "Traffic." })),
+    );
+    expect(response.status).toBe(429);
+    expect(mocks.saveLateReason).not.toHaveBeenCalled();
+  });
+
+  it("submits the trimmed reason and returns the canonical attendance response", async () => {
+    const response = await lateReason(
+      request(
+        JSON.stringify({ attendanceId: "record", reason: "  Traffic.  " }),
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      data: { id: "record", lateReason: "Traffic." },
+    });
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.saveLateReason).toHaveBeenCalledExactlyOnceWith(actor, {
+      attendanceId: "record",
+      reason: "Traffic.",
+    });
+    expect(mocks.rateLimit).toHaveBeenCalledExactlyOnceWith(
+      "attendance-late-reason:user",
+      15,
+      60,
+    );
+    expect(mocks.createEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe("attendance HTTP rejection logging", () => {

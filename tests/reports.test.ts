@@ -269,6 +269,150 @@ describe("dynamic report derivation", () => {
   });
 });
 
+describe("filtered overtime totals", () => {
+  it.each([1, 2])(
+    "sums exact minutes across every matching page when viewing page %i",
+    async (page) => {
+      const records = [
+        { ...attendance(employee(), "2025-01-07"), overtimeMinutes: 45 },
+        { ...attendance(employee(), "2025-01-06"), overtimeMinutes: 35 },
+      ];
+      mocks.attendances
+        .mockResolvedValueOnce(records)
+        .mockResolvedValueOnce([records[page - 1]]);
+
+      const result = await getReport({
+        ...filters,
+        employeeId: "employee-1",
+        from: "2025-01-06",
+        to: "2025-01-07",
+        page,
+        pageSize: 1,
+      });
+
+      expect(result).toMatchObject({
+        total: 2,
+        page,
+        pageSize: 1,
+        summary: { overtimeMinutes: 80, unknownOvertimeRecords: 0 },
+      });
+      if (result instanceof Response) throw new Error("Expected JSON page");
+      expect(result.items.map((row) => row.id)).toEqual([records[page - 1].id]);
+      expect(mocks.attendances.mock.calls[1][0].where.id.in).toEqual([
+        records[page - 1].id,
+      ]);
+    },
+  );
+
+  it("scopes the total to the selected employee and inclusive date range", async () => {
+    const target = employee("employee-2", "E002");
+    mocks.employees.mockResolvedValue([target]);
+    mocks.attendances.mockResolvedValue([
+      { ...attendance(target), overtimeMinutes: 47 },
+    ]);
+
+    const result = await getReport({
+      ...filters,
+      employeeId: target.id,
+      from: "2025-01-06",
+      to: "2025-01-06",
+    });
+
+    expect(result).toMatchObject({
+      total: 1,
+      summary: { overtimeMinutes: 47, unknownOvertimeRecords: 0 },
+    });
+    expect(mocks.attendances.mock.calls[0][0].where).toMatchObject({
+      employeeId: target.id,
+      attendanceDate: {
+        gte: date("2025-01-06"),
+        lte: date("2025-01-06"),
+      },
+    });
+    expect(mocks.employees.mock.calls[0][0].where).toMatchObject({
+      id: target.id,
+    });
+  });
+
+  it("excludes overtime and unknown values from rows outside the status filter", async () => {
+    const matching = { ...attendance(), overtimeMinutes: 45 };
+    mocks.attendances
+      .mockResolvedValueOnce([
+        matching,
+        {
+          ...attendance(employee(), "2025-01-07"),
+          status: "PRESENT",
+          overtimeMinutes: 120,
+        },
+        {
+          ...attendance(employee(), "2025-01-05"),
+          status: "HALF_DAY",
+          overtimeMinutes: null,
+        },
+      ])
+      .mockResolvedValueOnce([matching]);
+
+    const result = await getReport({ ...filters, status: "LATE" });
+
+    expect(result).toMatchObject({
+      total: 1,
+      summary: { overtimeMinutes: 45, unknownOvertimeRecords: 0 },
+    });
+  });
+
+  it("counts unknown overtime across pages without treating derived days as unknown", async () => {
+    const known = { ...attendance(), overtimeMinutes: 35 };
+    mocks.attendances
+      .mockResolvedValueOnce([
+        known,
+        {
+          ...attendance(employee(), "2025-01-07"),
+          overtimeMinutes: null,
+        },
+      ])
+      .mockResolvedValueOnce([known]);
+
+    const result = await getReport({ ...filters, page: 2, pageSize: 1 });
+
+    expect(result).toMatchObject({
+      total: 7,
+      summary: { overtimeMinutes: 35, unknownOvertimeRecords: 1 },
+    });
+    if (result instanceof Response) throw new Error("Expected JSON page");
+    expect(result.items.map((row) => row.overtimeMinutes)).toEqual([35]);
+  });
+
+  it("returns zero totals for an empty report", async () => {
+    mocks.attendances.mockResolvedValue([]);
+    mocks.employees.mockResolvedValue([]);
+
+    expect(await getReport(filters)).toMatchObject({
+      total: 0,
+      items: [],
+      summary: { overtimeMinutes: 0, unknownOvertimeRecords: 0 },
+    });
+  });
+
+  it("keeps the total and displayed overtime consistent during a concurrent correction", async () => {
+    const scanned = { ...attendance(), overtimeMinutes: 45 };
+    mocks.attendances
+      .mockResolvedValueOnce([scanned])
+      .mockResolvedValueOnce([{ ...scanned, overtimeMinutes: 120 }]);
+
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+    });
+
+    expect(result).toMatchObject({
+      summary: { overtimeMinutes: 45, unknownOvertimeRecords: 0 },
+    });
+    if (result instanceof Response) throw new Error("Expected JSON page");
+    expect(result.items.map((row) => row.overtimeMinutes)).toEqual([45]);
+  });
+});
+
 describe("late reason exports", () => {
   it("exports quoted, multiline reasons safely in CSV", async () => {
     mocks.attendances.mockResolvedValue([
@@ -323,6 +467,33 @@ describe("overtime exports", () => {
     const [header, row] = (await result.text()).split("\r\n");
     expect(header).toContain('"Worked minutes","Overtime hours","Derived"');
     expect(row).toContain('"450","1.5","No"');
+    expect(header).toContain('"Overtime minutes"');
+    expect(row).toMatch(/,"90"$/);
+  });
+
+  it("preserves minute totals when summing exported CSV hours", async () => {
+    mocks.attendances.mockResolvedValue(
+      ["2025-01-04", "2025-01-05", "2025-01-06"].map((day) => ({
+        ...attendance(employee(), day),
+        overtimeMinutes: 1,
+      })),
+    );
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-04",
+      to: "2025-01-06",
+      format: "csv",
+    });
+    if (!(result instanceof Response)) throw new Error("Expected CSV export");
+    const rows = (await result.text())
+      .split("\r\n")
+      .slice(1)
+      .map((row) => row.slice(1, -1).split('","'));
+    expect(rows).toHaveLength(3);
+    expect(
+      rows.reduce((sum, row) => sum + Number(row[12]), 0) * 60,
+    ).toBeCloseTo(3, 10);
+    expect(rows.reduce((sum, row) => sum + Number(row[15]), 0)).toBe(3);
   });
 
   it("leaves unknown historical overtime blank in CSV", async () => {
@@ -338,6 +509,7 @@ describe("overtime exports", () => {
     if (!(result instanceof Response)) throw new Error("Expected CSV export");
     const [, row] = (await result.text()).split("\r\n");
     expect(row).toContain('"450","","No"');
+    expect(row).toMatch(/,""$/);
   });
 
   it("exports numeric overtime hours in Excel and zero for derived days", async () => {
@@ -353,8 +525,43 @@ describe("overtime exports", () => {
     const sheet = workbook.worksheets[0];
     expect(sheet.getCell("M1").value).toBe("Overtime hours");
     expect(sheet.getCell("M2").value).toBe(0);
-    expect(sheet.getCell("M3").value).toBe(1.52);
+    expect(sheet.getCell("M3").value).toBe(91 / 60);
     expect(sheet.getCell("M3").type).toBe(ExcelJS.ValueType.Number);
+    expect(sheet.getCell("M3").numFmt).toBe("0.00");
+    expect(sheet.getCell("P1").value).toBe("Overtime minutes");
+    expect(sheet.getCell("P2").value).toBe(0);
+    expect(sheet.getCell("P3").value).toBe(91);
+  });
+
+  it("preserves minute totals when summing exported Excel hours", async () => {
+    vi.useRealTimers();
+    mocks.attendances.mockResolvedValue(
+      ["2025-01-04", "2025-01-05", "2025-01-06"].map((day) => ({
+        ...attendance(employee(), day),
+        overtimeMinutes: 1,
+      })),
+    );
+    const result = await getReport({
+      ...filters,
+      from: "2025-01-04",
+      to: "2025-01-06",
+      format: "xlsx",
+    });
+    if (!(result instanceof Response)) throw new Error("Expected Excel export");
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await result.arrayBuffer());
+    const sheet = workbook.worksheets[0];
+    const hours = [2, 3, 4].reduce(
+      (sum, row) => sum + Number(sheet.getCell(`M${row}`).value),
+      0,
+    );
+    const minutes = [2, 3, 4].reduce(
+      (sum, row) => sum + Number(sheet.getCell(`P${row}`).value),
+      0,
+    );
+    expect(hours * 60).toBeCloseTo(3, 10);
+    expect(minutes).toBe(3);
   });
 
   it("leaves unknown historical overtime blank in Excel", async () => {
@@ -373,6 +580,7 @@ describe("overtime exports", () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await result.arrayBuffer());
     expect(workbook.worksheets[0].getCell("M2").value).toBe("");
+    expect(workbook.worksheets[0].getCell("P2").value).toBe("");
   });
 });
 

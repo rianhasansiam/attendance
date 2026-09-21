@@ -11,6 +11,7 @@ import {
   removeCatalogRecord,
   saveAssignment,
   saveDepartment,
+  saveDriveCost,
   saveHoliday,
   saveNetwork,
   saveOffice,
@@ -45,6 +46,7 @@ export const resourceSchema = z.enum([
   "devices",
   "leaves",
   "holidays",
+  "drive-costs",
   "users",
   "settings",
   "audit",
@@ -191,6 +193,35 @@ export async function listRecords(
         db.holiday.count({ where: named }),
       ]);
       break;
+    case "drive-costs": {
+      const where = q
+        ? {
+            OR: [
+              {
+                destinationFrom: {
+                  contains: q,
+                  mode: "insensitive" as const,
+                },
+              },
+              {
+                destinationTo: {
+                  contains: q,
+                  mode: "insensitive" as const,
+                },
+              },
+            ],
+          }
+        : {};
+      result = await Promise.all([
+        db.driveCost.findMany({
+          where,
+          orderBy: [{ date: "desc" }, { id: "desc" }],
+          ...window,
+        }),
+        db.driveCost.count({ where }),
+      ]);
+      break;
+    }
     case "users": {
       const where = q
         ? {
@@ -317,6 +348,9 @@ export async function getRecord(actor: Actor, resource: Resource, id: string) {
         include: { office: true },
       });
       break;
+    case "drive-costs":
+      record = await db.driveCost.findUnique({ where: { id } });
+      break;
     case "users":
       record = await db.user.findUnique({
         where: { id },
@@ -360,6 +394,8 @@ export async function createRecord(
       return saveAssignment(actor, body);
     case "holidays":
       return saveHoliday(actor, body);
+    case "drive-costs":
+      return saveDriveCost(actor, body);
     case "users":
       return createAdministrator(actor, userSchema.parse(body));
     case "settings":
@@ -394,6 +430,8 @@ export async function updateRecord(
       return saveAssignment(actor, body, id);
     case "holidays":
       return saveHoliday(actor, body, id);
+    case "drive-costs":
+      return saveDriveCost(actor, body, id);
     case "devices":
       return updateDevice(actor, id, deviceUpdateSchema.parse(body));
     case "leaves":

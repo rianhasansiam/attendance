@@ -141,6 +141,28 @@ export const holidaySchema = z
     officeId: idSchema.nullable().optional(),
   })
   .strict();
+export const driveCostSchema = z
+  .object({
+    date: dateSchema,
+    destinationFrom: label,
+    destinationTo: label,
+    kilometers: z
+      .number()
+      .finite()
+      .positive()
+      .max(100000)
+      .refine((value) => {
+        const [coefficient, exponentText] = value
+          .toString()
+          .toLowerCase()
+          .split("e");
+        const fractionLength = coefficient.split(".")[1]?.length ?? 0;
+        const exponent = exponentText ? Number(exponentText) : 0;
+        return Math.max(0, fractionLength - exponent) <= 2;
+      }, "Kilometers can have at most two decimal places."),
+    rateType: z.enum(["IN_TIME", "OVER_TIME"]),
+  })
+  .strict();
 export const leaveSchema = z
   .object({
     startDate: dateSchema,

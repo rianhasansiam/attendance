@@ -10,6 +10,8 @@ Only super administrators can correct attendance records or create manual attend
 
 Delayed checkout automatically records overtime: full minutes actually worked after the scheduled shift end, shown as hours and minutes in employee/admin attendance tables and decimal hours in CSV/Excel exports. Arrival lateness does not reduce overtime. The scheduled end is captured at check-in, including overnight shifts, so later Shift edits do not change it. Corrections recalculate overtime from that saved end; removing checkout resets overtime to zero. Previously completed records without a historical schedule snapshot show `—` (blank in exports), including after corrections. Legacy open records use their linked shift and original business date to establish the end at checkout. Apply `20260922000000_attendance_overtime` with `pnpm db:migrate`, then run `pnpm db:generate` before starting the updated application. This records time only; it does not calculate overtime pay or approval.
 
+Administrators and super administrators can use **Drive Cost** to record dated trips and calculate costs at ৳5/km during in-time or ৳10/km during overtime. Rates and totals are derived on the server, saved as exact decimals, and recorded in the audit log. Apply the included `20260923000000_drive_costs` migration with `pnpm db:migrate` before using this workspace page.
+
 Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).
 
 ## Local setup

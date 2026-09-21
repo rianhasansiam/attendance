@@ -104,7 +104,11 @@ describe("attendance calculations", () => {
     ["2026-09-19T11:59:00Z", 0],
     ["2026-09-19T12:00:00Z", 0],
     ["2026-09-19T12:00:59Z", 0],
+    ["2026-09-19T12:00:59.999Z", 0],
     ["2026-09-19T12:01:00Z", 1],
+    ["2026-09-19T12:59:59.999Z", 59],
+    ["2026-09-19T13:00:00Z", 60],
+    ["2026-09-19T13:01:00Z", 61],
     ["2026-09-19T13:30:59Z", 90],
   ])(
     "counts full overtime minutes at checkout %s",
@@ -131,6 +135,40 @@ describe("attendance calculations", () => {
       ),
     ).toEqual({ workedMinutes: 30, overtimeMinutes: 30, status: "HALF_DAY" });
   });
+  it.each([
+    ["2026-09-19T13:31:29.499Z", 0],
+    ["2026-09-19T13:31:29.500Z", 1],
+    ["2026-09-19T14:30:29.499Z", 59],
+    ["2026-09-19T14:30:29.500Z", 60],
+  ])(
+    "counts only complete elapsed minutes when check-in is after shift end: %s",
+    (checkout, minutes) => {
+      expect(
+        calculateCheckOut(
+          new Date("2026-09-19T13:30:29.500Z"),
+          new Date(checkout),
+          240,
+          631,
+          new Date("2026-09-19T12:00:00Z"),
+        ),
+      ).toEqual({
+        workedMinutes: minutes,
+        overtimeMinutes: minutes,
+        status: "HALF_DAY",
+      });
+    },
+  );
+  it("keeps overtime unknown when the historical scheduled end is unavailable", () => {
+    expect(
+      calculateCheckOut(
+        startsAt,
+        new Date("2026-09-19T13:30:00Z"),
+        240,
+        0,
+        null,
+      ),
+    ).toEqual({ workedMinutes: 630, overtimeMinutes: null, status: "PRESENT" });
+  });
   it("does not subtract arrival lateness from time worked after shift end", () => {
     expect(
       calculateCheckOut(
@@ -142,6 +180,23 @@ describe("attendance calculations", () => {
       ),
     ).toEqual({ workedMinutes: 570, overtimeMinutes: 90, status: "LATE" });
   });
+  it.each([
+    ["09:30", "17:30", "2026-09-19T18:15:00+06:00"],
+    ["15:30", "23:30", "2026-09-20T00:15:00+06:00"],
+  ])(
+    "counts overtime after a partial-hour Dhaka shift from %s to %s",
+    (startTime, endTime, checkout) => {
+      const checkOutAt = new Date(checkout);
+      const window = getShiftWindow(
+        checkOutAt,
+        { ...shift, startTime, endTime },
+        "2026-09-19",
+      );
+      expect(
+        calculateCheckOut(window.startsAt, checkOutAt, 240, 0, window.endsAt),
+      ).toEqual({ workedMinutes: 525, overtimeMinutes: 45, status: "PRESENT" });
+    },
+  );
   it("counts delayed overnight checkout on the original business date", () => {
     const nightShift = { ...shift, startTime: "22:00", endTime: "06:00" };
     const checkout = new Date("2026-09-20T01:30:00Z");

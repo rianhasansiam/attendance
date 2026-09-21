@@ -8,6 +8,7 @@ import {
   Building2,
   CalendarCheck2,
   CalendarDays,
+  CarFront,
   ChartNoAxesCombined,
   CheckCheck,
   ChevronRight,
@@ -31,6 +32,7 @@ const adminNavigation = [
   { label: "Employees", href: "employees", icon: Users },
   { label: "Attendance", href: "attendance", icon: CalendarCheck2 },
   { label: "Reports", href: "reports", icon: ChartNoAxesCombined },
+  { label: "Drive Cost", href: "drive-cost", icon: CarFront },
   { label: "Leave requests", href: "leaves", icon: CalendarDays },
   { label: "Devices", href: "devices", icon: Fingerprint },
   { label: "Departments", href: "departments", icon: Layers3 },
@@ -56,9 +58,7 @@ export function Brand() {
         <CheckCheck size={24} strokeWidth={2.5} />
       </span>
 
-      <span>
-        BangBuy
-      </span>
+      <span>BangBuy</span>
     </div>
   );
 }

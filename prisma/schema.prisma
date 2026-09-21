@@ -34,6 +34,10 @@ enum ChallengePurpose {
   CHECK_IN
   CHECK_OUT
 }
+enum DriveCostRateType {
+  IN_TIME
+  OVER_TIME
+}
 model User {
   id String @id @default(cuid())
   name String?
@@ -50,6 +54,7 @@ model User {
   sessions Session[]
   employee Employee?
   auditLogs AuditLog[]
+  driveCosts DriveCost[]
 }
 model Account {
   id String @id @default(cuid())
@@ -257,6 +262,22 @@ model Holiday {
   office Office? @relation(fields: [officeId], references: [id], onDelete: Restrict)
   @@unique([officeId, date])
   @@index([date])
+}
+model DriveCost {
+  id String @id @default(cuid())
+  date DateTime @db.Date
+  destinationFrom String @db.VarChar(160)
+  destinationTo String @db.VarChar(160)
+  kilometers Decimal @db.Decimal(10, 2)
+  rateType DriveCostRateType
+  ratePerKilometer Decimal @db.Decimal(10, 2)
+  totalCost Decimal @db.Decimal(12, 2)
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  @@index([date(sort: Desc), id(sort: Desc)])
+  @@index([createdById, date(sort: Desc)])
 }
 model Leave {
   id String @id @default(cuid())

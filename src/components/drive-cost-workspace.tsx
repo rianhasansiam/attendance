@@ -1,0 +1,657 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Calculator,
+  Calendar,
+  Check,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { Modal } from "./modal";
+import {
+  ErrorNotice,
+  Loading,
+  Notice,
+  PageHeader,
+  Table,
+  type DataRow,
+} from "./ui";
+import { api, useDebouncedValue, useResource } from "./use-resource";
+import {
+  DRIVE_COST_RATES,
+  type DriveCostRateType as RateType,
+} from "@/modules/drive-costs/rates";
+
+type DriveCostRecord = {
+  id: string;
+  date: string;
+  destinationFrom: string;
+  destinationTo: string;
+  kilometers: string | number;
+  rateType: RateType;
+  ratePerKilometer: string | number;
+  totalCost: string | number;
+};
+
+type DriveCostData = {
+  items: DriveCostRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+type DriveCostDraft = {
+  id?: string;
+  date: string;
+  destinationFrom: string;
+  destinationTo: string;
+  kilometers: string;
+  rateType: RateType;
+};
+
+type CalcBreakdown = {
+  records: number;
+  kilometers: string;
+  totalCost: string;
+};
+
+type CalcResult = {
+  dateFrom: string;
+  dateTo: string;
+  isSingleDay: boolean;
+  totalRecords: number;
+  totalKilometers: string;
+  totalCost: string;
+  breakdown: {
+    inTime: CalcBreakdown;
+    overTime: CalcBreakdown;
+  };
+  records: DriveCostRecord[];
+};
+
+const PAGE_SIZE = 25;
+const RATES: Record<RateType, number> = {
+  IN_TIME: Number(DRIVE_COST_RATES.IN_TIME),
+  OVER_TIME: Number(DRIVE_COST_RATES.OVER_TIME),
+};
+
+function numberValue(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumber(value: unknown): string {
+  return numberValue(value).toLocaleString("en-BD", {
+    maximumFractionDigits: 2,
+  });
+}
+
+function taka(value: unknown): string {
+  return `৳${numberValue(value).toLocaleString("en-BD", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function today(): string {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function draftFromRow(row: DataRow): DriveCostDraft {
+  return {
+    id: String(row.id),
+    date: String(row.date).slice(0, 10),
+    destinationFrom: String(row.destinationFrom ?? ""),
+    destinationTo: String(row.destinationTo ?? ""),
+    kilometers: String(row.kilometers ?? ""),
+    rateType: row.rateType === "OVER_TIME" ? "OVER_TIME" : "IN_TIME",
+  };
+}
+
+function formatDateLabel(dateString: string): string {
+  return new Date(dateString + "T00:00:00").toLocaleDateString("en-BD", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+export function DriveCostWorkspace() {
+  const [query, setQuery] = useState("");
+  const search = useDebouncedValue(query);
+  const [pagination, setPagination] = useState({ query: "", page: 1 });
+  const page = pagination.query === search ? pagination.page : 1;
+  const [editing, setEditing] = useState<DriveCostDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [message, setMessage] = useState("");
+  const requestUrl = `/api/admin/drive-costs?page=${page}&pageSize=${PAGE_SIZE}&q=${encodeURIComponent(search)}`;
+  const { data, error, loading, refresh } =
+    useResource<DriveCostData>(requestUrl);
+
+  // Calculator state
+  const [calcMode, setCalcMode] = useState<"single" | "range">("single");
+  const [calcDate, setCalcDate] = useState(today());
+  const [calcFrom, setCalcFrom] = useState(today());
+  const [calcTo, setCalcTo] = useState(today());
+  const [calcBusy, setCalcBusy] = useState(false);
+  const [calcError, setCalcError] = useState("");
+  const [calcResult, setCalcResult] = useState<CalcResult | null>(null);
+  const [calcOpen, setCalcOpen] = useState(false);
+
+  function setPage(nextPage: number) {
+    setPagination({ query: search, page: nextPage });
+  }
+
+  function openNew() {
+    setActionError("");
+    setMessage("");
+    setEditing({
+      date: today(),
+      destinationFrom: "",
+      destinationTo: "",
+      kilometers: "",
+      rateType: "IN_TIME",
+    });
+  }
+
+  function openEdit(row: DataRow) {
+    setActionError("");
+    setMessage("");
+    setEditing(draftFromRow(row));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    const kilometers = Number(editing.kilometers);
+    if (!Number.isFinite(kilometers) || kilometers <= 0) {
+      setActionError("Enter a distance greater than zero.");
+      return;
+    }
+    setBusy(true);
+    setActionError("");
+    setMessage("");
+    try {
+      await api(`/api/admin/drive-costs${editing.id ? `/${editing.id}` : ""}`, {
+        method: editing.id ? "PATCH" : "POST",
+        body: JSON.stringify({
+          date: editing.date,
+          destinationFrom: editing.destinationFrom.trim(),
+          destinationTo: editing.destinationTo.trim(),
+          kilometers,
+          rateType: editing.rateType,
+        }),
+      });
+      setEditing(null);
+      setMessage(
+        editing.id
+          ? "Drive cost updated successfully."
+          : "Drive cost added successfully.",
+      );
+      refresh();
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save this drive cost.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(row: DataRow) {
+    const from = String(row.destinationFrom ?? "this destination");
+    const to = String(row.destinationTo ?? "this destination");
+    if (!window.confirm(`Delete the drive cost from ${from} to ${to}?`)) return;
+    setBusy(true);
+    setActionError("");
+    setMessage("");
+    try {
+      await api(`/api/admin/drive-costs/${String(row.id)}`, {
+        method: "DELETE",
+      });
+      setMessage("Drive cost deleted successfully.");
+      if ((data?.items.length || 0) === 1 && page > 1) setPage(page - 1);
+      else refresh();
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete this drive cost.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runCalculation() {
+    setCalcBusy(true);
+    setCalcError("");
+    setCalcResult(null);
+    try {
+      const params = new URLSearchParams();
+      if (calcMode === "single") {
+        params.set("from", calcDate);
+      } else {
+        params.set("from", calcFrom);
+        params.set("to", calcTo);
+      }
+      const result = await api<CalcResult>(
+        `/api/admin/drive-costs/calculate?${params.toString()}`,
+      );
+      setCalcResult(result);
+    } catch (err) {
+      setCalcError(
+        err instanceof Error ? err.message : "Unable to calculate costs.",
+      );
+    } finally {
+      setCalcBusy(false);
+    }
+  }
+
+  const tableRows: DataRow[] = (data?.items || []).map((record) => ({
+    ...record,
+    rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
+    kilometersLabel: formatNumber(record.kilometers),
+    rateLabel: `${taka(record.ratePerKilometer)} / km`,
+    totalLabel: taka(record.totalCost),
+  }));
+  const selectedRate = editing ? RATES[editing.rateType] : RATES.IN_TIME;
+  const previewKilometers = numberValue(editing?.kilometers);
+  const previewTotal = previewKilometers * selectedRate;
+
+  const calcRecordRows: DataRow[] = (calcResult?.records || []).map(
+    (record) => ({
+      ...record,
+      rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
+      kilometersLabel: formatNumber(record.kilometers),
+      rateLabel: `${taka(record.ratePerKilometer)} / km`,
+      totalLabel: taka(record.totalCost),
+    }),
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="TRAVEL EXPENSES"
+        title="Drive Cost"
+        description="Calculate and keep a clear record of every drive."
+        action={
+          <div className="page-header-actions">
+            <button
+              className="button secondary"
+              onClick={() => setCalcOpen(!calcOpen)}
+            >
+              <Calculator size={16} />
+              {calcOpen ? "Hide calculator" : "Cost calculator"}
+            </button>
+            <button className="button" disabled={busy} onClick={openNew}>
+              <Plus size={16} />
+              Add drive cost
+            </button>
+          </div>
+        }
+      />
+      <ErrorNotice message={error || (!editing ? actionError : "")} />
+      {message && (
+        <Notice>
+          <Check size={16} />
+          {message}
+        </Notice>
+      )}
+
+      {/* Cost Calculator Section */}
+      {calcOpen && (
+        <section className="card calc-card">
+          <div className="calc-header">
+            <div className="calc-title">
+              <Calculator size={18} />
+              <div>
+                <h3>Cost Calculator</h3>
+                <p>Calculate total drive costs for a single day or a date range.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="calc-mode-tabs">
+            <button
+              type="button"
+              className={`calc-mode-tab ${calcMode === "single" ? "is-active" : ""}`}
+              onClick={() => setCalcMode("single")}
+            >
+              <Calendar size={14} />
+              Single day
+            </button>
+            <button
+              type="button"
+              className={`calc-mode-tab ${calcMode === "range" ? "is-active" : ""}`}
+              onClick={() => setCalcMode("range")}
+            >
+              <Calendar size={14} />
+              Date range
+            </button>
+          </div>
+
+          <div className="calc-inputs">
+            {calcMode === "single" ? (
+              <div className="field">
+                <label htmlFor="calc-date">Date</label>
+                <input
+                  id="calc-date"
+                  type="date"
+                  value={calcDate}
+                  onChange={(e) => setCalcDate(e.target.value)}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="field">
+                  <label htmlFor="calc-from">From date</label>
+                  <input
+                    id="calc-from"
+                    type="date"
+                    value={calcFrom}
+                    onChange={(e) => setCalcFrom(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="calc-to">To date</label>
+                  <input
+                    id="calc-to"
+                    type="date"
+                    value={calcTo}
+                    onChange={(e) => setCalcTo(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+            <button
+              type="button"
+              className="button calc-run-btn"
+              disabled={calcBusy}
+              onClick={() => void runCalculation()}
+            >
+              {calcBusy ? "Calculating…" : "Calculate"}
+            </button>
+          </div>
+
+          <ErrorNotice message={calcError} />
+
+          {calcResult && (
+            <div className="calc-results">
+              <div className="calc-date-label">
+                {calcResult.isSingleDay
+                  ? formatDateLabel(calcResult.dateFrom)
+                  : `${formatDateLabel(calcResult.dateFrom)} — ${formatDateLabel(calcResult.dateTo)}`}
+              </div>
+
+              {calcResult.totalRecords === 0 ? (
+                <div className="calc-empty">
+                  <p>No drive costs found for this {calcResult.isSingleDay ? "date" : "date range"}.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Summary cards */}
+                  <div className="calc-summary-grid">
+                    <div className="calc-summary-card calc-total">
+                      <small>Grand total</small>
+                      <strong>{taka(calcResult.totalCost)}</strong>
+                      <p>{calcResult.totalRecords} trip{calcResult.totalRecords !== 1 ? "s" : ""} · {formatNumber(calcResult.totalKilometers)} km</p>
+                    </div>
+                    <div className="calc-summary-card">
+                      <small>In time</small>
+                      <strong>{taka(calcResult.breakdown.inTime.totalCost)}</strong>
+                      <p>{calcResult.breakdown.inTime.records} trip{calcResult.breakdown.inTime.records !== 1 ? "s" : ""} · {formatNumber(calcResult.breakdown.inTime.kilometers)} km</p>
+                    </div>
+                    <div className="calc-summary-card">
+                      <small>Over time</small>
+                      <strong>{taka(calcResult.breakdown.overTime.totalCost)}</strong>
+                      <p>{calcResult.breakdown.overTime.records} trip{calcResult.breakdown.overTime.records !== 1 ? "s" : ""} · {formatNumber(calcResult.breakdown.overTime.kilometers)} km</p>
+                    </div>
+                  </div>
+
+                  {/* Trip details table */}
+                  <div className="calc-details">
+                    <h4>Trip details</h4>
+                    <Table
+                      rows={calcRecordRows}
+                      columns={[
+                        { key: "date", label: "Date", format: "date" },
+                        { key: "destinationFrom", label: "From" },
+                        { key: "destinationTo", label: "To" },
+                        { key: "rateTypeLabel", label: "Rate type", format: "badge" },
+                        { key: "kilometersLabel", label: "Km" },
+                        { key: "rateLabel", label: "Rate" },
+                        { key: "totalLabel", label: "Total" },
+                      ]}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="card">
+        <div className="toolbar">
+          <div className="search-field">
+            <Search size={16} />
+            <input
+              type="search"
+              aria-label="Search drive costs"
+              placeholder="Search destinations…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <span className="muted" style={{ fontSize: 11 }}>
+            {data?.total || 0} records
+          </span>
+        </div>
+        {loading ? (
+          <Loading />
+        ) : (
+          <Table
+            rows={tableRows}
+            columns={[
+              { key: "date", label: "Date", format: "date" },
+              { key: "destinationFrom", label: "From" },
+              { key: "destinationTo", label: "To" },
+              { key: "rateTypeLabel", label: "Rate type", format: "badge" },
+              { key: "kilometersLabel", label: "Kilometers" },
+              { key: "rateLabel", label: "Rate" },
+              { key: "totalLabel", label: "Total" },
+            ]}
+            actions={(row) => (
+              <div className="row-actions">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="icon-button"
+                  aria-label={`Edit drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
+                  onClick={() => openEdit(row)}
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="icon-button"
+                  aria-label={`Delete drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
+                  onClick={() => void remove(row)}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            )}
+          />
+        )}
+        <div className="pagination">
+          <span>
+            Page {page} · {data?.total || 0} total records
+          </span>
+          <div className="buttons">
+            <button
+              type="button"
+              className="button small secondary"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage(page - 1)}
+            >
+              <ArrowLeft size={13} />
+              Previous
+            </button>
+            <button
+              type="button"
+              className="button small secondary"
+              disabled={page * PAGE_SIZE >= (data?.total || 0) || loading}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+              <ArrowRight size={13} />
+            </button>
+          </div>
+        </div>
+      </section>
+      {editing && (
+        <Modal
+          title={editing.id ? "Edit drive cost" : "Add drive cost"}
+          close={() => {
+            if (!busy) setEditing(null);
+          }}
+        >
+          <form onSubmit={submit}>
+            <ErrorNotice message={actionError} />
+            <div className="form-grid">
+              <div className="field">
+                <label htmlFor="drive-cost-date">Date *</label>
+                <input
+                  id="drive-cost-date"
+                  name="date"
+                  type="date"
+                  required
+                  value={editing.date}
+                  onChange={(event) =>
+                    setEditing({ ...editing, date: event.target.value })
+                  }
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="drive-cost-kilometers">Kilometers *</label>
+                <input
+                  id="drive-cost-kilometers"
+                  name="kilometers"
+                  type="number"
+                  min="0.01"
+                  max="100000"
+                  step="0.01"
+                  required
+                  value={editing.kilometers}
+                  onChange={(event) =>
+                    setEditing({ ...editing, kilometers: event.target.value })
+                  }
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="drive-cost-from">Destination from *</label>
+                <input
+                  id="drive-cost-from"
+                  name="destinationFrom"
+                  required
+                  maxLength={160}
+                  value={editing.destinationFrom}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      destinationFrom: event.target.value,
+                    })
+                  }
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="drive-cost-to">Destination to *</label>
+                <input
+                  id="drive-cost-to"
+                  name="destinationTo"
+                  required
+                  maxLength={160}
+                  value={editing.destinationTo}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      destinationTo: event.target.value,
+                    })
+                  }
+                />
+              </div>
+              <fieldset className="field full drive-cost-rate-field">
+                <legend>Rate type *</legend>
+                <div className="drive-cost-rate-options">
+                  {(
+                    [
+                      ["IN_TIME", "In time", "Standard work time"],
+                      ["OVER_TIME", "Over time", "Outside work time"],
+                    ] as const
+                  ).map(([value, title, description]) => (
+                    <label
+                      className={`drive-cost-rate-option ${editing.rateType === value ? "is-selected" : ""}`}
+                      key={value}
+                    >
+                      <input
+                        type="radio"
+                        name="rateType"
+                        value={value}
+                        checked={editing.rateType === value}
+                        onChange={() =>
+                          setEditing({ ...editing, rateType: value })
+                        }
+                      />
+                      <span>
+                        <strong>{title}</strong>
+                        <small>{description}</small>
+                      </span>
+                      <b>৳{RATES[value]}/km</b>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="drive-cost-preview full" aria-live="polite">
+                <span>
+                  <small>Calculated total</small>
+                  <strong>{taka(previewTotal)}</strong>
+                </span>
+                <p>
+                  {formatNumber(previewKilometers)} km × ৳{selectedRate}/km
+                </p>
+              </div>
+            </div>
+            <div className="form-actions">
+              <button
+                disabled={busy}
+                type="button"
+                className="button secondary"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
+              <button disabled={busy} type="submit" className="button">
+                {busy ? "Saving…" : "Save drive cost"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+

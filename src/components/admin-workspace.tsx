@@ -17,6 +17,7 @@ import {
   Users,
 } from "lucide-react";
 import {
+  duration,
   ErrorNotice,
   items,
   Loading,
@@ -240,6 +241,7 @@ export function AdminReports({
   const [filters, setFilters] = useState<Record<string, string>>(
     employeeId ? { employeeId } : {},
   );
+  const [filterDefaults, setFilterDefaults] = useState({ key: 0, employeeId });
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<DataRow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -253,6 +255,7 @@ export function AdminReports({
   const { data, error, loading, refresh } = useResource<{
     items: DataRow[];
     total: number;
+    summary: { overtimeMinutes: number; unknownOvertimeRecords: number };
   }>(`/api/admin/reports?${query}`);
   function filter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -350,10 +353,23 @@ export function AdminReports({
             <p>Filter up to 93 days. The last 30 days are shown by default.</p>
           </div>
         </div>
-        <form className="card-body" onSubmit={filter}>
+        <form
+          key={filterDefaults.key}
+          className="card-body"
+          onSubmit={filter}
+          onReset={(event) => {
+            event.preventDefault();
+            setFilterDefaults((previous) => ({
+              key: previous.key + 1,
+              employeeId: "",
+            }));
+            setFilters({});
+            setPage(1);
+          }}
+        >
           <div className="filter-grid">
             <FormField
-              row={{ employeeId }}
+              row={{ employeeId: filterDefaults.employeeId }}
               field={{
                 name: "employeeId",
                 label: "Employee",
@@ -405,20 +421,27 @@ export function AdminReports({
               <button className="button" type="submit">
                 Apply filters
               </button>
-              <button
-                type="reset"
-                className="button secondary"
-                onClick={() => {
-                  setFilters({});
-                  setPage(1);
-                }}
-              >
+              <button type="reset" className="button secondary">
                 Reset
               </button>
             </div>
           </div>
         </form>
       </section>
+      {data && (
+        <section aria-label="Overtime summary" style={{ marginBottom: 24 }}>
+          <Metric
+            title="Total overtime"
+            value={duration(data.summary.overtimeMinutes)}
+            note={`Across all ${data.total} matching records in the selected date range.${
+              data.summary.unknownOvertimeRecords > 0
+                ? ` Excludes ${data.summary.unknownOvertimeRecords} ${data.summary.unknownOvertimeRecords === 1 ? "record" : "records"} with unknown overtime.`
+                : ""
+            }`}
+            icon={<Clock3 size={18} />}
+          />
+        </section>
+      )}
       <section className="card">
         <div className="card-header">
           <h2>{attendance ? "Attendance records" : "Report results"}</h2>

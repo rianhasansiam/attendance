@@ -607,6 +607,105 @@ tbody tr:hover {
   margin-top: 25px;
   border-top: 1px solid var(--line);
 }
+.drive-cost-rate-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.drive-cost-rate-field legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #526155;
+}
+.drive-cost-rate-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.drive-cost-rate-option {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 11px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dfe5dc;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.drive-cost-rate-option:hover {
+  background: #f8faf7;
+}
+.drive-cost-rate-option.is-selected {
+  border-color: var(--green);
+  background: var(--green-light);
+}
+.drive-cost-rate-option input {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin: 2px 0 0;
+  accent-color: var(--green);
+}
+.drive-cost-rate-option span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.drive-cost-rate-option strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+.drive-cost-rate-option small {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.drive-cost-rate-option b {
+  color: var(--green);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.drive-cost-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border: 1px solid #d2e8d7;
+  border-radius: 8px;
+  background: #f4f8f3;
+}
+.drive-cost-preview span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.drive-cost-preview small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.drive-cost-preview strong {
+  color: var(--green);
+  font-size: 24px;
+  line-height: 1.2;
+}
+.drive-cost-preview p {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1141,6 +1240,9 @@ tbody tr:hover {
   .form-grid {
     grid-template-columns: 1fr;
   }
+  .drive-cost-rate-options {
+    grid-template-columns: 1fr;
+  }
   .filter-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -1205,5 +1307,172 @@ tbody tr:hover {
   *:after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Page header actions */
+.page-header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Cost Calculator */
+.calc-card {
+  border: 1px solid #c8e0cd;
+  background: linear-gradient(180deg, #f8fbf8 0%, #fff 100%);
+}
+.calc-header {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+}
+.calc-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--green);
+}
+.calc-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.calc-title p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.calc-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.calc-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid #dfe5dc;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.calc-mode-tab:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.calc-mode-tab.is-active {
+  border-color: var(--green);
+  background: var(--green-light);
+  color: var(--green);
+}
+.calc-inputs {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.calc-inputs .field {
+  flex: 1;
+  min-width: 160px;
+}
+.calc-run-btn {
+  flex-shrink: 0;
+  min-width: 120px;
+  align-self: flex-end;
+}
+.calc-results {
+  margin-top: 8px;
+  animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.calc-date-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.calc-empty {
+  text-align: center;
+  padding: 30px 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.calc-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.calc-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid #dfe5dc;
+  border-radius: 8px;
+  background: #fff;
+}
+.calc-summary-card.calc-total {
+  border-color: #c8e0cd;
+  background: linear-gradient(135deg, #f0f7f0 0%, #e8f4e8 100%);
+}
+.calc-summary-card small {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.calc-summary-card strong {
+  font-size: 22px;
+  color: var(--green);
+  line-height: 1.2;
+}
+.calc-total strong {
+  font-size: 26px;
+}
+.calc-summary-card p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+}
+.calc-details {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.calc-details h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+@media (max-width: 700px) {
+  .page-header-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .calc-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .calc-inputs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .calc-inputs .field {
+    min-width: 0;
   }
 }

@@ -536,6 +536,7 @@ const columns = [
   "Overtime hours",
   "Derived",
   "Late reason",
+  "Overtime minutes",
 ];
 function exportRows(records: ReportRecord[]) {
   return records.map((row) => [
@@ -551,17 +552,23 @@ function exportRows(records: ReportRecord[]) {
     row.checkOutAt?.toISOString() ?? "",
     row.lateMinutes,
     row.workedMinutes,
-    row.overtimeMinutes === null
-      ? ""
-      : Number((row.overtimeMinutes / 60).toFixed(2)),
+    // Keep the underlying precision so adding exported hours does not compound
+    // per-record rounding. The minutes column also provides an exact total.
+    row.overtimeMinutes === null ? "" : row.overtimeMinutes / 60,
     row.derived ? "Yes" : "No",
     row.lateReason ?? "",
+    row.overtimeMinutes ?? "",
   ]);
 }
 
 export async function getReport(filters: Filters) {
   const entries = await reportEntries(filters);
   if (filters.format === "json") {
+    const summary = { overtimeMinutes: 0, unknownOvertimeRecords: 0 };
+    for (const { record } of entries) {
+      if (record.overtimeMinutes === null) summary.unknownOvertimeRecords++;
+      else summary.overtimeMinutes += record.overtimeMinutes;
+    }
     return {
       items: await hydrateEntries(
         entries.slice(
@@ -570,6 +577,7 @@ export async function getReport(filters: Filters) {
         ),
       ),
       total: entries.length,
+      summary,
       page: filters.page,
       pageSize: filters.pageSize,
     };
@@ -611,6 +619,7 @@ export async function getReport(filters: Filters) {
     wrapText: true,
     vertical: "top",
   };
+  sheet.getColumn(columns.indexOf("Overtime hours") + 1).numFmt = "0.00";
   sheet.autoFilter = {
     from: { row: 1, column: 1 },
     to: { row: Math.max(records.length + 1, 1), column: columns.length },

@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { createEmployee, updateEmployee } from "@/modules/employees/service";
-import { saveAssignment, saveHoliday } from "@/modules/management/catalog";
+import {
+  removeCatalogRecord,
+  saveAssignment,
+  saveDriveCost,
+  saveHoliday,
+} from "@/modules/management/catalog";
 import {
   createAttendanceCorrection,
   createLeave,
@@ -228,6 +233,52 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
     await expect(
       reviewLeave(admin, leave.id, { status: "REJECTED" }),
     ).rejects.toMatchObject({ code: "LEAVE_ALREADY_REVIEWED" });
+  });
+
+  it("persists exact drive costs and audits recalculation and deletion", async () => {
+    const created = await saveDriveCost(admin, {
+      date: "2026-09-21",
+      destinationFrom: "Dhaka office",
+      destinationTo: "Gazipur warehouse",
+      kilometers: 12.5,
+      rateType: "IN_TIME",
+    });
+    expect(created.kilometers.toFixed(2)).toBe("12.50");
+    expect(created.ratePerKilometer.toFixed(2)).toBe("5.00");
+    expect(created.totalCost.toFixed(2)).toBe("62.50");
+    expect(created.createdById).toBe(admin.id);
+
+    const updated = await saveDriveCost(
+      superAdmin,
+      {
+        date: "2026-09-22",
+        destinationFrom: "Gazipur warehouse",
+        destinationTo: "Dhaka office",
+        kilometers: 12.5,
+        rateType: "OVER_TIME",
+      },
+      created.id,
+    );
+    expect(updated.ratePerKilometer.toFixed(2)).toBe("10.00");
+    expect(updated.totalCost.toFixed(2)).toBe("125.00");
+    expect(updated.createdById).toBe(admin.id);
+
+    await removeCatalogRecord(superAdmin, "drive-costs", created.id);
+    expect(
+      await db.driveCost.findUnique({ where: { id: created.id } }),
+    ).toBeNull();
+    const audits = await db.auditLog.findMany({
+      where: { resource: "DriveCost", resourceId: created.id },
+      select: { action: true, actorId: true },
+    });
+    expect(audits).toHaveLength(3);
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        { action: "DRIVE_COST_CREATED", actorId: admin.id },
+        { action: "DRIVE_COST_UPDATED", actorId: superAdmin.id },
+        { action: "DRIVE_COST_DELETED", actorId: superAdmin.id },
+      ]),
+    );
   });
 
   it("creates and corrects a missed punch with calculated duration and immutable audit records", async () => {

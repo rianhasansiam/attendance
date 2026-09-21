@@ -2,10 +2,12 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";
+import { calculateDriveCost } from "@/modules/drive-costs/calculations";
 import type { Actor } from "./permissions";
 import {
   assignmentSchema,
   departmentSchema,
+  driveCostSchema,
   holidaySchema,
   networkSchema,
   officeSchema,
@@ -280,6 +282,40 @@ export async function saveHoliday(actor: Actor, raw: unknown, id?: string) {
   );
 }
 
+export async function saveDriveCost(actor: Actor, raw: unknown, id?: string) {
+  const input = driveCostSchema.parse(raw);
+  const calculation = calculateDriveCost(input.kilometers, input.rateType);
+  const data = {
+    date: utcDate(input.date),
+    destinationFrom: input.destinationFrom,
+    destinationTo: input.destinationTo,
+    rateType: input.rateType,
+    ...calculation,
+  };
+
+  return db.$transaction(async (tx) => {
+    const previous = id
+      ? await tx.driveCost.findUnique({ where: { id } })
+      : null;
+    if (id && !previous) throw missing();
+    const result = id
+      ? await tx.driveCost.update({ where: { id }, data })
+      : await tx.driveCost.create({
+          data: { ...data, createdById: actor.id },
+        });
+    await writeAudit(
+      actor.id,
+      id ? "DRIVE_COST_UPDATED" : "DRIVE_COST_CREATED",
+      "DriveCost",
+      result.id,
+      previous ?? undefined,
+      result,
+      tx,
+    );
+    return result;
+  });
+}
+
 export async function removeCatalogRecord(
   actor: Actor,
   resource: string,
@@ -313,6 +349,9 @@ export async function removeCatalogRecord(
       case "holidays":
         previous = await tx.holiday.delete({ where: { id } });
         break;
+      case "drive-costs":
+        previous = await tx.driveCost.delete({ where: { id } });
+        break;
       default:
         throw new DomainError(
           "METHOD_NOT_ALLOWED",
@@ -322,8 +361,8 @@ export async function removeCatalogRecord(
     }
     await writeAudit(
       actor.id,
-      "RECORD_REMOVED",
-      resource,
+      resource === "drive-costs" ? "DRIVE_COST_DELETED" : "RECORD_REMOVED",
+      resource === "drive-costs" ? "DriveCost" : resource,
       id,
       previous,
       undefined,

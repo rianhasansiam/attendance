@@ -14,8 +14,8 @@ const nextConfig: NextConfig = {
     "pdfkit",
   ],
   outputFileTracingIncludes: {
-    "/api/admin/reports": ["./src/assets/fonts/*.ttf"],
-    "/api/admin/drive-costs/report": ["./src/assets/fonts/*.ttf"],
+    "/api/admin/reports": ["./src/assets/fonts/*"],
+    "/api/admin/drive-costs/report": ["./src/assets/fonts/*"],
   },
   async headers() {
     return [

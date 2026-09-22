@@ -22,11 +22,11 @@ const report: PdfReport = {
 async function readPdf(input: PdfReport) {
   const bytes = await createReportPdf(input);
   expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe("%PDF-");
-  const document = await getDocument({
+  const loadingTask = getDocument({
     data: bytes,
     useSystemFonts: false,
-    isEvalSupported: false,
-  }).promise;
+  });
+  const document = await loadingTask.promise;
   try {
     const pages: string[] = [];
     for (let number = 1; number <= document.numPages; number++) {
@@ -43,11 +43,16 @@ async function readPdf(input: PdfReport) {
         expect(item.transform[5]).toBeGreaterThan(10);
         expect(item.transform[5]).toBeLessThan(575);
       }
-      pages.push(items.map((item) => item.str).join(" "));
+      pages.push(
+        items
+          .map((item) => item.str)
+          .join(" ")
+          .replace(/\s+/g, " "),
+      );
     }
     return { pages, metadata: await document.getMetadata() };
   } finally {
-    await document.destroy();
+    await loadingTask.destroy();
   }
 }
 

@@ -76,7 +76,8 @@ async function pdfText(download: Download, path: string) {
   const bytes = await readFile(path);
   expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const document = await getDocument({ data: new Uint8Array(bytes) }).promise;
+  const loadingTask = getDocument({ data: new Uint8Array(bytes) });
+  const document = await loadingTask.promise;
   try {
     const pages = await Promise.all(
       Array.from({ length: document.numPages }, async (_, index) => {
@@ -84,12 +85,13 @@ async function pdfText(download: Download, path: string) {
         const content = await page.getTextContent();
         return content.items
           .map((item) => ("str" in item ? item.str : ""))
-          .join(" ");
+          .join(" ")
+          .replace(/\s+/g, " ");
       }),
     );
     return { text: pages.join(" "), pages: document.numPages };
   } finally {
-    await document.destroy();
+    await loadingTask.destroy();
   }
 }
 

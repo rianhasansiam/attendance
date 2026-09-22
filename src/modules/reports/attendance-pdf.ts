@@ -70,7 +70,9 @@ export async function attendanceReportPdf(
     rows: records.map((row) => {
       const zone = row.shift.timezone;
       const punch = (value: Date | null) =>
-        value ? formatInTimeZone(value, zone, "yyyy-MM-dd\nHH:mm") : "-";
+        value
+          ? `${formatInTimeZone(value, zone, "yyyy-MM-dd")}\n${formatInTimeZone(value, zone, "HH:mm")}`
+          : "-";
       return [
         row.attendanceDate.toISOString().slice(0, 10),
         `${row.employee.user.name || row.employee.employeeCode}\n${row.employee.employeeCode}`,

@@ -172,7 +172,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
   }
   y += 14;
 
-  const cardsPerRow = Math.min(4, report.summary.length);
+  const cardsPerRow = Math.min(5, report.summary.length);
   const cardGap = 10;
   const cardWidth =
     (contentWidth - cardGap * (cardsPerRow - 1)) / Math.max(1, cardsPerRow);
@@ -215,6 +215,20 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     y += height + cardGap;
   }
   y += 7;
+
+  if (report.footerNote) {
+    doc.font("Regular").fontSize(8).fillColor(colors.muted);
+    const notes = wrapText(doc, report.footerNote, contentWidth);
+    for (const note of notes) {
+      if (y + lineHeight() > contentBottom) {
+        newPage();
+        doc.font("Regular").fontSize(8).fillColor(colors.muted);
+      }
+      paintLine(note, margin, y, contentWidth);
+      y += lineHeight();
+    }
+    y += 12;
+  }
 
   doc.font("Bold").fontSize(bodySize);
   const headings = report.columns.map((column, index) =>
@@ -273,31 +287,45 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       let availableLines = Math.floor(
         (contentBottom - y - cellPadding * 2) / bodyLineHeight,
       );
-      if (availableLines < 1) {
+      const continuation =
+        offset > 0 && cells[0].length <= offset
+          ? [...cells[0].slice(0, 2), "(continued)"]
+          : null;
+      const minimumLines = Math.max(
+        Math.min(3, lines - offset),
+        continuation?.length ?? 0,
+      );
+      if (availableLines < minimumLines) {
         tablePage();
         availableLines = Math.floor(
           (contentBottom - y - cellPadding * 2) / bodyLineHeight,
         );
       }
-      const count = Math.min(lines - offset, availableLines);
-      const height = count * bodyLineHeight + cellPadding * 2;
+      let count = Math.min(lines - offset, availableLines);
+      const remaining = lines - offset - count;
+      if (remaining > 0 && remaining < 3 && count > 3) count -= 3 - remaining;
+      const height =
+        Math.max(count, continuation?.length ?? 0) * bodyLineHeight +
+        cellPadding * 2;
       doc
         .rect(margin, y, contentWidth, height)
         .fill(rowIndex % 2 ? colors.stripe : "#FFFFFF");
       doc.font("Regular").fontSize(bodySize).fillColor(colors.dark);
       let x = margin;
       cells.forEach((cell, index) => {
-        cell
-          .slice(offset, offset + count)
-          .forEach((line, lineIndex) =>
-            paintLine(
-              line,
-              x + cellPadding,
-              y + cellPadding + lineIndex * bodyLineHeight,
-              widths[index] - cellPadding * 2,
-              report.columns[index].align,
-            ),
-          );
+        const visibleLines =
+          index === 0 && continuation
+            ? continuation
+            : cell.slice(offset, offset + count);
+        visibleLines.forEach((line, lineIndex) =>
+          paintLine(
+            line,
+            x + cellPadding,
+            y + cellPadding + lineIndex * bodyLineHeight,
+            widths[index] - cellPadding * 2,
+            report.columns[index].align,
+          ),
+        );
         x += widths[index];
       });
       y += height;
@@ -321,20 +349,6 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       contentWidth - cellPadding * 2,
     );
     y += 45;
-  }
-
-  if (report.footerNote) {
-    y += 12;
-    doc.font("Regular").fontSize(8).fillColor(colors.muted);
-    const notes = wrapText(doc, report.footerNote, contentWidth);
-    for (const note of notes) {
-      if (y + lineHeight() > contentBottom) {
-        newPage();
-        doc.font("Regular").fontSize(8).fillColor(colors.muted);
-      }
-      paintLine(note, margin, y, contentWidth);
-      y += lineHeight();
-    }
   }
 
   const { count: pageCount } = doc.bufferedPageRange();

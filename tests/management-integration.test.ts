@@ -409,7 +409,8 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(Buffer.from(bytes.subarray(0, 5)).toString()).toBe("%PDF-");
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const document = await getDocument({ data: bytes }).promise;
+    const loadingTask = getDocument({ data: bytes });
+    const document = await loadingTask.promise;
     try {
       const pages = await Promise.all(
         Array.from({ length: document.numPages }, async (_, index) => {
@@ -429,7 +430,7 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       expect(text).not.toContain("Sensitive personal reason");
       expect(text).not.toContain("checkInLatitude");
     } finally {
-      await document.destroy();
+      await loadingTask.destroy();
     }
   });
 

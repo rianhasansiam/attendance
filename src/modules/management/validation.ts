@@ -222,6 +222,15 @@ export const paginationSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   q: z.string().trim().max(100).optional(),
 });
+export const driveCostFilterSchema = paginationSchema
+  .extend({
+    from: dateSchema.optional(),
+    to: dateSchema.optional(),
+  })
+  .refine(
+    (value) => !value.from || !value.to || value.to >= value.from,
+    "End date must be on or after start date.",
+  );
 export const reportFilterSchema = z
   .object({
     employeeId: idSchema.optional(),
@@ -231,7 +240,7 @@ export const reportFilterSchema = z
     status: attendanceStatusSchema.optional(),
     from: dateSchema.optional(),
     to: dateSchema.optional(),
-    format: z.enum(["json", "csv", "xlsx"]).default("json"),
+    format: z.enum(["json", "pdf"]).default("json"),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(50),
   })

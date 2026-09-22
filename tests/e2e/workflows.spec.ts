@@ -358,7 +358,7 @@ test("refresh clears a late reason reminder after the reason is saved in another
   ).toHaveCount(0);
 });
 
-test("super administrator manages departments and downloads both report formats", async ({
+test("super administrator manages departments and downloads a PDF report", async ({
   page,
   context,
 }) => {
@@ -384,14 +384,13 @@ test("super administrator manages departments and downloads both report formats"
   await expect(page.getByRole("status")).toContainText("saved");
   await page.getByLabel("Search departments").fill(name);
   await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
-  for (const format of ["csv", "xlsx"]) {
-    const response = await context.request.get(
-      `/api/admin/reports?format=${format}`,
-    );
-    expect(response.ok()).toBe(true);
-    expect(response.headers()["content-disposition"]).toContain(`.${format}`);
-    expect((await response.body()).byteLength).toBeGreaterThan(50);
-  }
+  const response = await context.request.get("/api/admin/reports?format=pdf");
+  expect(response.ok()).toBe(true);
+  expect(response.headers()["content-type"]).toBe("application/pdf");
+  expect(response.headers()["content-disposition"]).toContain(".pdf");
+  const pdf = await response.body();
+  expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  expect(pdf.byteLength).toBeGreaterThan(1000);
   const crossOrigin = await context.request.post("/api/admin/departments", {
     data: { name: "Forbidden cross-site" },
     headers: { origin: "https://untrusted.example" },

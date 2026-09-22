@@ -8,7 +8,10 @@ import {
   listRecords,
   resourceSchema,
 } from "@/modules/management/service";
-import { paginationSchema } from "@/modules/management/validation";
+import {
+  driveCostFilterSchema,
+  paginationSchema,
+} from "@/modules/management/validation";
 
 type Context = { params: Promise<{ resource: string }> };
 
@@ -16,12 +19,12 @@ export function GET(request: Request, context: Context) {
   return api(async () => {
     const actor = await requireAdmin();
     const resource = resourceSchema.parse((await context.params).resource);
+    const querySchema =
+      resource === "drive-costs" ? driveCostFilterSchema : paginationSchema;
     return listRecords(
       actor,
       resource,
-      paginationSchema.parse(
-        Object.fromEntries(new URL(request.url).searchParams),
-      ),
+      querySchema.parse(Object.fromEntries(new URL(request.url).searchParams)),
     );
   });
 }

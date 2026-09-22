@@ -30,6 +30,7 @@ import {
 } from "./ui";
 import { api, useResource } from "./use-resource";
 import { FormField, Modal } from "./resource-workspace";
+import { PdfDownloadButton } from "./pdf-download-button";
 
 type DashboardData = {
   totalEmployees: number;
@@ -326,22 +327,11 @@ export function AdminReports({
             : "Turn everyday records into a clearer picture."
         }
         action={
-          <div className="header-actions">
-            <a
-              className="button secondary"
-              href={`/api/admin/reports?${query}&format=csv`}
-            >
-              <Download size={15} />
-              CSV
-            </a>
-            <a
-              className="button"
-              href={`/api/admin/reports?${query}&format=xlsx`}
-            >
-              <Download size={15} />
-              Excel
-            </a>
-          </div>
+          <PdfDownloadButton
+            href={`/api/admin/reports?${new URLSearchParams({ ...filters, format: "pdf" })}`}
+            filename="attendance-report.pdf"
+            disabled={loading}
+          />
         }
       />
       <ErrorNotice message={error || (!editing ? actionError : "")} />

@@ -7,7 +7,16 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_TEST_DIST_DIR || ".next",
   poweredByHeader: false,
   output: "standalone",
-  serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg"],
+  serverExternalPackages: [
+    "@prisma/client",
+    "@prisma/adapter-pg",
+    "pg",
+    "pdfkit",
+  ],
+  outputFileTracingIncludes: {
+    "/api/admin/reports": ["./src/assets/fonts/*.ttf"],
+    "/api/admin/drive-costs/report": ["./src/assets/fonts/*.ttf"],
+  },
   async headers() {
     return [
       {

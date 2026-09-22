@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   offices: vi.fn(),
   employeeCount: vi.fn(),
   attendanceCount: vi.fn(),
+  pdf: vi.fn(),
 }));
+vi.mock("@/modules/reports/pdf", () => ({ createReportPdf: mocks.pdf }));
 vi.mock("@/lib/db", () => {
   const db = {
     attendance: { findMany: mocks.attendances, count: mocks.attendanceCount },
@@ -112,6 +114,7 @@ beforeEach(() => {
   mocks.offices.mockResolvedValue([office]);
   mocks.employeeCount.mockResolvedValue(1);
   mocks.attendanceCount.mockResolvedValue(0);
+  mocks.pdf.mockResolvedValue(new TextEncoder().encode("%PDF-1.7\nfixture"));
 });
 afterEach(() => vi.useRealTimers());
 
@@ -413,174 +416,94 @@ describe("filtered overtime totals", () => {
   });
 });
 
-describe("late reason exports", () => {
-  it("exports quoted, multiline reasons safely in CSV", async () => {
-    mocks.attendances.mockResolvedValue([
-      {
-        ...attendance(),
-        lateReason: '=Train delay, "signal issue"\nNo service.',
-      },
+describe("attendance PDF exports", () => {
+  it("exports all filtered records and exact overtime totals regardless of pagination", async () => {
+    const records = [
+      { ...attendance(employee(), "2025-01-05"), overtimeMinutes: 40 },
+      { ...attendance(employee(), "2025-01-06"), overtimeMinutes: 90 },
+      { ...attendance(employee(), "2025-01-07"), overtimeMinutes: null },
+    ];
+    mocks.attendances.mockResolvedValue(records);
+    const result = await getReport({
+      ...filters,
+      employeeId: "employee-1",
+      from: "2025-01-05",
+      to: "2025-01-07",
+      format: "pdf",
+      page: 2,
+      pageSize: 1,
+    });
+    if (!(result instanceof Response)) throw new Error("Expected PDF export");
+    expect(result.headers.get("Content-Type")).toBe("application/pdf");
+    expect(result.headers.get("Content-Disposition")).toContain(
+      "attendance-2025-01-05-to-2025-01-07.pdf",
+    );
+    expect(result.headers.get("Cache-Control")).toBe("no-store");
+    expect(await result.text()).toMatch(/^%PDF-/);
+    const document = mocks.pdf.mock.calls[0][0];
+    expect(document.title).toBe("Attendance report");
+    expect(document.subtitle).toContain("Employee: Employee (E001)");
+    expect(document.rows).toHaveLength(3);
+    expect(document.rows.map((row: string[]) => row[6])).toEqual([
+      "Unknown",
+      "1h 30m",
+      "0h 40m",
     ]);
-    const result = await getReport({ ...filters, format: "csv" });
-    if (!(result instanceof Response)) throw new Error("Expected CSV export");
-    const csv = await result.text();
-    expect(csv.split("\r\n")[0]).toContain('"Derived","Late reason"');
-    expect(csv).toContain('"\'=Train delay, ""signal issue""\nNo service."');
-    expect(csv).not.toContain("private-test-address");
+    expect(document.summary).toContainEqual({
+      label: "Total overtime",
+      value: "2h 10m (130 min)",
+    });
+    expect(document.footerNote).toContain(
+      "excludes 1 record with unknown overtime",
+    );
+    expect(mocks.attendances.mock.calls[0][0].where.employeeId).toBe(
+      "employee-1",
+    );
   });
 
-  it("keeps formula-like reasons as text in Excel", async () => {
-    vi.useRealTimers();
-    const reason = '=HYPERLINK("https://example.test", "Train delay")';
-    mocks.attendances.mockResolvedValue([
-      { ...attendance(), lateReason: reason },
-    ]);
-    const result = await getReport({
+  it("prints full late reasons as text and localizes punches to the shift timezone", async () => {
+    const record = {
+      ...attendance(),
+      lateReason: '=Train delay, "signal issue"\nNo service.',
+      shift: { ...shift, timezone: "Asia/Dhaka" },
+    };
+    mocks.attendances.mockResolvedValue([record]);
+    await getReport({
       ...filters,
       from: "2025-01-06",
       to: "2025-01-06",
-      format: "xlsx",
+      format: "pdf",
     });
-    if (!(result instanceof Response)) throw new Error("Expected Excel export");
-    const ExcelJS = await import("exceljs");
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await result.arrayBuffer());
-    const sheet = workbook.worksheets[0];
-    expect(sheet.getCell("O1").value).toBe("Late reason");
-    expect(sheet.getCell("O2").value).toBe(reason);
-    expect(sheet.getCell("O2").type).toBe(ExcelJS.ValueType.String);
-  });
-});
-
-describe("overtime exports", () => {
-  it("exports overtime as decimal hours in CSV", async () => {
-    mocks.attendances.mockResolvedValue([
-      { ...attendance(), overtimeMinutes: 90 },
-    ]);
-    const result = await getReport({
-      ...filters,
-      from: "2025-01-06",
-      to: "2025-01-06",
-      format: "csv",
-    });
-    if (!(result instanceof Response)) throw new Error("Expected CSV export");
-    const [header, row] = (await result.text()).split("\r\n");
-    expect(header).toContain('"Worked minutes","Overtime hours","Derived"');
-    expect(row).toContain('"450","1.5","No"');
-    expect(header).toContain('"Overtime minutes"');
-    expect(row).toMatch(/,"90"$/);
+    const document = mocks.pdf.mock.calls[0][0];
+    expect(document.rows[0][3]).toBe("2025-01-06\n15:30");
+    expect(document.rows[0][4]).toBe("2025-01-06\n23:00");
+    expect(document.rows[0][9]).toBe(record.lateReason);
+    expect(JSON.stringify(document)).not.toContain("private-test-address");
+    expect(JSON.stringify(document)).not.toContain("checkInLatitude");
   });
 
-  it("preserves minute totals when summing exported CSV hours", async () => {
-    mocks.attendances.mockResolvedValue(
-      ["2025-01-04", "2025-01-05", "2025-01-06"].map((day) => ({
-        ...attendance(employee(), day),
-        overtimeMinutes: 1,
-      })),
+  it("gives derived days zero overtime and identifies their source", async () => {
+    await getReport({ ...filters, format: "pdf" });
+    const document = mocks.pdf.mock.calls[0][0];
+    expect(document.rows).toHaveLength(7);
+    expect(document.rows[0][6]).toBe("0h 0m");
+    expect(document.rows[0][8]).toBe("ABSENT\nScheduled day");
+  });
+
+  it("creates an empty report with its date range and zero totals", async () => {
+    mocks.attendances.mockResolvedValue([]);
+    mocks.employees.mockResolvedValue([]);
+    await getReport({ ...filters, format: "pdf" });
+    expect(mocks.pdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subtitle: ["Date range: 2025-01-01 to 2025-01-07"],
+        rows: [],
+        summary: expect.arrayContaining([
+          { label: "Records", value: "0" },
+          { label: "Total overtime", value: "0h 0m (0 min)" },
+        ]),
+      }),
     );
-    const result = await getReport({
-      ...filters,
-      from: "2025-01-04",
-      to: "2025-01-06",
-      format: "csv",
-    });
-    if (!(result instanceof Response)) throw new Error("Expected CSV export");
-    const rows = (await result.text())
-      .split("\r\n")
-      .slice(1)
-      .map((row) => row.slice(1, -1).split('","'));
-    expect(rows).toHaveLength(3);
-    expect(
-      rows.reduce((sum, row) => sum + Number(row[12]), 0) * 60,
-    ).toBeCloseTo(3, 10);
-    expect(rows.reduce((sum, row) => sum + Number(row[15]), 0)).toBe(3);
-  });
-
-  it("leaves unknown historical overtime blank in CSV", async () => {
-    mocks.attendances.mockResolvedValue([
-      { ...attendance(), overtimeMinutes: null },
-    ]);
-    const result = await getReport({
-      ...filters,
-      from: "2025-01-06",
-      to: "2025-01-06",
-      format: "csv",
-    });
-    if (!(result instanceof Response)) throw new Error("Expected CSV export");
-    const [, row] = (await result.text()).split("\r\n");
-    expect(row).toContain('"450","","No"');
-    expect(row).toMatch(/,""$/);
-  });
-
-  it("exports numeric overtime hours in Excel and zero for derived days", async () => {
-    vi.useRealTimers();
-    mocks.attendances.mockResolvedValue([
-      { ...attendance(), overtimeMinutes: 91 },
-    ]);
-    const result = await getReport({ ...filters, format: "xlsx" });
-    if (!(result instanceof Response)) throw new Error("Expected Excel export");
-    const ExcelJS = await import("exceljs");
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await result.arrayBuffer());
-    const sheet = workbook.worksheets[0];
-    expect(sheet.getCell("M1").value).toBe("Overtime hours");
-    expect(sheet.getCell("M2").value).toBe(0);
-    expect(sheet.getCell("M3").value).toBe(91 / 60);
-    expect(sheet.getCell("M3").type).toBe(ExcelJS.ValueType.Number);
-    expect(sheet.getCell("M3").numFmt).toBe("0.00");
-    expect(sheet.getCell("P1").value).toBe("Overtime minutes");
-    expect(sheet.getCell("P2").value).toBe(0);
-    expect(sheet.getCell("P3").value).toBe(91);
-  });
-
-  it("preserves minute totals when summing exported Excel hours", async () => {
-    vi.useRealTimers();
-    mocks.attendances.mockResolvedValue(
-      ["2025-01-04", "2025-01-05", "2025-01-06"].map((day) => ({
-        ...attendance(employee(), day),
-        overtimeMinutes: 1,
-      })),
-    );
-    const result = await getReport({
-      ...filters,
-      from: "2025-01-04",
-      to: "2025-01-06",
-      format: "xlsx",
-    });
-    if (!(result instanceof Response)) throw new Error("Expected Excel export");
-    const ExcelJS = await import("exceljs");
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await result.arrayBuffer());
-    const sheet = workbook.worksheets[0];
-    const hours = [2, 3, 4].reduce(
-      (sum, row) => sum + Number(sheet.getCell(`M${row}`).value),
-      0,
-    );
-    const minutes = [2, 3, 4].reduce(
-      (sum, row) => sum + Number(sheet.getCell(`P${row}`).value),
-      0,
-    );
-    expect(hours * 60).toBeCloseTo(3, 10);
-    expect(minutes).toBe(3);
-  });
-
-  it("leaves unknown historical overtime blank in Excel", async () => {
-    vi.useRealTimers();
-    mocks.attendances.mockResolvedValue([
-      { ...attendance(), overtimeMinutes: null },
-    ]);
-    const result = await getReport({
-      ...filters,
-      from: "2025-01-06",
-      to: "2025-01-06",
-      format: "xlsx",
-    });
-    if (!(result instanceof Response)) throw new Error("Expected Excel export");
-    const ExcelJS = await import("exceljs");
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await result.arrayBuffer());
-    expect(workbook.worksheets[0].getCell("M2").value).toBe("");
-    expect(workbook.worksheets[0].getCell("P2").value).toBe("");
   });
 });
 

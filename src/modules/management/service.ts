@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
+import { driveCostWhere } from "@/modules/drive-costs/filters";
 import {
   createEmployee,
   employeeInclude,
@@ -28,12 +29,13 @@ import {
 } from "./workflows";
 import {
   deviceUpdateSchema,
+  driveCostFilterSchema,
   employeeSchema,
   employeeUpdateSchema,
   leaveReviewSchema,
-  paginationSchema,
   userSchema,
   userUpdateSchema,
+  utcDate,
 } from "./validation";
 
 export const resourceSchema = z.enum([
@@ -68,7 +70,7 @@ const employeeName = (q?: string) =>
 export async function listRecords(
   actor: Actor,
   resource: Resource,
-  query: z.infer<typeof paginationSchema>,
+  query: z.infer<typeof driveCostFilterSchema>,
 ) {
   if (resource === "users" || resource === "settings") assertSuperAdmin(actor);
   const { page, pageSize, q } = query;
@@ -194,24 +196,7 @@ export async function listRecords(
       ]);
       break;
     case "drive-costs": {
-      const where = q
-        ? {
-            OR: [
-              {
-                destinationFrom: {
-                  contains: q,
-                  mode: "insensitive" as const,
-                },
-              },
-              {
-                destinationTo: {
-                  contains: q,
-                  mode: "insensitive" as const,
-                },
-              },
-            ],
-          }
-        : {};
+      const where = driveCostWhere(query);
       result = await Promise.all([
         db.driveCost.findMany({
           where,

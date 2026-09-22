@@ -8,7 +8,6 @@ import {
   getShiftWindow,
   shiftDate,
 } from "@/modules/shifts/calculations";
-import { toCsv } from "./export";
 
 type Filters = z.infer<typeof reportFilterSchema>;
 const officeSelect = {
@@ -520,49 +519,9 @@ export async function getAdminDashboard(now = new Date()) {
   };
 }
 
-const columns = [
-  "Date",
-  "Employee ID",
-  "Employee",
-  "Email",
-  "Department",
-  "Office",
-  "Shift",
-  "Status",
-  "Check-in (UTC)",
-  "Check-out (UTC)",
-  "Late minutes",
-  "Worked minutes",
-  "Overtime hours",
-  "Derived",
-  "Late reason",
-  "Overtime minutes",
-];
-function exportRows(records: ReportRecord[]) {
-  return records.map((row) => [
-    row.attendanceDate.toISOString().slice(0, 10),
-    row.employee.employeeCode,
-    row.employee.user.name ?? "",
-    row.employee.user.email,
-    row.employee.department?.name ?? "",
-    row.office.name,
-    row.shift.name,
-    row.status,
-    row.checkInAt?.toISOString() ?? "",
-    row.checkOutAt?.toISOString() ?? "",
-    row.lateMinutes,
-    row.workedMinutes,
-    // Keep the underlying precision so adding exported hours does not compound
-    // per-record rounding. The minutes column also provides an exact total.
-    row.overtimeMinutes === null ? "" : row.overtimeMinutes / 60,
-    row.derived ? "Yes" : "No",
-    row.lateReason ?? "",
-    row.overtimeMinutes ?? "",
-  ]);
-}
-
 export async function getReport(filters: Filters) {
-  const entries = await reportEntries(filters);
+  const now = new Date();
+  const entries = await reportEntries(filters, now);
   if (filters.format === "json") {
     const summary = { overtimeMinutes: 0, unknownOvertimeRecords: 0 };
     for (const { record } of entries) {
@@ -582,54 +541,12 @@ export async function getReport(filters: Filters) {
       pageSize: filters.pageSize,
     };
   }
+  if (entries.length > 10000)
+    throw new DomainError(
+      "REPORT_TOO_LARGE",
+      "PDF reports support up to 10,000 records. Narrow the date range or filters.",
+    );
   const records = await hydrateEntries(entries);
-  const filename = `attendance-${new Date().toISOString().slice(0, 10)}`;
-  if (filters.format === "csv")
-    return new Response(toCsv(columns, exportRows(records)), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}.csv"`,
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
-  const ExcelJS = await import("exceljs");
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Attendance", {
-    views: [{ state: "frozen", ySplit: 1 }],
-  });
-  sheet.addRow(columns);
-  for (const row of exportRows(records)) sheet.addRow(row);
-  sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-  sheet.getRow(1).fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FF163C36" },
-  };
-  sheet.columns.forEach((column, index) => {
-    column.width =
-      columns[index] === "Late reason"
-        ? 48
-        : index === 3
-          ? 32
-          : index === 8 || index === 9
-            ? 26
-            : 20;
-  });
-  sheet.getColumn(columns.indexOf("Late reason") + 1).alignment = {
-    wrapText: true,
-    vertical: "top",
-  };
-  sheet.getColumn(columns.indexOf("Overtime hours") + 1).numFmt = "0.00";
-  sheet.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: Math.max(records.length + 1, 1), column: columns.length },
-  };
-  const buffer = await workbook.xlsx.writeBuffer();
-  return new Response(new Uint8Array(buffer), {
-    headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}.xlsx"`,
-    },
-  });
+  const { attendanceReportPdf } = await import("./attendance-pdf");
+  return attendanceReportPdf(records, filters, now);
 }

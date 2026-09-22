@@ -401,17 +401,36 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
         new Date("2025-01-08T09:10:00Z"),
       ),
     ).toHaveLength(0);
-    const csv = await getReport({ ...filters, format: "csv" });
-    expect(csv).toBeInstanceOf(Response);
-    expect(await (csv as Response).text()).toContain("'=1+1");
-    const xlsx = await getReport({ ...filters, format: "xlsx" });
-    const ExcelJS = await import("exceljs");
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await (xlsx as Response).arrayBuffer());
-    expect(workbook.worksheets[0].getCell("C2").value).toBe("=1+1");
-    expect(workbook.worksheets[0].getCell("C2").type).toBe(
-      ExcelJS.ValueType.String,
-    );
+    const pdf = await getReport({ ...filters, format: "pdf" });
+    expect(pdf).toBeInstanceOf(Response);
+    const response = pdf as Response;
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toContain(".pdf");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(Buffer.from(bytes.subarray(0, 5)).toString()).toBe("%PDF-");
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const document = await getDocument({ data: bytes }).promise;
+    try {
+      const pages = await Promise.all(
+        Array.from({ length: document.numPages }, async (_, index) => {
+          const page = await document.getPage(index + 1);
+          const text = await page.getTextContent();
+          return text.items
+            .map((item) => ("str" in item ? item.str : ""))
+            .join(" ");
+        }),
+      );
+      const text = pages.join(" ");
+      expect(text).toContain("=1+1");
+      expect(text).toMatch(/absent/i);
+      expect(text).toMatch(/holiday/i);
+      expect(text).toMatch(/weekend/i);
+      expect(text).toMatch(/leave/i);
+      expect(text).not.toContain("Sensitive personal reason");
+      expect(text).not.toContain("checkInLatitude");
+    } finally {
+      await document.destroy();
+    }
   });
 
   it("includes the previous calendar date's ongoing overnight shift in current dashboard totals", async () => {

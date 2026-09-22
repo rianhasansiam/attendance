@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Modal } from "./modal";
+import { PdfDownloadButton } from "./pdf-download-button";
 import {
   ErrorNotice,
   Loading,
@@ -127,13 +128,19 @@ function formatDateLabel(dateString: string): string {
 export function DriveCostWorkspace() {
   const [query, setQuery] = useState("");
   const search = useDebouncedValue(query);
-  const [pagination, setPagination] = useState({ query: "", page: 1 });
-  const page = pagination.query === search ? pagination.page : 1;
+  const [dateDraft, setDateDraft] = useState({ from: "", to: "" });
+  const [dateFilters, setDateFilters] = useState({ from: "", to: "" });
+  const params = new URLSearchParams({ q: search });
+  if (dateFilters.from) params.set("from", dateFilters.from);
+  if (dateFilters.to) params.set("to", dateFilters.to);
+  const filterKey = params.toString();
+  const [pagination, setPagination] = useState({ filterKey: "", page: 1 });
+  const page = pagination.filterKey === filterKey ? pagination.page : 1;
   const [editing, setEditing] = useState<DriveCostDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
-  const requestUrl = `/api/admin/drive-costs?page=${page}&pageSize=${PAGE_SIZE}&q=${encodeURIComponent(search)}`;
+  const requestUrl = `/api/admin/drive-costs?page=${page}&pageSize=${PAGE_SIZE}&${filterKey}`;
   const { data, error, loading, refresh } =
     useResource<DriveCostData>(requestUrl);
 
@@ -148,7 +155,21 @@ export function DriveCostWorkspace() {
   const [calcOpen, setCalcOpen] = useState(false);
 
   function setPage(nextPage: number) {
-    setPagination({ query: search, page: nextPage });
+    setPagination({ filterKey, page: nextPage });
+  }
+
+  function applyDateFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDateFilters({ ...dateDraft });
+    setPage(1);
+  }
+
+  function resetFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setQuery("");
+    setDateDraft({ from: "", to: "" });
+    setDateFilters({ from: "", to: "" });
+    setPage(1);
   }
 
   function openNew() {
@@ -288,6 +309,11 @@ export function DriveCostWorkspace() {
         description="Calculate and keep a clear record of every drive."
         action={
           <div className="page-header-actions">
+            <PdfDownloadButton
+              href={`/api/admin/drive-costs/report?${filterKey}`}
+              filename="drive-cost-report.pdf"
+              disabled={loading}
+            />
             <button
               className="button secondary"
               onClick={() => setCalcOpen(!calcOpen)}
@@ -389,6 +415,11 @@ export function DriveCostWorkspace() {
 
           {calcResult && (
             <div className="calc-results">
+              <PdfDownloadButton
+                href={`/api/admin/drive-costs/report?${new URLSearchParams({ from: calcResult.dateFrom, to: calcResult.dateTo })}`}
+                filename="drive-cost-report.pdf"
+                disabled={calcBusy}
+              />
               <div className="calc-date-label">
                 {calcResult.isSingleDay
                   ? formatDateLabel(calcResult.dateFrom)
@@ -444,6 +475,57 @@ export function DriveCostWorkspace() {
       )}
 
       <section className="card">
+        <form
+          className="drive-cost-date-filters"
+          aria-label="Filter drive costs by date"
+          onSubmit={applyDateFilters}
+          onReset={resetFilters}
+        >
+          <div className="field">
+            <label htmlFor="drive-cost-filter-from">From date</label>
+            <input
+              id="drive-cost-filter-from"
+              name="from"
+              type="date"
+              disabled={loading}
+              value={dateDraft.from}
+              max={dateDraft.to || undefined}
+              onChange={(event) =>
+                setDateDraft({ ...dateDraft, from: event.target.value })
+              }
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="drive-cost-filter-to">To date</label>
+            <input
+              id="drive-cost-filter-to"
+              name="to"
+              type="date"
+              disabled={loading}
+              value={dateDraft.to}
+              min={dateDraft.from || undefined}
+              onChange={(event) =>
+                setDateDraft({ ...dateDraft, to: event.target.value })
+              }
+            />
+          </div>
+          <div className="buttons">
+            <button className="button" type="submit" disabled={loading}>
+              Apply filters
+            </button>
+            <button
+              className="button secondary"
+              type="reset"
+              disabled={loading}
+            >
+              Reset filters
+            </button>
+          </div>
+          <p className="muted">
+            Use the same date in both fields for a single day. Leave a field
+            blank for an open-ended range.
+          </p>
+        </form>
         <div className="toolbar">
           <div className="search-field">
             <Search size={16} />
@@ -654,4 +736,3 @@ export function DriveCostWorkspace() {
     </>
   );
 }
-

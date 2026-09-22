@@ -9,7 +9,6 @@ import {
   officeSchema,
   shiftSchema,
 } from "@/modules/management/validation";
-import { safeCell, toCsv } from "@/modules/reports/export";
 
 describe("management authorization and validation", () => {
   it("prevents administrator privilege escalation and editing elevated accounts", () => {
@@ -252,23 +251,5 @@ describe("attendance corrections", () => {
         now,
       ),
     ).toThrow();
-  });
-});
-
-describe("safe spreadsheet exports", () => {
-  it.each([
-    '=HYPERLINK("https://example.com")',
-    "+SUM(A1)",
-    "-1+2",
-    "@SUM(A1)",
-    "\t=1+1",
-    " \n=1+1",
-  ])("neutralizes formula-like cell %j", (input) => {
-    expect(safeCell(input)).toBe(`'${input}`);
-  });
-  it("quotes commas, newlines and double quotes without altering ordinary values", () => {
-    expect(toCsv(["Name"], [['Alice, "Smith"'], ["Line\nTwo"]])).toBe(
-      '\uFEFF"Name"\r\n"Alice, ""Smith"""\r\n"Line\nTwo"',
-    );
   });
 });

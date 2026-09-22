@@ -269,6 +269,7 @@ model DriveCost {
   destinationFrom String @db.VarChar(160)
   destinationTo String @db.VarChar(160)
   kilometers Decimal @db.Decimal(10, 2)
+  isRoundTrip Boolean @default(false)
   rateType DriveCostRateType
   ratePerKilometer Decimal @db.Decimal(10, 2)
   totalCost Decimal @db.Decimal(12, 2)

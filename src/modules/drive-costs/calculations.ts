@@ -12,6 +12,7 @@ export type { DriveCostRateType } from "./rates";
 export function calculateDriveCost(
   kilometers: number,
   rateType: DriveCostRateType,
+  isRoundTrip = false,
 ) {
   const normalizedKilometers = new Prisma.Decimal(
     kilometers.toString(),
@@ -21,6 +22,9 @@ export function calculateDriveCost(
   return {
     kilometers: normalizedKilometers.toFixed(2),
     ratePerKilometer: ratePerKilometer.toFixed(2),
-    totalCost: normalizedKilometers.mul(ratePerKilometer).toFixed(2),
+    totalCost: normalizedKilometers
+      .mul(ratePerKilometer)
+      .mul(isRoundTrip ? 2 : 1)
+      .toFixed(2),
   };
 }

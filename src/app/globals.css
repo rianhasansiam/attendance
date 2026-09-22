@@ -430,6 +430,18 @@ tbody tr:last-child td {
 tbody tr:hover {
   background: #fcfdfb;
 }
+tbody tr.date-group-0 {
+  background: #dcebe1;
+}
+tbody tr.date-group-1 {
+  background: #dce7f8;
+}
+tbody tr.date-group-0:hover {
+  background: #cfe2d6;
+}
+tbody tr.date-group-1:hover {
+  background: #cfdef4;
+}
 .align-right {
   text-align: right;
 }

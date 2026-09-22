@@ -44,6 +44,23 @@ describe("drive cost calculations", () => {
       totalCost: "12.50",
     });
   });
+
+  it.each([
+    ["IN_TIME", "12.50"],
+    ["OVER_TIME", "25.00"],
+  ] as const)(
+    "doubles %s round-trip cost while preserving one-way kilometers",
+    (rateType, totalCost) => {
+      expect(calculateDriveCost(1.25, rateType, true)).toEqual({
+        kilometers: "1.25",
+        ratePerKilometer: DRIVE_COST_RATES[rateType],
+        totalCost,
+      });
+      expect(calculateDriveCost(1.25, rateType, false)).toEqual(
+        calculateDriveCost(1.25, rateType),
+      );
+    },
+  );
 });
 
 describe("drive cost validation", () => {
@@ -54,8 +71,23 @@ describe("drive cost validation", () => {
         destinationFrom: "  Dhaka office  ",
         destinationTo: "  Gazipur warehouse  ",
       }),
-    ).toEqual(validDriveCost);
+    ).toEqual({ ...validDriveCost, isRoundTrip: false });
   });
+
+  it("accepts an explicit round-trip flag", () => {
+    expect(
+      driveCostSchema.parse({ ...validDriveCost, isRoundTrip: true }),
+    ).toEqual({ ...validDriveCost, isRoundTrip: true });
+  });
+
+  it.each(["true", "false", 1, 2, null])(
+    "rejects a non-boolean trip flag %s",
+    (isRoundTrip) => {
+      expect(
+        driveCostSchema.safeParse({ ...validDriveCost, isRoundTrip }).success,
+      ).toBe(false);
+    },
+  );
 
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
     "rejects an invalid kilometer value %s",

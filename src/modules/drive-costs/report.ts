@@ -11,6 +11,7 @@ const reportSelect = {
   destinationFrom: true,
   destinationTo: true,
   kilometers: true,
+  isRoundTrip: true,
   rateType: true,
   ratePerKilometer: true,
   totalCost: true,
@@ -36,7 +37,9 @@ export async function getDriveCostReport(filters: DriveCostFilters) {
   let inTimeCost = new Prisma.Decimal(0);
   let overTimeCost = new Prisma.Decimal(0);
   for (const record of records) {
-    kilometers = kilometers.add(record.kilometers);
+    kilometers = kilometers.add(
+      record.kilometers.mul(record.isRoundTrip ? 2 : 1),
+    );
     totalCost = totalCost.add(record.totalCost);
     if (record.rateType === "IN_TIME")
       inTimeCost = inTimeCost.add(record.totalCost);
@@ -66,24 +69,26 @@ export async function getDriveCostReport(filters: DriveCostFilters) {
     ],
     columns: [
       { label: "Date", width: 78 },
-      { label: "From", width: 159 },
-      { label: "To", width: 159 },
-      { label: "Rate type", width: 72 },
-      { label: "Kilometers", width: 75, align: "right" },
-      { label: "Rate (BDT/km)", width: 88, align: "right" },
-      { label: "Total (BDT)", width: 91, align: "right" },
+      { label: "From", width: 120 },
+      { label: "To", width: 120 },
+      { label: "Trip type", width: 99 },
+      { label: "Rate type", width: 65 },
+      { label: "Total km", width: 66, align: "right" },
+      { label: "Rate (BDT/km)", width: 85, align: "right" },
+      { label: "Total (BDT)", width: 89, align: "right" },
     ],
     rows: records.map((record) => [
       record.date.toISOString().slice(0, 10),
       record.destinationFrom,
       record.destinationTo,
+      record.isRoundTrip ? "Round trip (×2)" : "One way",
       record.rateType === "IN_TIME" ? "In-time" : "Overtime",
-      record.kilometers.toFixed(2),
+      record.kilometers.mul(record.isRoundTrip ? 2 : 1).toFixed(2),
       record.ratePerKilometer.toFixed(2),
       record.totalCost.toFixed(2),
     ]),
     footerNote:
-      "All matching trips are included. Amounts use each trip's saved rate and are shown in Bangladeshi taka (BDT).",
+      "All matching trips are included. Round-trip kilometers include the return journey (×2). Amounts use each trip's saved rate and are shown in Bangladeshi taka (BDT).",
   });
   const filenamePeriod =
     from && to

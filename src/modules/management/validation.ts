@@ -146,6 +146,7 @@ export const driveCostSchema = z
     date: dateSchema,
     destinationFrom: label,
     destinationTo: label,
+    isRoundTrip: z.boolean().default(false),
     kilometers: z
       .number()
       .finite()

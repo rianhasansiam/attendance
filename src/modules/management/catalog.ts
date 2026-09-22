@@ -284,11 +284,16 @@ export async function saveHoliday(actor: Actor, raw: unknown, id?: string) {
 
 export async function saveDriveCost(actor: Actor, raw: unknown, id?: string) {
   const input = driveCostSchema.parse(raw);
-  const calculation = calculateDriveCost(input.kilometers, input.rateType);
+  const calculation = calculateDriveCost(
+    input.kilometers,
+    input.rateType,
+    input.isRoundTrip,
+  );
   const data = {
     date: utcDate(input.date),
     destinationFrom: input.destinationFrom,
     destinationTo: input.destinationTo,
+    isRoundTrip: input.isRoundTrip,
     rateType: input.rateType,
     ...calculation,
   };

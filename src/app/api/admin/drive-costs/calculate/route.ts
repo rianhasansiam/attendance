@@ -30,53 +30,47 @@ export function GET(request: Request) {
       orderBy: [{ date: "asc" }, { id: "asc" }],
     });
 
-    const aggregation = await db.driveCost.aggregate({
-      where,
-      _sum: { totalCost: true, kilometers: true },
-      _count: true,
+    // Sum the displayed records so detail and totals share one snapshot.
+    const totals = {
+      IN_TIME: {
+        records: 0,
+        kilometers: new Prisma.Decimal(0),
+        totalCost: new Prisma.Decimal(0),
+      },
+      OVER_TIME: {
+        records: 0,
+        kilometers: new Prisma.Decimal(0),
+        totalCost: new Prisma.Decimal(0),
+      },
+    };
+    for (const record of records) {
+      const group = totals[record.rateType];
+      group.records += 1;
+      group.kilometers = group.kilometers.add(
+        record.kilometers.mul(record.isRoundTrip ? 2 : 1),
+      );
+      group.totalCost = group.totalCost.add(record.totalCost);
+    }
+    const formatGroup = (group: (typeof totals)["IN_TIME"]) => ({
+      records: group.records,
+      kilometers: group.kilometers.toFixed(2),
+      totalCost: group.totalCost.toFixed(2),
     });
-
-    // Group totals by rate type
-    const byRateType = await db.driveCost.groupBy({
-      by: ["rateType"],
-      where,
-      _sum: { totalCost: true, kilometers: true },
-      _count: true,
-    });
-
-    const inTimeGroup = byRateType.find((g) => g.rateType === "IN_TIME");
-    const overTimeGroup = byRateType.find((g) => g.rateType === "OVER_TIME");
 
     return {
       dateFrom: from,
       dateTo: to || from,
       isSingleDay: !to || to === from,
-      totalRecords: aggregation._count,
-      totalKilometers: new Prisma.Decimal(
-        aggregation._sum.kilometers?.toString() || "0",
-      ).toFixed(2),
-      totalCost: new Prisma.Decimal(
-        aggregation._sum.totalCost?.toString() || "0",
-      ).toFixed(2),
+      totalRecords: records.length,
+      totalKilometers: totals.IN_TIME.kilometers
+        .add(totals.OVER_TIME.kilometers)
+        .toFixed(2),
+      totalCost: totals.IN_TIME.totalCost
+        .add(totals.OVER_TIME.totalCost)
+        .toFixed(2),
       breakdown: {
-        inTime: {
-          records: inTimeGroup?._count || 0,
-          kilometers: new Prisma.Decimal(
-            inTimeGroup?._sum.kilometers?.toString() || "0",
-          ).toFixed(2),
-          totalCost: new Prisma.Decimal(
-            inTimeGroup?._sum.totalCost?.toString() || "0",
-          ).toFixed(2),
-        },
-        overTime: {
-          records: overTimeGroup?._count || 0,
-          kilometers: new Prisma.Decimal(
-            overTimeGroup?._sum.kilometers?.toString() || "0",
-          ).toFixed(2),
-          totalCost: new Prisma.Decimal(
-            overTimeGroup?._sum.totalCost?.toString() || "0",
-          ).toFixed(2),
-        },
+        inTime: formatGroup(totals.IN_TIME),
+        overTime: formatGroup(totals.OVER_TIME),
       },
       records,
     };

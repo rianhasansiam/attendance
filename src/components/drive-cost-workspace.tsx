@@ -34,6 +34,7 @@ type DriveCostRecord = {
   destinationFrom: string;
   destinationTo: string;
   kilometers: string | number;
+  isRoundTrip?: boolean;
   rateType: RateType;
   ratePerKilometer: string | number;
   totalCost: string | number;
@@ -52,6 +53,7 @@ type DriveCostDraft = {
   destinationFrom: string;
   destinationTo: string;
   kilometers: string;
+  isRoundTrip: boolean;
   rateType: RateType;
 };
 
@@ -113,6 +115,7 @@ function draftFromRow(row: DataRow): DriveCostDraft {
     destinationFrom: String(row.destinationFrom ?? ""),
     destinationTo: String(row.destinationTo ?? ""),
     kilometers: String(row.kilometers ?? ""),
+    isRoundTrip: row.isRoundTrip === true,
     rateType: row.rateType === "OVER_TIME" ? "OVER_TIME" : "IN_TIME",
   };
 }
@@ -180,6 +183,7 @@ export function DriveCostWorkspace() {
       destinationFrom: "",
       destinationTo: "",
       kilometers: "",
+      isRoundTrip: false,
       rateType: "IN_TIME",
     });
   }
@@ -209,6 +213,7 @@ export function DriveCostWorkspace() {
           destinationFrom: editing.destinationFrom.trim(),
           destinationTo: editing.destinationTo.trim(),
           kilometers,
+          isRoundTrip: editing.isRoundTrip,
           rateType: editing.rateType,
         }),
       });
@@ -283,19 +288,26 @@ export function DriveCostWorkspace() {
   const tableRows: DataRow[] = (data?.items || []).map((record) => ({
     ...record,
     rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
-    kilometersLabel: formatNumber(record.kilometers),
+    tripTypeLabel: record.isRoundTrip ? "Round trip (×2)" : "One way",
+    kilometersLabel: formatNumber(
+      numberValue(record.kilometers) * (record.isRoundTrip ? 2 : 1),
+    ),
     rateLabel: `${taka(record.ratePerKilometer)} / km`,
     totalLabel: taka(record.totalCost),
   }));
   const selectedRate = editing ? RATES[editing.rateType] : RATES.IN_TIME;
   const previewKilometers = numberValue(editing?.kilometers);
-  const previewTotal = previewKilometers * selectedRate;
+  const previewTotal =
+    previewKilometers * selectedRate * (editing?.isRoundTrip ? 2 : 1);
 
   const calcRecordRows: DataRow[] = (calcResult?.records || []).map(
     (record) => ({
       ...record,
       rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
-      kilometersLabel: formatNumber(record.kilometers),
+      tripTypeLabel: record.isRoundTrip ? "Round trip (×2)" : "One way",
+      kilometersLabel: formatNumber(
+        numberValue(record.kilometers) * (record.isRoundTrip ? 2 : 1),
+      ),
       rateLabel: `${taka(record.ratePerKilometer)} / km`,
       totalLabel: taka(record.totalCost),
     }),
@@ -344,7 +356,9 @@ export function DriveCostWorkspace() {
               <Calculator size={18} />
               <div>
                 <h3>Cost Calculator</h3>
-                <p>Calculate total drive costs for a single day or a date range.</p>
+                <p>
+                  Calculate total drive costs for a single day or a date range.
+                </p>
               </div>
             </div>
           </div>
@@ -428,7 +442,10 @@ export function DriveCostWorkspace() {
 
               {calcResult.totalRecords === 0 ? (
                 <div className="calc-empty">
-                  <p>No drive costs found for this {calcResult.isSingleDay ? "date" : "date range"}.</p>
+                  <p>
+                    No drive costs found for this{" "}
+                    {calcResult.isSingleDay ? "date" : "date range"}.
+                  </p>
                 </div>
               ) : (
                 <>
@@ -437,17 +454,40 @@ export function DriveCostWorkspace() {
                     <div className="calc-summary-card calc-total">
                       <small>Grand total</small>
                       <strong>{taka(calcResult.totalCost)}</strong>
-                      <p>{calcResult.totalRecords} trip{calcResult.totalRecords !== 1 ? "s" : ""} · {formatNumber(calcResult.totalKilometers)} km</p>
+                      <p>
+                        {calcResult.totalRecords} trip
+                        {calcResult.totalRecords !== 1 ? "s" : ""} ·{" "}
+                        {formatNumber(calcResult.totalKilometers)} km
+                      </p>
                     </div>
                     <div className="calc-summary-card">
                       <small>In time</small>
-                      <strong>{taka(calcResult.breakdown.inTime.totalCost)}</strong>
-                      <p>{calcResult.breakdown.inTime.records} trip{calcResult.breakdown.inTime.records !== 1 ? "s" : ""} · {formatNumber(calcResult.breakdown.inTime.kilometers)} km</p>
+                      <strong>
+                        {taka(calcResult.breakdown.inTime.totalCost)}
+                      </strong>
+                      <p>
+                        {calcResult.breakdown.inTime.records} trip
+                        {calcResult.breakdown.inTime.records !== 1
+                          ? "s"
+                          : ""} ·{" "}
+                        {formatNumber(calcResult.breakdown.inTime.kilometers)}{" "}
+                        km
+                      </p>
                     </div>
                     <div className="calc-summary-card">
                       <small>Over time</small>
-                      <strong>{taka(calcResult.breakdown.overTime.totalCost)}</strong>
-                      <p>{calcResult.breakdown.overTime.records} trip{calcResult.breakdown.overTime.records !== 1 ? "s" : ""} · {formatNumber(calcResult.breakdown.overTime.kilometers)} km</p>
+                      <strong>
+                        {taka(calcResult.breakdown.overTime.totalCost)}
+                      </strong>
+                      <p>
+                        {calcResult.breakdown.overTime.records} trip
+                        {calcResult.breakdown.overTime.records !== 1
+                          ? "s"
+                          : ""}{" "}
+                        ·{" "}
+                        {formatNumber(calcResult.breakdown.overTime.kilometers)}{" "}
+                        km
+                      </p>
                     </div>
                   </div>
 
@@ -456,12 +496,18 @@ export function DriveCostWorkspace() {
                     <h4>Trip details</h4>
                     <Table
                       rows={calcRecordRows}
+                      dateGroupKey="date"
                       columns={[
                         { key: "date", label: "Date", format: "date" },
                         { key: "destinationFrom", label: "From" },
                         { key: "destinationTo", label: "To" },
-                        { key: "rateTypeLabel", label: "Rate type", format: "badge" },
-                        { key: "kilometersLabel", label: "Km" },
+                        { key: "tripTypeLabel", label: "Trip type" },
+                        {
+                          key: "rateTypeLabel",
+                          label: "Rate type",
+                          format: "badge",
+                        },
+                        { key: "kilometersLabel", label: "Total km" },
                         { key: "rateLabel", label: "Rate" },
                         { key: "totalLabel", label: "Total" },
                       ]}
@@ -546,12 +592,14 @@ export function DriveCostWorkspace() {
         ) : (
           <Table
             rows={tableRows}
+            dateGroupKey="date"
             columns={[
               { key: "date", label: "Date", format: "date" },
               { key: "destinationFrom", label: "From" },
               { key: "destinationTo", label: "To" },
+              { key: "tripTypeLabel", label: "Trip type" },
               { key: "rateTypeLabel", label: "Rate type", format: "badge" },
-              { key: "kilometersLabel", label: "Kilometers" },
+              { key: "kilometersLabel", label: "Total km" },
               { key: "rateLabel", label: "Rate" },
               { key: "totalLabel", label: "Total" },
             ]}
@@ -629,7 +677,9 @@ export function DriveCostWorkspace() {
                 />
               </div>
               <div className="field">
-                <label htmlFor="drive-cost-kilometers">Kilometers *</label>
+                <label htmlFor="drive-cost-kilometers">
+                  Kilometers (one way) *
+                </label>
                 <input
                   id="drive-cost-kilometers"
                   name="kilometers"
@@ -638,11 +688,16 @@ export function DriveCostWorkspace() {
                   max="100000"
                   step="0.01"
                   required
+                  aria-describedby="drive-cost-distance-help"
                   value={editing.kilometers}
                   onChange={(event) =>
                     setEditing({ ...editing, kilometers: event.target.value })
                   }
                 />
+                <small id="drive-cost-distance-help" className="muted">
+                  Enter the one-way distance. Round trips include the return
+                  journey.
+                </small>
               </div>
               <div className="field">
                 <label htmlFor="drive-cost-from">Destination from *</label>
@@ -675,6 +730,28 @@ export function DriveCostWorkspace() {
                     })
                   }
                 />
+              </div>
+              <div className="field full">
+                <label htmlFor="drive-cost-trip-type">Trip type</label>
+                <select
+                  id="drive-cost-trip-type"
+                  name="isRoundTrip"
+                  aria-describedby="drive-cost-trip-help"
+                  value={editing.isRoundTrip ? "round-trip" : "one-way"}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      isRoundTrip: event.target.value === "round-trip",
+                    })
+                  }
+                >
+                  <option value="one-way">One way</option>
+                  <option value="round-trip">Round trip (×2)</option>
+                </select>
+                <small id="drive-cost-trip-help" className="muted">
+                  For office → destination → office, choose round trip to double
+                  the distance and cost.
+                </small>
               </div>
               <fieldset className="field full drive-cost-rate-field">
                 <legend>Rate type *</legend>
@@ -714,6 +791,7 @@ export function DriveCostWorkspace() {
                 </span>
                 <p>
                   {formatNumber(previewKilometers)} km × ৳{selectedRate}/km
+                  {editing.isRoundTrip ? " × 2" : ""}
                 </p>
               </div>
             </div>

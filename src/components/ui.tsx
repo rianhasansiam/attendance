@@ -133,6 +133,7 @@ export function Table({
   rows,
   columns,
   actions,
+  dateGroupKey,
 }: {
   rows: DataRow[];
   columns: {
@@ -142,8 +143,19 @@ export function Table({
       "date" | "time" | "badge" | "duration" | "nullable-duration" | "text";
   }[];
   actions?: (row: DataRow) => ReactNode;
+  dateGroupKey?: string;
 }) {
   if (!rows.length) return <Empty />;
+  const dateGroups = new Map<string, number>();
+  const rowClasses = dateGroupKey
+    ? rows.map((row) => {
+        const groupDate = date(nested(row, dateGroupKey));
+        if (!dateGroups.has(groupDate)) {
+          dateGroups.set(groupDate, dateGroups.size % 2);
+        }
+        return `date-group-${dateGroups.get(groupDate)}`;
+      })
+    : [];
   return (
     <div className="table-scroll">
       <table>
@@ -157,7 +169,7 @@ export function Table({
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={String(row.id || index)}>
+            <tr key={String(row.id || index)} className={rowClasses[index]}>
               {columns.map((column) => {
                 const value = nested(row, column.key);
                 return (

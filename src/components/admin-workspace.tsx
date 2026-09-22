@@ -445,6 +445,7 @@ export function AdminReports({
           <Table
             rows={items(data)}
             columns={reportColumns}
+            dateGroupKey={attendance ? "attendanceDate" : undefined}
             actions={
               attendance && canCorrectAttendance
                 ? (row) => (

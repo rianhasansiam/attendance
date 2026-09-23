@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
   revalidate: vi.fn(),
   lookup: vi.fn(),
 }));
-vi.mock("@/lib/auth", () => ({ requireAdmin: mocks.auth }));
+vi.mock("@/lib/auth", () => ({
+  requireAdmin: mocks.auth,
+  requireDriveCostManager: mocks.auth,
+}));
 vi.mock("@/lib/security", () => ({
   assertSameOrigin: vi.fn(),
   rateLimit: vi.fn(),

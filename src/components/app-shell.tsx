@@ -91,7 +91,12 @@ export function AppShell({
               ]
             : []),
         ]
-      : employeeNavigation;
+      : [
+          ...employeeNavigation,
+          ...(user.role === "MANAGE_DRIVER"
+            ? [{ label: "Drive Cost", href: "drive-cost", icon: CarFront }]
+            : []),
+        ];
   const current = navigation.find(
     (item) => pathname === `/${mode}/${item.href}`,
   );

@@ -60,6 +60,7 @@ export async function getDriveCostReport(filters: DriveCostFilters) {
   const bytes = await createReportPdf({
     title: "Drive cost report",
     subtitle: [period, ...(q ? [`Destination search: ${q}`] : [])],
+    dateGroupColumn: 0,
     summary: [
       { label: "Total trips", value: records.length.toLocaleString("en-US") },
       { label: "Total kilometers", value: kilometers.toFixed(2) },

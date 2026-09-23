@@ -90,6 +90,15 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
         type: "select",
         resource: "departments",
       },
+      {
+        name: "role",
+        label: "Role",
+        type: "select",
+        options: ["EMPLOYEE", "MANAGE_DRIVER"],
+        default: "EMPLOYEE",
+        source: "user.role",
+        hint: "Manage driver adds drive cost management to employee access.",
+      },
       status,
     ],
     columns: [
@@ -98,6 +107,7 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
       { key: "user.email", label: "Google email" },
       { key: "department.name", label: "Department" },
       { key: "office.name", label: "Office" },
+      { key: "user.role", label: "Role", format: "badge" },
       { key: "user.status", label: "Status", format: "badge" },
     ],
     noDelete: true,

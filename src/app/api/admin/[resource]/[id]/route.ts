@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { api, readJson } from "@/lib/api";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, requireDriveCostManager } from "@/lib/auth";
 import { invalidateReferenceDisplay } from "@/lib/cache/invalidation";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
 import {
@@ -15,23 +15,24 @@ type Context = { params: Promise<{ resource: string; id: string }> };
 
 export function GET(_request: Request, context: Context) {
   return api(async () => {
-    const actor = await requireAdmin();
     const params = await context.params;
-    return getRecord(
-      actor,
-      resourceSchema.parse(params.resource),
-      idSchema.parse(params.id),
-    );
+    const resource = resourceSchema.parse(params.resource);
+    const actor = await (resource === "drive-costs"
+      ? requireDriveCostManager()
+      : requireAdmin());
+    return getRecord(actor, resource, idSchema.parse(params.id));
   });
 }
 
 export function PATCH(request: Request, context: Context) {
   return api(async () => {
     assertSameOrigin(request);
-    const actor = await requireAdmin();
-    await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const params = await context.params;
     const resource = resourceSchema.parse(params.resource);
+    const actor = await (resource === "drive-costs"
+      ? requireDriveCostManager()
+      : requireAdmin());
+    await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const result = await updateRecord(
       actor,
       resource,
@@ -46,10 +47,12 @@ export function PATCH(request: Request, context: Context) {
 export function DELETE(request: Request, context: Context) {
   return api(async () => {
     assertSameOrigin(request);
-    const actor = await requireAdmin();
-    await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const params = await context.params;
     const resource = resourceSchema.parse(params.resource);
+    const actor = await (resource === "drive-costs"
+      ? requireDriveCostManager()
+      : requireAdmin());
+    await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const result = await removeRecord(
       actor,
       resource,

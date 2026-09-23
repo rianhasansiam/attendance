@@ -47,6 +47,7 @@ export async function attendanceReportPdf(
   const bytes = await createReportPdf({
     title: "Attendance report",
     subtitle,
+    dateGroupColumn: 0,
     summary: [
       { label: "Records", value: String(records.length) },
       { label: "Total worked", value: duration(worked) },

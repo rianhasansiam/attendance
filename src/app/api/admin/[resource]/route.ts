@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { api, readJson } from "@/lib/api";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, requireDriveCostManager } from "@/lib/auth";
 import { invalidateReferenceDisplay } from "@/lib/cache/invalidation";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
 import {
@@ -17,8 +17,10 @@ type Context = { params: Promise<{ resource: string }> };
 
 export function GET(request: Request, context: Context) {
   return api(async () => {
-    const actor = await requireAdmin();
     const resource = resourceSchema.parse((await context.params).resource);
+    const actor = await (resource === "drive-costs"
+      ? requireDriveCostManager()
+      : requireAdmin());
     const querySchema =
       resource === "drive-costs" ? driveCostFilterSchema : paginationSchema;
     return listRecords(
@@ -32,9 +34,11 @@ export function GET(request: Request, context: Context) {
 export function POST(request: Request, context: Context) {
   return api(async () => {
     assertSameOrigin(request);
-    const actor = await requireAdmin();
-    await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const resource = resourceSchema.parse((await context.params).resource);
+    const actor = await (resource === "drive-costs"
+      ? requireDriveCostManager()
+      : requireAdmin());
+    await rateLimit(`admin-write:${actor.id}`, 120, 60);
     const result = await createRecord(
       actor,
       resource,

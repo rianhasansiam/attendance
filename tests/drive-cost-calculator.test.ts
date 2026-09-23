@@ -3,18 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
-  requireAdmin: vi.fn(),
+  requireDriveCostManager: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
   db: { driveCost: { findMany: mocks.findMany } },
 }));
-vi.mock("@/lib/auth", () => ({ requireAdmin: mocks.requireAdmin }));
+vi.mock("@/lib/auth", () => ({
+  requireDriveCostManager: mocks.requireDriveCostManager,
+}));
 
 import { GET } from "@/app/api/admin/drive-costs/calculate/route";
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.requireAdmin.mockResolvedValue({ id: "admin", role: "ADMIN" });
+  mocks.requireDriveCostManager.mockResolvedValue({
+    id: "admin",
+    role: "ADMIN",
+  });
   mocks.findMany.mockResolvedValue([]);
 });
 

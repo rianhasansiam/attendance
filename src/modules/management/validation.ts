@@ -46,10 +46,14 @@ export const employeeSchema = z
       .regex(/^[A-Za-z0-9_-]+$/),
     officeId: idSchema,
     departmentId: idSchema.nullable().optional(),
+    role: z.enum(["EMPLOYEE", "MANAGE_DRIVER"]).optional(),
     status: statusSchema.default("ACTIVE"),
   })
   .strict();
-export const employeeUpdateSchema = employeeSchema.partial().strict();
+export const employeeUpdateSchema = employeeSchema
+  .partial()
+  .extend({ status: statusSchema.optional() })
+  .strict();
 export const departmentSchema = z
   .object({ name: label, active: z.boolean().default(true) })
   .strict();
@@ -202,7 +206,9 @@ export const userSchema = z
 export const userUpdateSchema = z
   .object({
     name: label.optional(),
-    role: z.enum(["EMPLOYEE", "ADMIN", "SUPER_ADMIN"]).optional(),
+    role: z
+      .enum(["EMPLOYEE", "MANAGE_DRIVER", "ADMIN", "SUPER_ADMIN"])
+      .optional(),
     status: statusSchema.optional(),
   })
   .strict();

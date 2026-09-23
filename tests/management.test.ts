@@ -5,12 +5,60 @@ import {
   assignmentSchema,
   dateSchema,
   employeeSchema,
+  employeeUpdateSchema,
   networkSchema,
   officeSchema,
   shiftSchema,
+  userUpdateSchema,
 } from "@/modules/management/validation";
 
 describe("management authorization and validation", () => {
+  it.each(["EMPLOYEE", "MANAGE_DRIVER"] as const)(
+    "allows administrators to manage %s accounts without administrator privileges",
+    (role) => {
+      expect(() =>
+        assertMayManageUser(
+          { id: "admin", role: "ADMIN" },
+          { id: "employee", role },
+          { role: "MANAGE_DRIVER", status: "ACTIVE" },
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertMayManageUser(
+          { id: "employee", role },
+          { id: "other", role: "EMPLOYEE" },
+        ),
+      ).toThrow("Administrator access is required.");
+      expect(() =>
+        assertMayManageUser(
+          { id: "admin", role: "ADMIN" },
+          { id: "employee", role },
+          { role: "ADMIN" },
+        ),
+      ).toThrow();
+    },
+  );
+  it("accepts drive cost managers as employee roles but rejects administrator assignment through employee forms", () => {
+    const employee = {
+      name: "Driver manager",
+      email: "manager@example.com",
+      employeeCode: "E1",
+      officeId: "office",
+    };
+    expect(
+      employeeSchema.parse({ ...employee, role: "MANAGE_DRIVER" }).role,
+    ).toBe("MANAGE_DRIVER");
+    expect(employeeSchema.safeParse(employee).success).toBe(true);
+    expect(employeeUpdateSchema.parse({ role: "MANAGE_DRIVER" })).toEqual({
+      role: "MANAGE_DRIVER",
+    });
+    expect(employeeUpdateSchema.safeParse({ role: "ADMIN" }).success).toBe(
+      false,
+    );
+    expect(userUpdateSchema.parse({ role: "MANAGE_DRIVER" })).toEqual({
+      role: "MANAGE_DRIVER",
+    });
+  });
   it("prevents administrator privilege escalation and editing elevated accounts", () => {
     expect(() =>
       assertMayManageUser(

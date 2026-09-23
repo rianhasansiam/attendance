@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
+import { authorizeRole } from "@/modules/auth/authorization";
 import { driveCostWhere } from "@/modules/drive-costs/filters";
 import {
   createEmployee,
@@ -54,6 +55,13 @@ export const resourceSchema = z.enum([
   "events",
 ]);
 type Resource = z.infer<typeof resourceSchema>;
+function authorizeResource(actor: Actor, resource: Resource) {
+  authorizeRole(
+    actor.role,
+    resource === "drive-costs" ? "MANAGE_DRIVER" : "ADMIN",
+  );
+}
+
 const employeeName = (q?: string) =>
   q
     ? {
@@ -71,6 +79,7 @@ export async function listRecords(
   resource: Resource,
   query: z.infer<typeof driveCostFilterSchema>,
 ) {
+  authorizeResource(actor, resource);
   if (resource === "users" || resource === "settings") assertSuperAdmin(actor);
   const { page, pageSize, q } = query;
   const window = { take: pageSize, skip: (page - 1) * pageSize };
@@ -277,6 +286,7 @@ export async function listRecords(
 }
 
 export async function getRecord(actor: Actor, resource: Resource, id: string) {
+  authorizeResource(actor, resource);
   if (resource === "users" || resource === "settings") assertSuperAdmin(actor);
   let record: unknown;
   switch (resource) {
@@ -363,6 +373,7 @@ export async function createRecord(
   resource: Resource,
   body: unknown,
 ) {
+  authorizeResource(actor, resource);
   switch (resource) {
     case "employees":
       return createEmployee(actor, employeeSchema.parse(body));
@@ -399,6 +410,7 @@ export async function updateRecord(
   id: string,
   body: unknown,
 ) {
+  authorizeResource(actor, resource);
   switch (resource) {
     case "employees":
       return updateEmployee(actor, id, employeeUpdateSchema.parse(body));
@@ -441,6 +453,7 @@ export async function removeRecord(
   resource: Resource,
   id: string,
 ) {
+  authorizeResource(actor, resource);
   if (resource === "employees")
     return updateEmployee(actor, id, { status: "INACTIVE" });
   if (resource === "devices") return updateDevice(actor, id, { revoked: true });

@@ -204,9 +204,21 @@ export function AdminResource({ resource }: { resource: string }) {
     .filter((field) =>
       editing?.id ? field.edit !== false : field.create !== false,
     )
+    .filter(
+      (field) =>
+        resource !== "employees" ||
+        !editing?.id ||
+        field.name !== "role" ||
+        ["EMPLOYEE", "MANAGE_DRIVER"].includes(
+          String(nested(editing, "user.role")),
+        ),
+    )
     .map((field) =>
       resource === "users" && editing?.id && field.name === "role"
-        ? { ...field, options: ["EMPLOYEE", "ADMIN", "SUPER_ADMIN"] }
+        ? {
+            ...field,
+            options: ["EMPLOYEE", "MANAGE_DRIVER", "ADMIN", "SUPER_ADMIN"],
+          }
         : field,
     );
   async function mutate(

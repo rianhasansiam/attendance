@@ -62,6 +62,11 @@ export async function requireAdmin() {
   authorizeRole(user.role, "ADMIN");
   return user;
 }
+export async function requireDriveCostManager() {
+  const user = await requireUser();
+  authorizeRole(user.role, "MANAGE_DRIVER");
+  return user;
+}
 export async function requireSuperAdmin() {
   const user = await requireUser();
   authorizeRole(user.role, "SUPER_ADMIN");

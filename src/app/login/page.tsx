@@ -4,6 +4,7 @@ import { CheckCheck } from "lucide-react";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import LoadingWorkspace from "@/app/loading";
+import { isEmployeeRole } from "@/modules/auth/authorization";
 
 type Props = { searchParams: Promise<{ error?: string }> };
 export default function Login(props: Props) {
@@ -23,7 +24,7 @@ async function LoginContent({
     process.env.DATABASE_URL && process.env.AUTH_SECRET ? await auth() : null;
   if (session?.user?.id)
     redirect(
-      session.user.role === "EMPLOYEE"
+      isEmployeeRole(session.user.role)
         ? "/employee/dashboard"
         : "/admin/dashboard",
     );

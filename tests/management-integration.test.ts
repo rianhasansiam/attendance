@@ -90,6 +90,43 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
     return value;
   }
 
+  it("creates drive cost managers with employee profiles and revokes sessions when their role changes", async () => {
+    const unique = randomUUID().slice(0, 8);
+    const manager = await createEmployee(admin, {
+      name: "Driver manager",
+      email: `driver-manager-${unique}@example.test`,
+      employeeCode: `M-${unique}`,
+      officeId,
+      role: "MANAGE_DRIVER",
+      status: "ACTIVE",
+    });
+    expect(manager.user.role).toBe("MANAGE_DRIVER");
+    expect(manager.officeId).toBe(officeId);
+    await db.session.create({
+      data: {
+        userId: manager.userId,
+        sessionToken: randomUUID(),
+        expires: new Date("2099-01-01"),
+      },
+    });
+
+    const updated = await updateEmployee(admin, manager.id, {
+      role: "EMPLOYEE",
+    });
+    expect(updated.user.role).toBe("EMPLOYEE");
+    expect(await db.session.count({ where: { userId: manager.userId } })).toBe(
+      0,
+    );
+
+    await updateUser(superAdmin, manager.userId, { role: "MANAGE_DRIVER" });
+    expect(
+      (await db.user.findUniqueOrThrow({ where: { id: manager.userId } })).role,
+    ).toBe("MANAGE_DRIVER");
+    await expect(
+      updateUser(superAdmin, admin.id, { role: "MANAGE_DRIVER" }),
+    ).rejects.toMatchObject({ code: "EMPLOYEE_REQUIRED" });
+  });
+
   it("blocks admin modification of an elevated employee and admin role management", async () => {
     const target = await employee();
     await db.user.update({

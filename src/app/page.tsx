@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import LoadingWorkspace from "./loading";
+import { isEmployeeRole } from "@/modules/auth/authorization";
 
 export default function Home() {
   return (
@@ -18,7 +19,7 @@ async function HomeRedirect() {
   return redirect(
     !session?.user?.id
       ? "/login"
-      : session.user.role === "EMPLOYEE"
+      : isEmployeeRole(session.user.role)
         ? "/employee/dashboard"
         : "/admin/dashboard",
   );

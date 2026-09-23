@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";
+import { isEmployeeRole } from "@/modules/auth/authorization";
 import { publicUserSelect } from "@/modules/employees/service";
 import { calculateCorrection } from "./corrections";
 import {
@@ -243,10 +244,10 @@ export async function updateUser(
       });
       if (!previous) throw new DomainError("NOT_FOUND", "User not found.", 404);
       assertMayManageUser(actor, previous, input);
-      if (input.role === "EMPLOYEE" && !previous.employee)
+      if (input.role && isEmployeeRole(input.role) && !previous.employee)
         throw new DomainError(
           "EMPLOYEE_REQUIRED",
-          "This user needs an employee profile before becoming an employee.",
+          "This user needs an employee profile before receiving an employee role.",
         );
       if (
         previous.role === "SUPER_ADMIN" &&

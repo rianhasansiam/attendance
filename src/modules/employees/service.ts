@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";
+import { authorizeRole, isEmployeeRole } from "@/modules/auth/authorization";
 import {
   assertMayManageUser,
   type Actor,
@@ -55,11 +56,12 @@ export async function createEmployee(
   actor: Actor,
   input: z.infer<typeof employeeSchema>,
 ) {
+  authorizeRole(actor.role, "ADMIN");
   return db.$transaction(async (tx) => {
     await validateAssignments(tx, input.officeId, input.departmentId);
-    const { name, email, status, ...employee } = input;
+    const { name, email, status, role = "EMPLOYEE", ...employee } = input;
     const user = await tx.user.create({
-      data: { name, email, status, role: "EMPLOYEE" },
+      data: { name, email, status, role },
     });
     const created = await tx.employee.create({
       data: { ...employee, userId: user.id },
@@ -83,6 +85,7 @@ export async function updateEmployee(
   id: string,
   input: z.infer<typeof employeeUpdateSchema>,
 ) {
+  authorizeRole(actor.role, "ADMIN");
   return db.$transaction(async (tx) => {
     const identities = await tx.$queryRaw<
       { userId: string }[]
@@ -96,9 +99,18 @@ export async function updateEmployee(
     });
     if (!previous)
       throw new DomainError("NOT_FOUND", "Employee not found.", 404);
-    assertMayManageUser(actor, previous.user, { status: input.status });
+    assertMayManageUser(actor, previous.user, {
+      role: input.role,
+      status: input.status,
+    });
+    if (input.role && !isEmployeeRole(previous.user.role))
+      throw new DomainError(
+        "FORBIDDEN",
+        "Use user management to change administrator roles.",
+        403,
+      );
     await validateAssignments(tx, input.officeId, input.departmentId);
-    const { name, email, status, ...employee } = input;
+    const { name, email, status, role, ...employee } = input;
     // A changed Google identity must reauthenticate and register fresh credentials.
     if (email && email !== previous.user.email) {
       await tx.account.deleteMany({ where: { userId: previous.userId } });
@@ -109,7 +121,10 @@ export async function updateEmployee(
       });
       await tx.webAuthnChallenge.deleteMany({ where: { employeeId: id } });
     }
-    if (status && status !== "ACTIVE")
+    if (
+      (status && status !== "ACTIVE") ||
+      (role && role !== previous.user.role)
+    )
       await tx.session.deleteMany({ where: { userId: previous.userId } });
     await tx.user.update({
       where: { id: previous.userId },
@@ -117,6 +132,7 @@ export async function updateEmployee(
         name,
         email,
         status,
+        role,
         ...(email && email !== previous.user.email
           ? { googleAccountId: null, emailVerified: null, image: null }
           : {}),

@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth", () => ({
   requireAdmin: vi.fn().mockResolvedValue({ id: "admin", role: "ADMIN" }),
+  requireDriveCostManager: vi
+    .fn()
+    .mockResolvedValue({ id: "admin", role: "ADMIN" }),
 }));
 vi.mock("@/lib/db", () => ({
   db: {

@@ -5,7 +5,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter } from "next-auth/adapters";
 import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
-import { authorizeGoogle } from "@/modules/auth/authorization";
+import { authorizeGoogle, isEmployeeRole } from "@/modules/auth/authorization";
 
 export const { handlers, auth, signIn, signOut } = NextAuth(() => {
   const env = getEnv();
@@ -83,7 +83,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
     secret: env.AUTH_SECRET,
     trustHost: true, // AUTH_URL is canonical; Nginx accepts only the configured server_name.
     useSecureCookies: env.NODE_ENV === "production",
-    session: { strategy: "database", maxAge: 60 * 60 * 12, updateAge: 60 * 60 },
+    session: {
+      strategy: "database",
+      maxAge: 7 * 24 * 60 * 60,
+      updateAge: 60 * 60,
+    },
     providers: [
       Google({
         clientId: env.GOOGLE_CLIENT_ID,
@@ -122,7 +126,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
         });
         try {
           authorizeGoogle(profile, user, env.ALLOWED_GOOGLE_DOMAIN);
-          if (!user || (user.role === "EMPLOYEE" && !user.employee))
+          if (!user || (isEmployeeRole(user.role) && !user.employee))
             return false;
           const bound = await db.user.updateMany({
             where: {

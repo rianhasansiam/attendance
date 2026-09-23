@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { api } from "@/lib/api";
-import { requireAdmin } from "@/lib/auth";
+import { requireDriveCostManager } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 
@@ -14,7 +14,7 @@ const querySchema = z.object({
 
 export function GET(request: Request) {
   return api(async () => {
-    await requireAdmin();
+    await requireDriveCostManager();
     const params = Object.fromEntries(new URL(request.url).searchParams);
     const { from, to } = querySchema.parse(params);
 

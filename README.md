@@ -12,6 +12,8 @@ Delayed checkout automatically records overtime: full minutes actually worked af
 
 Administrators and super administrators can use **Drive Cost** to record dated trips and calculate costs at ৳5/km during in-time or ৳10/km during overtime. Rates and totals are derived on the server, saved as exact decimals, and recorded in the audit log. Apply the included `20260923000000_drive_costs` migration with `pnpm db:migrate` before using this workspace page.
 
+The `MANAGE_DRIVER` role has all employee access plus **Drive Cost** in the employee workspace. It can view, add, edit, delete, calculate, and export drive costs, without access to other administrator features. Administrators can assign or remove this role through **Employees → Add/Edit → Role**; changing a role signs out existing sessions. An employee profile is required. Apply `20260925000000_manage_driver_role` with `pnpm db:migrate`, then run `pnpm db:generate` before starting the updated application.
+
 Choose **Round trip (×2)** for office → destination → office and enter the one-way kilometers. The cost is kilometers × rate × 2, and the list, calculator, and PDF show the total distance including the return journey. Existing records stay one-way. Apply `20260924000000_drive_cost_round_trips` with `pnpm db:migrate`, then run `pnpm db:generate` before starting the updated application.
 
 Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).

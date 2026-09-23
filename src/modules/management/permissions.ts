@@ -1,5 +1,6 @@
 import type { Role, UserStatus } from "@prisma/client";
 import { DomainError } from "@/lib/errors";
+import { isEmployeeRole } from "@/modules/auth/authorization";
 
 export type Actor = { id: string; role: Role };
 
@@ -8,7 +9,7 @@ export function assertMayManageUser(
   target: { id: string; role: Role },
   next?: { role?: Role; status?: UserStatus },
 ) {
-  if (actor.role === "EMPLOYEE")
+  if (actor.role !== "ADMIN" && actor.role !== "SUPER_ADMIN")
     throw new DomainError(
       "FORBIDDEN",
       "Administrator access is required.",
@@ -16,7 +17,7 @@ export function assertMayManageUser(
     );
   if (
     actor.role !== "SUPER_ADMIN" &&
-    (target.role !== "EMPLOYEE" || (next?.role && next.role !== "EMPLOYEE"))
+    (!isEmployeeRole(target.role) || (next?.role && !isEmployeeRole(next.role)))
   ) {
     throw new DomainError(
       "FORBIDDEN",

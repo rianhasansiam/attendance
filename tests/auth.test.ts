@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { authorizeGoogle, authorizeRole } from "@/modules/auth/authorization";
+import {
+  authorizeGoogle,
+  authorizeRole,
+  isEmployeeRole,
+  type Role,
+} from "@/modules/auth/authorization";
 import { parseEnv } from "@/lib/env";
 const user = {
   email: "staff@example.com",
@@ -46,6 +51,33 @@ describe("Google authorization", () => {
     expect(() => authorizeRole("ADMIN", "SUPER_ADMIN")).toThrow("access"));
   it("permits superadmin across roles", () =>
     expect(() => authorizeRole("SUPER_ADMIN", "ADMIN")).not.toThrow());
+});
+describe("drive-cost manager permissions", () => {
+  it("retains employee access and adds drive-cost access", () => {
+    expect(isEmployeeRole("MANAGE_DRIVER")).toBe(true);
+    expect(() => authorizeRole("MANAGE_DRIVER", "EMPLOYEE")).not.toThrow();
+    expect(() => authorizeRole("MANAGE_DRIVER", "MANAGE_DRIVER")).not.toThrow();
+  });
+  it.each(["ADMIN", "SUPER_ADMIN"] as const)(
+    "cannot enter %s areas",
+    (required) => {
+      expect(() => authorizeRole("MANAGE_DRIVER", required)).toThrow("access");
+    },
+  );
+  it("does not grant ordinary employees drive-cost access", () => {
+    expect(() => authorizeRole("EMPLOYEE", "MANAGE_DRIVER")).toThrow("access");
+  });
+  it.each(["ADMIN", "SUPER_ADMIN"] as const)(
+    "preserves drive-cost access for %s",
+    (role) => {
+      expect(() => authorizeRole(role, "MANAGE_DRIVER")).not.toThrow();
+    },
+  );
+  it("rejects unknown roles instead of allowing access", () => {
+    expect(() => authorizeRole("UNKNOWN" as Role, "EMPLOYEE")).toThrow(
+      "access",
+    );
+  });
 });
 describe("environment validation", () => {
   const env = {

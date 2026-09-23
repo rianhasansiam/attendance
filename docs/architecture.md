@@ -45,7 +45,7 @@ The migration adds SQL checks, one-open-attendance partial uniqueness and immuta
 
 ## Identity and authorization
 
-Google OAuth (PKCE, state, nonce) establishes verified email and subject. A centralized policy checks an existing local user, ACTIVE status, subject binding and optional Google Workspace `hd` plus email domain. Public user creation is disabled at adapter level. Only a verified Google identity can link to a pre-provisioned email; no password, OTP, magic link or passkey login provider exists. Google tokens are discarded after authentication. Database sessions expire after 12 hours, with secure HttpOnly/SameSite cookies managed by Auth.js. Session responses use an explicit public field allowlist.
+Google OAuth (PKCE, state, nonce) establishes verified email and subject. A centralized policy checks an existing local user, ACTIVE status, subject binding and optional Google Workspace `hd` plus email domain. Public user creation is disabled at adapter level. Only a verified Google identity can link to a pre-provisioned email; no password, OTP, magic link or passkey login provider exists. Google tokens are discarded after authentication. Database sessions have a seven-day lifetime, with activity-based renewal writes throttled to once per hour and secure HttpOnly/SameSite cookies managed by Auth.js. Session responses use an explicit public field allowlist.
 
 Every protected request re-reads the user and current role. Employee, admin and super-admin helpers are centralized. Management updates invalidate sessions on email/status/role changes. Elevated roles and global settings require super-admin permissions. Client navigation is convenience only.
 

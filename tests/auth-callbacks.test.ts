@@ -40,7 +40,12 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/env", () => ({ getEnv: () => mocks.env }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 import "../src/auth";
-import { requireAdmin, requireEmployee, requireUser } from "../src/lib/auth";
+import {
+  requireAdmin,
+  requireDriveCostManager,
+  requireEmployee,
+  requireUser,
+} from "../src/lib/auth";
 
 type SignInInput = Parameters<
   NonNullable<NonNullable<NextAuthConfig["callbacks"]>["signIn"]>
@@ -101,12 +106,13 @@ beforeEach(() => {
 });
 
 describe("actual Auth.js configuration callbacks and adapter", () => {
-  it("configures Google only with database sessions and secure cookies", () => {
+  it("configures Google only with seven-day database sessions and secure cookies", () => {
     const config = mocks.factory!();
     expect(config.providers).toHaveLength(1);
     expect(config.session).toMatchObject({
       strategy: "database",
-      maxAge: 43200,
+      maxAge: 604800,
+      updateAge: 3600,
     });
     expect(config.useSecureCookies).toBe(true);
   });
@@ -166,6 +172,20 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
   it("rejects account changes between authorization lookup and subject binding", async () => {
     mocks.db.user.updateMany.mockResolvedValue({ count: 0 });
     expect(await mocks.factory!().callbacks!.signIn!(signInInput)).toBe(false);
+  });
+  it("requires an employee profile when signing in as MANAGE_DRIVER", async () => {
+    const signIn = mocks.factory!().callbacks!.signIn!;
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      role: "MANAGE_DRIVER",
+    });
+    expect(await signIn(signInInput)).toBe(true);
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      role: "MANAGE_DRIVER",
+      employee: null,
+    });
+    expect(await signIn(signInInput)).toBe(false);
   });
   it("discards OAuth access, refresh and ID tokens when linking an account", async () => {
     const config = mocks.factory!();
@@ -278,6 +298,43 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
 });
 
 describe("backend session and role guards", () => {
+  it("allows MANAGE_DRIVER employee and drive-cost access, but denies administrator access", async () => {
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      role: "MANAGE_DRIVER",
+    });
+    await expect(requireEmployee()).resolves.toMatchObject({
+      employee: { id: "employee-id" },
+    });
+    await expect(requireDriveCostManager()).resolves.toMatchObject({
+      role: "MANAGE_DRIVER",
+    });
+    await expect(requireAdmin()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+  it("rechecks drive-cost permission after a role is removed", async () => {
+    mocks.auth.mockResolvedValue({
+      user: { id: user.id, role: "MANAGE_DRIVER" },
+      sessionId: "session-id",
+    });
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      role: "MANAGE_DRIVER",
+    });
+    await expect(requireDriveCostManager()).resolves.toMatchObject({
+      role: "MANAGE_DRIVER",
+    });
+    mocks.db.user.findUnique.mockResolvedValue(user);
+    await expect(requireDriveCostManager()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+  it.each(["ADMIN", "SUPER_ADMIN"])(
+    "retains drive-cost access for %s",
+    async (role) => {
+      mocks.db.user.findUnique.mockResolvedValue({ ...user, role });
+      await expect(requireDriveCostManager()).resolves.toMatchObject({ role });
+    },
+  );
   it.each([
     ["account deactivation", "USER_INACTIVE"],
     ["identity reset", "USER_NOT_AUTHORIZED"],

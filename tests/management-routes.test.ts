@@ -15,6 +15,7 @@ import { PATCH as correction } from "@/app/api/admin/attendance/[id]/route";
 
 vi.mock("@/lib/auth", () => ({
   requireAdmin: vi.fn(),
+  requireDriveCostManager: vi.fn(),
   requireSuperAdmin: vi.fn(),
 }));
 vi.mock("@/lib/security", () => ({

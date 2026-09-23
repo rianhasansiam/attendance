@@ -1,5 +1,10 @@
 import { DomainError } from "@/lib/errors";
-export type Role = "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN";
+import type { Role } from "@prisma/client";
+export type { Role } from "@prisma/client";
+
+export function isEmployeeRole(role: Role): boolean {
+  return role === "EMPLOYEE" || role === "MANAGE_DRIVER";
+}
 export type AuthorizedRecord = {
   email: string;
   status: string;
@@ -55,8 +60,13 @@ export function authorizeGoogle(
     );
 }
 export function authorizeRole(actual: Role, required: Role): void {
-  const ranks = { EMPLOYEE: 0, ADMIN: 1, SUPER_ADMIN: 2 };
-  if (ranks[actual] < ranks[required])
+  const ranks: Record<Role, number> = {
+    EMPLOYEE: 0,
+    MANAGE_DRIVER: 1,
+    ADMIN: 2,
+    SUPER_ADMIN: 3,
+  };
+  if (!(ranks[actual] >= ranks[required]))
     throw new DomainError(
       "FORBIDDEN",
       "You do not have access to this resource.",

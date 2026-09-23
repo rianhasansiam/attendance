@@ -3,14 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
-  requireAdmin: vi.fn(),
+  requireDriveCostManager: vi.fn(),
   rateLimit: vi.fn(),
   createPdf: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
   db: { driveCost: { findMany: mocks.findMany } },
 }));
-vi.mock("@/lib/auth", () => ({ requireAdmin: mocks.requireAdmin }));
+vi.mock("@/lib/auth", () => ({
+  requireDriveCostManager: mocks.requireDriveCostManager,
+}));
 vi.mock("@/lib/security", () => ({ rateLimit: mocks.rateLimit }));
 vi.mock("@/modules/reports/pdf", () => ({ createReportPdf: mocks.createPdf }));
 
@@ -52,7 +54,10 @@ function report(query = "") {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.requireAdmin.mockResolvedValue({ id: "admin", role: "ADMIN" });
+  mocks.requireDriveCostManager.mockResolvedValue({
+    id: "admin",
+    role: "ADMIN",
+  });
   mocks.findMany.mockResolvedValue([]);
   mocks.createPdf.mockResolvedValue(new TextEncoder().encode("%PDF-1.7\n"));
 });
@@ -308,8 +313,8 @@ describe("drive cost PDF reports", () => {
   it.each([
     ["UNAUTHENTICATED", 401],
     ["FORBIDDEN", 403],
-  ])("requires administrator access: %s", async (code, status) => {
-    mocks.requireAdmin.mockRejectedValue(
+  ])("requires drive cost management access: %s", async (code, status) => {
+    mocks.requireDriveCostManager.mockRejectedValue(
       new DomainError(code, "Denied", status),
     );
 

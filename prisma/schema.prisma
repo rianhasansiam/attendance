@@ -8,6 +8,7 @@ enum Role {
   SUPER_ADMIN
   ADMIN
   EMPLOYEE
+  MANAGE_DRIVER
 }
 enum UserStatus {
   ACTIVE

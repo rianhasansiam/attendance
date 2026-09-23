@@ -9,6 +9,7 @@ export type PdfReport = {
   summary: Array<{ label: string; value: string }>;
   columns: Array<{ label: string; width: number; align?: "left" | "right" }>;
   rows: string[][];
+  dateGroupColumn?: number;
   footerNote?: string;
 };
 
@@ -29,6 +30,7 @@ const colors = {
   muted: "#5F7068",
   line: "#DDE7E1",
   stripe: "#F5F9F6",
+  dateGroups: ["#DCEBE1", "#DCE7F8"],
   summary: "#EEF6F0",
 };
 
@@ -270,7 +272,19 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     newPage();
   tableHeading();
 
+  const dateGroups = new Map<string, string>();
   report.rows.forEach((row, rowIndex) => {
+    let background = rowIndex % 2 ? colors.stripe : "#FFFFFF";
+    if (report.dateGroupColumn !== undefined) {
+      const groupDate = row[report.dateGroupColumn] ?? "";
+      let groupColor = dateGroups.get(groupDate);
+      if (groupColor === undefined) {
+        groupColor =
+          colors.dateGroups[dateGroups.size % colors.dateGroups.length];
+        dateGroups.set(groupDate, groupColor);
+      }
+      background = groupColor;
+    }
     const cells = report.columns.map((_, index) =>
       wrapText(doc, row[index] ?? "", widths[index] - cellPadding * 2),
     );
@@ -307,9 +321,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       const height =
         Math.max(count, continuation?.length ?? 0) * bodyLineHeight +
         cellPadding * 2;
-      doc
-        .rect(margin, y, contentWidth, height)
-        .fill(rowIndex % 2 ? colors.stripe : "#FFFFFF");
+      doc.rect(margin, y, contentWidth, height).fill(background);
       doc.font("Regular").fontSize(bodySize).fillColor(colors.dark);
       let x = margin;
       cells.forEach((cell, index) => {

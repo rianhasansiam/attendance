@@ -244,16 +244,22 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
   it("prevents overlapping leave requests and repeat leave approval", async () => {
     const target = await employee();
     const results = await Promise.allSettled([
-      createLeave(target.id, {
-        startDate: "2025-02-10",
-        endDate: "2025-02-12",
-        reason: "Family event",
-      }),
-      createLeave(target.id, {
-        startDate: "2025-02-11",
-        endDate: "2025-02-14",
-        reason: "Family event",
-      }),
+      createLeave(
+        { id: target.userId, employee: { id: target.id } },
+        {
+          startDate: "2025-02-10",
+          endDate: "2025-02-12",
+          reason: "Family event",
+        },
+      ),
+      createLeave(
+        { id: target.userId, employee: { id: target.id } },
+        {
+          startDate: "2025-02-11",
+          endDate: "2025-02-14",
+          reason: "Family event",
+        },
+      ),
     ]);
     expect(
       results.filter((result) => result.status === "fulfilled"),
@@ -399,11 +405,14 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       officeId,
       date: "2025-01-02",
     });
-    const leave = await createLeave(target.id, {
-      startDate: "2025-01-03",
-      endDate: "2025-01-03",
-      reason: "Sensitive personal reason",
-    });
+    const leave = await createLeave(
+      { id: target.userId, employee: { id: target.id } },
+      {
+        startDate: "2025-01-03",
+        endDate: "2025-01-03",
+        reason: "Sensitive personal reason",
+      },
+    );
     await reviewLeave(admin, leave.id, { status: "APPROVED" });
     await createAttendanceCorrection(superAdmin, {
       employeeId: target.id,
@@ -420,7 +429,11 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       page: 1,
       pageSize: 100,
     };
-    const rows = await reportRecords(filters, new Date("2025-01-08T12:00:00Z"));
+    const rows = await reportRecords(
+      admin,
+      filters,
+      new Date("2025-01-08T12:00:00Z"),
+    );
     expect(rows.map((row) => row.status)).toEqual([
       "ABSENT",
       "LATE",
@@ -434,11 +447,12 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
     expect(JSON.stringify(rows)).not.toContain("checkInLatitude");
     expect(
       await reportRecords(
+        admin,
         { ...filters, from: "2025-01-08", to: "2025-01-08" },
         new Date("2025-01-08T09:10:00Z"),
       ),
     ).toHaveLength(0);
-    const pdf = await getReport({ ...filters, format: "pdf" });
+    const pdf = await getReport(admin, { ...filters, format: "pdf" });
     expect(pdf).toBeInstanceOf(Response);
     const response = pdf as Response;
     expect(response.headers.get("content-type")).toBe("application/pdf");
@@ -487,14 +501,14 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
       startDate: "2025-01-01",
     });
     const now = new Date("2025-01-07T03:00:00Z");
-    const before = await getAdminDashboard(now);
+    const before = await getAdminDashboard(admin, now);
     await createAttendanceCorrection(superAdmin, {
       employeeId: target.id,
       attendanceDate: "2025-01-06",
       checkInAt: "2025-01-06T20:00:00Z",
       reason: "Manager confirmed overnight arrival",
     });
-    const after = await getAdminDashboard(now);
+    const after = await getAdminDashboard(admin, now);
     expect(after.presentToday).toBe(before.presentToday + 1);
     expect(after.currentlyCheckedIn).toBe(before.currentlyCheckedIn + 1);
   });

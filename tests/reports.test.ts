@@ -27,6 +27,7 @@ import {
   reportRecords,
 } from "@/modules/reports/service";
 
+const admin = { id: "admin", role: "ADMIN" } as const;
 const date = (day: string) => new Date(`${day}T00:00:00Z`);
 const now = new Date("2025-01-08T12:00:00Z");
 const office = {
@@ -120,7 +121,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("dynamic report derivation", () => {
   it("preserves recorded days and derived absence, leave, holiday and weekend ordering", async () => {
-    const rows = await reportRecords(filters, now);
+    const rows = await reportRecords(admin, filters, now);
     expect(rows.map((row) => row.status)).toEqual([
       "ABSENT",
       "LATE",
@@ -138,7 +139,7 @@ describe("dynamic report derivation", () => {
   it("includes submitted late reasons only in hydrated attendance details", async () => {
     const record = { ...attendance(), status: "HALF_DAY" };
     mocks.attendances.mockResolvedValue([record]);
-    const rows = await reportRecords(filters, now);
+    const rows = await reportRecords(admin, filters, now);
     expect(rows.find((row) => row.id === record.id)).toMatchObject({
       status: "HALF_DAY",
       lateReason: "Train service was delayed.",
@@ -161,7 +162,7 @@ describe("dynamic report derivation", () => {
       overtimeMinutes: 90,
     };
     mocks.attendances.mockResolvedValue([record]);
-    const rows = await reportRecords(filters, now);
+    const rows = await reportRecords(admin, filters, now);
     expect(rows.find((row) => row.id === record.id)).toMatchObject({
       workedMinutes: 540,
       overtimeMinutes: 90,
@@ -187,7 +188,7 @@ describe("dynamic report derivation", () => {
     mocks.attendances
       .mockResolvedValueOnce([scanned])
       .mockResolvedValueOnce([attendance()]);
-    const rows = await reportRecords(filters, now);
+    const rows = await reportRecords(admin, filters, now);
     expect(rows.find((row) => row.id === scanned.id)).toMatchObject({
       checkOutAt: scanned.checkOutAt,
       workedMinutes: 540,
@@ -198,7 +199,7 @@ describe("dynamic report derivation", () => {
   it("preserves unknown overtime for historical attendance", async () => {
     const record = { ...attendance(), overtimeMinutes: null };
     mocks.attendances.mockResolvedValue([record]);
-    const rows = await reportRecords(filters, now);
+    const rows = await reportRecords(admin, filters, now);
     expect(
       rows.find((row) => row.id === record.id)?.overtimeMinutes,
     ).toBeNull();
@@ -208,21 +209,21 @@ describe("dynamic report derivation", () => {
     mocks.attendances.mockResolvedValue([]);
     const today = { ...filters, from: "2025-01-08", to: "2025-01-08" };
     expect(
-      await reportRecords(today, new Date("2025-01-08T09:10:00Z")),
+      await reportRecords(admin, today, new Date("2025-01-08T09:10:00Z")),
     ).toHaveLength(0);
     const target = employee();
     mocks.employees.mockResolvedValue([
       { ...target, user: { ...target.user, status: "INACTIVE" } },
     ]);
-    expect(await reportRecords(today, now)).toHaveLength(0);
+    expect(await reportRecords(admin, today, now)).toHaveLength(0);
     mocks.employees.mockResolvedValue([
       { ...target, joinedAt: date("2025-01-09") },
     ]);
-    expect(await reportRecords(today, now)).toHaveLength(0);
+    expect(await reportRecords(admin, today, now)).toHaveLength(0);
   });
 
   it("preserves status-filtered totals and pages across persisted and derived records", async () => {
-    const result = await getReport({
+    const result = await getReport(admin, {
       ...filters,
       status: "ABSENT",
       page: 2,
@@ -245,7 +246,7 @@ describe("dynamic report derivation", () => {
     mocks.attendances
       .mockResolvedValueOnce(records)
       .mockResolvedValueOnce([records[1]]);
-    const result = await getReport({
+    const result = await getReport(admin, {
       ...filters,
       from: "2025-01-06",
       to: "2025-01-06",
@@ -266,7 +267,7 @@ describe("dynamic report derivation", () => {
 
   it("rejects excessive ranges before accessing the database", async () => {
     await expect(
-      reportRecords({ ...filters, from: "2024-01-01" }, now),
+      reportRecords(admin, { ...filters, from: "2024-01-01" }, now),
     ).rejects.toThrow("93 days");
     expect(mocks.attendances).not.toHaveBeenCalled();
   });
@@ -284,7 +285,7 @@ describe("filtered overtime totals", () => {
         .mockResolvedValueOnce(records)
         .mockResolvedValueOnce([records[page - 1]]);
 
-      const result = await getReport({
+      const result = await getReport(admin, {
         ...filters,
         employeeId: "employee-1",
         from: "2025-01-06",
@@ -314,7 +315,7 @@ describe("filtered overtime totals", () => {
       { ...attendance(target), overtimeMinutes: 47 },
     ]);
 
-    const result = await getReport({
+    const result = await getReport(admin, {
       ...filters,
       employeeId: target.id,
       from: "2025-01-06",
@@ -355,7 +356,7 @@ describe("filtered overtime totals", () => {
       ])
       .mockResolvedValueOnce([matching]);
 
-    const result = await getReport({ ...filters, status: "LATE" });
+    const result = await getReport(admin, { ...filters, status: "LATE" });
 
     expect(result).toMatchObject({
       total: 1,
@@ -375,7 +376,7 @@ describe("filtered overtime totals", () => {
       ])
       .mockResolvedValueOnce([known]);
 
-    const result = await getReport({ ...filters, page: 2, pageSize: 1 });
+    const result = await getReport(admin, { ...filters, page: 2, pageSize: 1 });
 
     expect(result).toMatchObject({
       total: 7,
@@ -389,7 +390,7 @@ describe("filtered overtime totals", () => {
     mocks.attendances.mockResolvedValue([]);
     mocks.employees.mockResolvedValue([]);
 
-    expect(await getReport(filters)).toMatchObject({
+    expect(await getReport(admin, filters)).toMatchObject({
       total: 0,
       items: [],
       summary: { overtimeMinutes: 0, unknownOvertimeRecords: 0 },
@@ -402,7 +403,7 @@ describe("filtered overtime totals", () => {
       .mockResolvedValueOnce([scanned])
       .mockResolvedValueOnce([{ ...scanned, overtimeMinutes: 120 }]);
 
-    const result = await getReport({
+    const result = await getReport(admin, {
       ...filters,
       from: "2025-01-06",
       to: "2025-01-06",
@@ -424,7 +425,7 @@ describe("attendance PDF exports", () => {
       { ...attendance(employee(), "2025-01-07"), overtimeMinutes: null },
     ];
     mocks.attendances.mockResolvedValue(records);
-    const result = await getReport({
+    const result = await getReport(admin, {
       ...filters,
       employeeId: "employee-1",
       from: "2025-01-05",
@@ -468,7 +469,7 @@ describe("attendance PDF exports", () => {
       shift: { ...shift, timezone: "Asia/Dhaka" },
     };
     mocks.attendances.mockResolvedValue([record]);
-    await getReport({
+    await getReport(admin, {
       ...filters,
       from: "2025-01-06",
       to: "2025-01-06",
@@ -483,7 +484,7 @@ describe("attendance PDF exports", () => {
   });
 
   it("gives derived days zero overtime and identifies their source", async () => {
-    await getReport({ ...filters, format: "pdf" });
+    await getReport(admin, { ...filters, format: "pdf" });
     const document = mocks.pdf.mock.calls[0][0];
     expect(document.rows).toHaveLength(7);
     expect(document.rows[0][6]).toBe("0h 0m");
@@ -493,7 +494,7 @@ describe("attendance PDF exports", () => {
   it("creates an empty report with its date range and zero totals", async () => {
     mocks.attendances.mockResolvedValue([]);
     mocks.employees.mockResolvedValue([]);
-    await getReport({ ...filters, format: "pdf" });
+    await getReport(admin, { ...filters, format: "pdf" });
     expect(mocks.pdf).toHaveBeenCalledWith(
       expect.objectContaining({
         subtitle: ["Date range: 2025-01-01 to 2025-01-07"],
@@ -522,7 +523,7 @@ describe("live dashboard", () => {
       return Promise.resolve(employees.slice(start, start + take));
     });
 
-    await expect(getAdminDashboard(now)).rejects.toMatchObject({
+    await expect(getAdminDashboard(admin, now)).rejects.toMatchObject({
       code: "REPORT_TOO_LARGE",
     });
     expect(mocks.employees).toHaveBeenCalledTimes(5);
@@ -544,7 +545,7 @@ describe("live dashboard", () => {
       return Promise.resolve(records.slice(start, start + take));
     });
 
-    await expect(getAdminDashboard(now)).rejects.toMatchObject({
+    await expect(getAdminDashboard(admin, now)).rejects.toMatchObject({
       code: "REPORT_TOO_LARGE",
     });
     const scans = mocks.attendances.mock.calls.filter(
@@ -574,7 +575,7 @@ describe("live dashboard", () => {
       return Promise.resolve(employees.slice(start, start + take));
     });
 
-    await expect(getAdminDashboard(now)).resolves.toMatchObject({
+    await expect(getAdminDashboard(admin, now)).resolves.toMatchObject({
       totalEmployees: 1200,
       absentToday: 0,
     });
@@ -601,7 +602,10 @@ describe("live dashboard", () => {
     };
     mocks.attendances.mockResolvedValue([record]);
     mocks.attendanceCount.mockResolvedValue(1);
-    const result = await getAdminDashboard(new Date("2025-01-07T03:00:00Z"));
+    const result = await getAdminDashboard(
+      admin,
+      new Date("2025-01-07T03:00:00Z"),
+    );
     expect(result).toMatchObject({
       totalEmployees: 2,
       presentToday: 1,
@@ -616,9 +620,9 @@ describe("live dashboard", () => {
 
   it("reads attendance again on the next dashboard request", async () => {
     mocks.attendances.mockResolvedValue([]);
-    const first = await getAdminDashboard(now);
+    const first = await getAdminDashboard(admin, now);
     mocks.attendances.mockResolvedValue([attendance(employee(), "2025-01-08")]);
-    const second = await getAdminDashboard(now);
+    const second = await getAdminDashboard(admin, now);
     expect(first.presentToday).toBe(0);
     expect(second.presentToday).toBe(1);
   });

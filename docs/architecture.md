@@ -1,5 +1,7 @@
 # Architecture and implementation map
 
+For the current Redux/RTK Query data flow, cache ownership, authentication cleanup and verification, see [State management and data flow](state-management.md) and the [state audit](state-audit.md). The baseline below records the original application implementation.
+
 ## Baseline inspection
 
 The repository began as an untouched Next.js 16.3.5 App Router starter, React 19.2.8, strict TypeScript, Tailwind CSS 4, ESLint 9, and pnpm 12. It had no database, models, authentication, routes, or business modules. The supplied plan is `implimentation_plan.md` (the filename has a spelling difference from the request). Existing working functionality was limited to the starter page.

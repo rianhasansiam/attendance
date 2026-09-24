@@ -119,7 +119,10 @@ beforeEach(() => {
     user: { id: "user-1" },
     sessionId: "session-1",
   });
-  mocks.session.mockResolvedValue({ id: "session-1" });
+  mocks.session.mockResolvedValue({
+    id: "session-1",
+    expires: new Date("2030-01-01T00:00:00Z"),
+  });
   mocks.user.mockResolvedValue(user("MANAGE_DRIVER"));
   for (const [, , , operation] of managementActions)
     operation.mockResolvedValue({ id: "trip-1" });

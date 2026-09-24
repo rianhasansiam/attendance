@@ -4,7 +4,7 @@ import { getAdminDashboard } from "@/modules/reports/service";
 
 export function GET() {
   return api(async () => {
-    await requireAdmin();
-    return getAdminDashboard();
+    const actor = await requireAdmin();
+    return getAdminDashboard(actor);
   });
 }

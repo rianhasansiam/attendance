@@ -30,6 +30,6 @@ export function POST(request: Request) {
     assertSameOrigin(request);
     const user = await requireEmployee();
     await rateLimit(`leave:${user.id}`, 10, 60);
-    return createLeave(user.employee.id, await readJson(request, leaveSchema));
+    return createLeave(user, await readJson(request, leaveSchema));
   });
 }

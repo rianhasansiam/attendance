@@ -11,6 +11,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Suites share one disposable database. SERIALIZABLE predicate locks can
+    // conflict across unrelated fixtures; concurrency tests still race their
+    // operations explicitly within each suite.
+    fileParallelism: !process.env.TEST_DATABASE_URL,
     include: ["tests/**/*.test.ts"],
     exclude: ["tests/e2e/**"],
   },

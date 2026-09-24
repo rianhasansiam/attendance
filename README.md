@@ -1,5 +1,7 @@
 # Office Attendance
 
+State management: [architecture, cache matrix and test instructions](docs/state-management.md) · [verified findings and baseline](docs/state-audit.md).
+
 A modular Next.js application for Google-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, PDF reports, and append-only audit history.
 
 See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results.

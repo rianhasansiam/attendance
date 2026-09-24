@@ -1,9 +1,10 @@
+import "server-only";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";
-import { isEmployeeRole } from "@/modules/auth/authorization";
+import { authorizeRole, isEmployeeRole } from "@/modules/auth/authorization";
 import { publicUserSelect } from "@/modules/employees/service";
 import { calculateCorrection } from "./corrections";
 import {
@@ -47,6 +48,7 @@ export async function updateDevice(
   id: string,
   input: z.infer<typeof deviceUpdateSchema>,
 ) {
+  authorizeRole(actor.role, "ADMIN");
   return db.$transaction(async (tx) => {
     const previous = await tx.webAuthnCredential.findUnique({
       where: { id },
@@ -93,10 +95,22 @@ export async function updateDevice(
   });
 }
 
+type EmployeeScope = { id: string; employee: { id: string } | null };
+function ownEmployeeId(actor: EmployeeScope) {
+  if (!actor.employee)
+    throw new DomainError(
+      "NO_EMPLOYEE",
+      "An employee profile is required.",
+      403,
+    );
+  return actor.employee.id;
+}
+
 export async function createLeave(
-  employeeId: string,
+  actor: EmployeeScope,
   input: z.infer<typeof leaveSchema>,
 ) {
+  const employeeId = ownEmployeeId(actor);
   const data = {
     employeeId,
     startDate: utcDate(input.startDate),
@@ -105,6 +119,16 @@ export async function createLeave(
   };
   return db.$transaction(
     async (tx) => {
+      const employee = await tx.employee.findUnique({
+        where: { id: employeeId, userId: actor.id },
+        select: { id: true },
+      });
+      if (!employee)
+        throw new DomainError(
+          "NO_EMPLOYEE",
+          "An employee profile is required.",
+          403,
+        );
       const overlap = await tx.leave.findFirst({
         where: {
           employeeId,
@@ -130,6 +154,7 @@ export async function reviewLeave(
   id: string,
   input: z.infer<typeof leaveReviewSchema>,
 ) {
+  authorizeRole(actor.role, "ADMIN");
   return db.$transaction(
     async (tx) => {
       const previous = await tx.leave.findUnique({
@@ -192,9 +217,15 @@ export async function reviewLeave(
   );
 }
 
-export async function cancelLeave(employeeId: string, id: string) {
+export async function cancelLeave(actor: EmployeeScope, id: string) {
+  const employeeId = ownEmployeeId(actor);
   const changed = await db.leave.updateMany({
-    where: { id, employeeId, status: "PENDING" },
+    where: {
+      id,
+      employeeId,
+      employee: { userId: actor.id },
+      status: "PENDING",
+    },
     data: { status: "CANCELLED" },
   });
   if (changed.count !== 1)

@@ -1,6 +1,9 @@
+import "server-only";
 import { Prisma, type AttendanceStatus } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { authorizeRole } from "@/modules/auth/authorization";
+import type { Actor } from "@/modules/management/permissions";
 import { DomainError } from "@/lib/errors";
 import { reportFilterSchema, utcDate } from "@/modules/management/validation";
 import {
@@ -440,13 +443,16 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
   });
 }
 export async function reportRecords(
+  actor: Actor,
   filters: Filters,
   now = new Date(),
 ): Promise<ReportRecord[]> {
+  authorizeRole(actor.role, "ADMIN");
   return hydrateEntries(await reportEntries(filters, now));
 }
 
-export async function getAdminDashboard(now = new Date()) {
+export async function getAdminDashboard(actor: Actor, now = new Date()) {
+  authorizeRole(actor.role, "ADMIN");
   const summary = Promise.all([
     db.employee.count({ where: { user: { status: "ACTIVE" } } }),
     db.attendance.count({
@@ -519,7 +525,8 @@ export async function getAdminDashboard(now = new Date()) {
   };
 }
 
-export async function getReport(filters: Filters) {
+export async function getReport(actor: Actor, filters: Filters) {
+  authorizeRole(actor.role, "ADMIN");
   const now = new Date();
   const entries = await reportEntries(filters, now);
   if (filters.format === "json") {

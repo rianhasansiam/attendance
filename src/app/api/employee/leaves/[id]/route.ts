@@ -12,9 +12,6 @@ export function DELETE(
     assertSameOrigin(request);
     const user = await requireEmployee();
     await rateLimit(`leave:${user.id}`, 10, 60);
-    return cancelLeave(
-      user.employee.id,
-      idSchema.parse((await context.params).id),
-    );
+    return cancelLeave(user, idSchema.parse((await context.params).id));
   });
 }

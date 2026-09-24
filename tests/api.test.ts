@@ -28,6 +28,24 @@ describe("API boundary", () => {
       error: { code: "FORBIDDEN", message: "Access denied." },
     });
   });
+  it("preserves validation field errors without reflecting submitted values", async () => {
+    const response = await api(async () =>
+      z
+        .object({ name: z.string().min(2), count: z.number().positive() })
+        .parse({ name: "", count: -1 }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        fieldErrors: {
+          name: [expect.any(String)],
+          count: [expect.any(String)],
+        },
+      },
+    });
+  });
   it("sanitizes unexpected errors including secrets and database details", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = await api(async () => {

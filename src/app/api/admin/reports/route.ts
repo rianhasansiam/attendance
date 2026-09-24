@@ -9,6 +9,7 @@ export function GET(request: Request) {
     const actor = await requireAdmin();
     await rateLimit(`reports:${actor.id}`, 30, 60);
     return getReport(
+      actor,
       reportFilterSchema.parse(
         Object.fromEntries(new URL(request.url).searchParams),
       ),

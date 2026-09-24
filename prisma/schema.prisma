@@ -43,6 +43,10 @@ enum DriveCostPaymentStatus {
   UNPAID
   PAID
 }
+enum DailyExpenseTransactionType {
+  BALANCE_ADDED
+  EXPENSE
+}
 model User {
   id String @id @default(cuid())
   name String?
@@ -60,6 +64,7 @@ model User {
   employee Employee?
   auditLogs AuditLog[]
   driveCosts DriveCost[]
+  dailyExpenseTransactions DailyExpenseTransaction[]
 }
 model Account {
   id String @id @default(cuid())
@@ -325,4 +330,52 @@ model SystemSetting {
   key String @id
   value Json
   updatedAt DateTime @updatedAt
+}
+
+model DailyExpenseLedger {
+  id String @id @default(cuid())
+  workspaceKey String @unique @db.VarChar(64)
+  currency String @db.VarChar(3)
+  timezone String @db.VarChar(100)
+  createdAt DateTime @default(now())
+  categories DailyExpenseCategory[]
+  transactions DailyExpenseTransaction[]
+}
+
+model DailyExpenseCategory {
+  id String @id @default(cuid())
+  ledgerId String
+  name String @db.VarChar(80)
+  /// PostgreSQL generates Unicode lowercase with und-x-icu; callers cannot override it.
+  normalizedName String @default(dbgenerated())
+  archived Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ledger DailyExpenseLedger @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  transactions DailyExpenseTransaction[]
+  @@unique([ledgerId, normalizedName])
+  @@unique([ledgerId, id])
+  @@index([ledgerId, archived, name])
+}
+
+model DailyExpenseTransaction {
+  id String @id @default(cuid())
+  ledgerId String
+  type DailyExpenseTransactionType
+  amount Decimal @db.Decimal(18, 2)
+  categoryId String?
+  date DateTime @db.Date
+  note String? @db.VarChar(1000)
+  createdById String
+  createdAt DateTime @default(now())
+  idempotencyKey String @db.VarChar(128)
+  payloadHash String @db.VarChar(64)
+  ledger DailyExpenseLedger @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  category DailyExpenseCategory? @relation(fields: [ledgerId, categoryId], references: [ledgerId, id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  @@unique([ledgerId, idempotencyKey])
+  @@index([ledgerId, date(sort: Desc), createdAt(sort: Desc), id(sort: Desc)])
+  @@index([ledgerId, type, date(sort: Desc)])
+  @@index([ledgerId, categoryId, date(sort: Desc)])
+  @@index([createdById])
 }

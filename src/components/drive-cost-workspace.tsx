@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
+import { skipToken } from "@reduxjs/toolkit/query/react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -19,34 +20,28 @@ import {
   Loading,
   Notice,
   PageHeader,
+  Refresh,
   Table,
   type DataRow,
 } from "./ui";
-import { api, useDebouncedValue, useResource } from "./use-resource";
+import { useDebouncedValue } from "@/lib/client/use-debounced-value";
+import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
+import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
+import { useQueryView } from "@/store/use-query-view";
+import { useFreshness } from "@/store/freshness";
+import { errorMessage } from "@/store/api/errors";
+import {
+  useDriveCostsQuery,
+  useDriveCostCalculationQuery,
+  useSaveDriveCostMutation,
+  useDeleteDriveCostMutation,
+  useUpdateDriveCostPaymentMutation,
+  type CalculationArgs,
+} from "@/store/features/drive-costs/api";
 import {
   DRIVE_COST_RATES,
   type DriveCostRateType as RateType,
 } from "@/modules/drive-costs/rates";
-
-type DriveCostRecord = {
-  id: string;
-  date: string;
-  destinationFrom: string;
-  destinationTo: string;
-  kilometers: string | number;
-  isRoundTrip?: boolean;
-  rateType: RateType;
-  paymentStatus: "UNPAID" | "PAID";
-  ratePerKilometer: string | number;
-  totalCost: string | number;
-};
-
-type DriveCostData = {
-  items: DriveCostRecord[];
-  total: number;
-  page: number;
-  pageSize: number;
-};
 
 type DriveCostDraft = {
   id?: string;
@@ -56,26 +51,6 @@ type DriveCostDraft = {
   kilometers: string;
   isRoundTrip: boolean;
   rateType: RateType;
-};
-
-type CalcBreakdown = {
-  records: number;
-  kilometers: string;
-  totalCost: string;
-};
-
-type CalcResult = {
-  dateFrom: string;
-  dateTo: string;
-  isSingleDay: boolean;
-  totalRecords: number;
-  totalKilometers: string;
-  totalCost: string;
-  breakdown: {
-    inTime: CalcBreakdown;
-    overTime: CalcBreakdown;
-  };
-  records: DriveCostRecord[];
 };
 
 const PAGE_SIZE = 25;
@@ -134,50 +109,101 @@ export function DriveCostWorkspace({
 }: {
   canEditPaymentStatus?: boolean;
 }) {
-  const [query, setQuery] = useState("");
+  const { params: urlParams, update } = useUrlFilters();
+  const query = urlParams.get("q") || "";
   const search = useDebouncedValue(query);
-  const [dateDraft, setDateDraft] = useState({ from: "", to: "" });
-  const [dateFilters, setDateFilters] = useState({ from: "", to: "" });
+  const dateFilters = {
+    from: urlParams.get("from") || "",
+    to: urlParams.get("to") || "",
+  };
+  const dateFilterKey = `${dateFilters.from}|${dateFilters.to}`;
+  const [dateEdit, setDateEdit] = useState({
+    key: dateFilterKey,
+    ...dateFilters,
+  });
+  const dateDraft = dateEdit.key === dateFilterKey ? dateEdit : dateFilters;
+  const setDateDraft = (draft: { from: string; to: string }) =>
+    setDateEdit({ key: dateFilterKey, ...draft });
   const params = new URLSearchParams({ q: search });
   if (dateFilters.from) params.set("from", dateFilters.from);
   if (dateFilters.to) params.set("to", dateFilters.to);
   const filterKey = params.toString();
-  const [pagination, setPagination] = useState({ filterKey: "", page: 1 });
-  const page = pagination.filterKey === filterKey ? pagination.page : 1;
+  const page = pageFromSearch(urlParams.get("page"));
   const [editing, setEditing] = useState<DriveCostDraft | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
-  const requestUrl = `/api/admin/drive-costs?page=${page}&pageSize=${PAGE_SIZE}&${filterKey}`;
-  const { data, error, loading, refresh } =
-    useResource<DriveCostData>(requestUrl);
+  const costsQuery = useDriveCostsQuery(
+    {
+      page,
+      pageSize: PAGE_SIZE,
+      q: search,
+      ...(dateFilters.from ? { from: dateFilters.from } : {}),
+      ...(dateFilters.to ? { to: dateFilters.to } : {}),
+    },
+    useFreshness(),
+  );
+  const costsView = useQueryView(costsQuery);
+  const { refresh, isFetching } = costsView;
+  const waitingForSearch = query !== search;
+  const data = waitingForSearch ? undefined : costsView.data;
+  const error = waitingForSearch ? "" : costsView.error;
+  const loading = waitingForSearch || costsView.loading;
+  const [saveDriveCost] = useSaveDriveCostMutation();
+  const [deleteDriveCost] = useDeleteDriveCostMutation();
+  const [updatePayment] = useUpdateDriveCostPaymentMutation();
 
-  // Calculator state
+  // Draft inputs are local; the calculation and records belong to RTK Query.
   const [calcMode, setCalcMode] = useState<"single" | "range">("single");
   const [calcDate, setCalcDate] = useState(today());
   const [calcFrom, setCalcFrom] = useState(today());
   const [calcTo, setCalcTo] = useState(today());
-  const [calcBusy, setCalcBusy] = useState(false);
-  const [calcError, setCalcError] = useState("");
-  const [calcResult, setCalcResult] = useState<CalcResult | null>(null);
+  const [calcArgs, setCalcArgs] = useState<CalculationArgs>();
   const [calcOpen, setCalcOpen] = useState(false);
+  const calculationQuery = useDriveCostCalculationQuery(calcArgs ?? skipToken, {
+    ...useFreshness(),
+    skip: !calcOpen,
+  });
+  const {
+    data: calcResult,
+    error: calcError,
+    isFetching: calcBusy,
+    refresh: refreshCalculation,
+  } = useQueryView(calculationQuery);
 
-  function setPage(nextPage: number) {
-    setPagination({ filterKey, page: nextPage });
+  function setPage(page: number) {
+    update({ page });
+  }
+
+  async function refreshCosts() {
+    try {
+      await refresh().unwrap();
+      if (calcArgs && calcOpen) await refreshCalculation().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // Preserve the uncertainty gate until authoritative reads succeed.
+    }
+  }
+
+  async function showWriteError(error: unknown) {
+    setActionError(errorMessage(error));
+    if (isAmbiguousWrite(error)) {
+      setNeedsReconcile(true);
+      await refreshCosts();
+    }
   }
 
   function applyDateFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setDateFilters({ ...dateDraft });
-    setPage(1);
+    update({ from: dateDraft.from, to: dateDraft.to, page: 1 });
   }
 
   function resetFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setQuery("");
     setDateDraft({ from: "", to: "" });
-    setDateFilters({ from: "", to: "" });
-    setPage(1);
+    update({ q: "", from: "", to: "", page: 1 });
   }
 
   function openNew() {
@@ -201,132 +227,92 @@ export function DriveCostWorkspace({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || submitting.current || needsReconcile) return;
     const kilometers = Number(editing.kilometers);
     if (!Number.isFinite(kilometers) || kilometers <= 0) {
       setActionError("Enter a distance greater than zero.");
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     setMessage("");
     try {
-      await api(`/api/admin/drive-costs${editing.id ? `/${editing.id}` : ""}`, {
-        method: editing.id ? "PATCH" : "POST",
-        body: JSON.stringify({
+      await saveDriveCost({
+        id: editing.id,
+        input: {
           date: editing.date,
           destinationFrom: editing.destinationFrom.trim(),
           destinationTo: editing.destinationTo.trim(),
           kilometers,
           isRoundTrip: editing.isRoundTrip,
           rateType: editing.rateType,
-        }),
-      });
+        },
+      }).unwrap();
       setEditing(null);
       setMessage(
         editing.id
           ? "Drive cost updated successfully."
           : "Drive cost added successfully.",
       );
-      refresh();
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save this drive cost.",
-      );
+      await showWriteError(error);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
 
   async function changePaymentStatus(row: DataRow) {
+    if (submitting.current || needsReconcile) return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     setMessage("");
     const paymentStatus = row.paymentStatus === "PAID" ? "UNPAID" : "PAID";
     try {
-      const updated = await api<DriveCostRecord>(
-        `/api/admin/drive-costs/${String(row.id)}/payment-status`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ paymentStatus }),
-        },
-      );
+      await updatePayment({ id: String(row.id), paymentStatus }).unwrap();
       setMessage(
         `Drive cost marked as ${paymentStatus === "PAID" ? "paid" : "unpaid"}.`,
       );
-      setCalcResult((current) =>
-        current
-          ? {
-              ...current,
-              records: current.records.map((record) =>
-                record.id === updated.id
-                  ? { ...record, paymentStatus: updated.paymentStatus }
-                  : record,
-              ),
-            }
-          : current,
-      );
-      refresh();
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to update payment status.",
-      );
+      await showWriteError(error);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
 
   async function remove(row: DataRow) {
+    if (submitting.current || needsReconcile) return;
     const from = String(row.destinationFrom ?? "this destination");
     const to = String(row.destinationTo ?? "this destination");
     if (!window.confirm(`Delete the drive cost from ${from} to ${to}?`)) return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     setMessage("");
     try {
-      await api(`/api/admin/drive-costs/${String(row.id)}`, {
-        method: "DELETE",
-      });
+      await deleteDriveCost(String(row.id)).unwrap();
       setMessage("Drive cost deleted successfully.");
       if ((data?.items.length || 0) === 1 && page > 1) setPage(page - 1);
-      else refresh();
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to delete this drive cost.",
-      );
+      await showWriteError(error);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
 
-  async function runCalculation() {
-    setCalcBusy(true);
-    setCalcError("");
-    setCalcResult(null);
-    try {
-      const params = new URLSearchParams();
-      if (calcMode === "single") {
-        params.set("from", calcDate);
-      } else {
-        params.set("from", calcFrom);
-        params.set("to", calcTo);
-      }
-      const result = await api<CalcResult>(
-        `/api/admin/drive-costs/calculate?${params.toString()}`,
-      );
-      setCalcResult(result);
-    } catch (err) {
-      setCalcError(
-        err instanceof Error ? err.message : "Unable to calculate costs.",
-      );
-    } finally {
-      setCalcBusy(false);
+  function runCalculation() {
+    const args =
+      calcMode === "single"
+        ? { from: calcDate }
+        : { from: calcFrom, to: calcTo };
+    if (calcArgs?.from === args.from && calcArgs?.to === args.to) {
+      void refreshCalculation();
+    } else {
+      setCalcArgs(args);
     }
   }
 
@@ -368,6 +354,7 @@ export function DriveCostWorkspace({
         description="Calculate and keep a clear record of every drive."
         action={
           <div className="page-header-actions">
+            <Refresh onClick={() => void refreshCosts()} />
             <PdfDownloadButton
               href={`/api/admin/drive-costs/report?${filterKey}`}
               filename="drive-cost-report.pdf"
@@ -380,7 +367,11 @@ export function DriveCostWorkspace({
               <Calculator size={16} />
               {calcOpen ? "Hide calculator" : "Cost calculator"}
             </button>
-            <button className="button" disabled={busy} onClick={openNew}>
+            <button
+              className="button"
+              disabled={busy || needsReconcile}
+              onClick={openNew}
+            >
               <Plus size={16} />
               Add drive cost
             </button>
@@ -388,6 +379,16 @@ export function DriveCostWorkspace({
         }
       />
       <ErrorNotice message={error || (!editing ? actionError : "")} />
+      {isFetching && data && (
+        <p className="muted" role="status">
+          Refreshing drive costs…
+        </p>
+      )}
+      {needsReconcile && (
+        <Notice>
+          Refresh drive costs successfully before trying another change.
+        </Notice>
+      )}
       {message && (
         <Notice>
           <Check size={16} />
@@ -473,6 +474,11 @@ export function DriveCostWorkspace({
           </div>
 
           <ErrorNotice message={calcError} />
+          {calcBusy && calcResult && (
+            <p className="muted" role="status">
+              Refreshing calculation…
+            </p>
+          )}
 
           {calcResult && (
             <div className="calc-results">
@@ -632,7 +638,7 @@ export function DriveCostWorkspace({
               aria-label="Search drive costs"
               placeholder="Search destinations…"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => update({ q: event.target.value, page: 1 })}
             />
           </div>
           <span className="muted" style={{ fontSize: 11 }}>
@@ -665,7 +671,7 @@ export function DriveCostWorkspace({
                 {canEditPaymentStatus && (
                   <button
                     type="button"
-                    disabled={busy || loading}
+                    disabled={busy || needsReconcile || isFetching}
                     className="button small secondary"
                     aria-label={`Mark ${row.paymentStatus === "PAID" ? "unpaid" : "paid"} for drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
                     onClick={() => void changePaymentStatus(row)}
@@ -675,7 +681,7 @@ export function DriveCostWorkspace({
                 )}
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || needsReconcile}
                   className="icon-button"
                   aria-label={`Edit drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
                   onClick={() => openEdit(row)}
@@ -684,7 +690,7 @@ export function DriveCostWorkspace({
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || needsReconcile}
                   className="icon-button"
                   aria-label={`Delete drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
                   onClick={() => void remove(row)}
@@ -865,14 +871,18 @@ export function DriveCostWorkspace({
             </div>
             <div className="form-actions">
               <button
-                disabled={busy}
+                disabled={busy || needsReconcile}
                 type="button"
                 className="button secondary"
                 onClick={() => setEditing(null)}
               >
                 Cancel
               </button>
-              <button disabled={busy} type="submit" className="button">
+              <button
+                disabled={busy || needsReconcile}
+                type="submit"
+                className="button"
+              >
                 {busy ? "Saving…" : "Save drive cost"}
               </button>
             </div>

@@ -19,7 +19,7 @@ export async function requireUser() {
       userId: session.user.id,
       expires: { gt: new Date() },
     },
-    select: { id: true },
+    select: { id: true, expires: true },
   });
   if (!persistedSession)
     throw new DomainError(
@@ -45,7 +45,11 @@ export async function requireUser() {
       "Google authentication is required.",
       403,
     );
-  return { ...user, sessionId: session.sessionId };
+  return {
+    ...user,
+    sessionId: session.sessionId,
+    sessionExpires: persistedSession.expires.toISOString(),
+  };
 }
 export async function requireEmployee() {
   const user = await requireUser();

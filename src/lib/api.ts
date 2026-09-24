@@ -13,6 +13,19 @@ export async function api(handler: () => Promise<unknown>): Promise<Response> {
     // Preserve framework control flow during Cache Components prerendering.
     unstable_rethrow(error);
     let safe = error instanceof DomainError ? error : undefined;
+    const fieldErrors =
+      error instanceof ZodError
+        ? Object.fromEntries(
+            [...new Set(error.issues.map((issue) => issue.path.join(".")))].map(
+              (path) => [
+                path || "_form",
+                error.issues
+                  .filter((issue) => issue.path.join(".") === path)
+                  .map((issue) => issue.message),
+              ],
+            ),
+          )
+        : undefined;
     if (error instanceof ZodError)
       safe = new DomainError(
         "VALIDATION_ERROR",
@@ -58,6 +71,7 @@ export async function api(handler: () => Promise<unknown>): Promise<Response> {
           message:
             safe?.message ??
             "Unable to complete the request. Please try again.",
+          ...(fieldErrors ? { fieldErrors } : {}),
         },
       },
       { status: safe?.status ?? 500, headers: { "Cache-Control": "no-store" } },

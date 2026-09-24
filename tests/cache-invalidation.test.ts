@@ -40,6 +40,7 @@ import { POST } from "@/app/api/admin/[resource]/route";
 import { PATCH, DELETE } from "@/app/api/admin/[resource]/[id]/route";
 import { GET } from "@/app/api/admin/lookups/[resource]/route";
 import { CACHE_TAGS } from "@/lib/cache/tags";
+import { mayCacheReferenceDisplay } from "@/lib/cache/invalidation";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -102,6 +103,32 @@ describe("display cache mutation boundary", () => {
       200,
     );
     expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+  it("reports a committed write as successful and bypasses the cache if expiry fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.revalidate.mockImplementationOnce(() => {
+      throw new Error("private cache backend details");
+    });
+    const response = await PATCH(request("PATCH"), context("offices"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { id: "record-1" },
+    });
+    expect(mocks.update).toHaveBeenCalledOnce();
+    expect(mayCacheReferenceDisplay("offices")).toBe(false);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(
+      "private cache backend details",
+    );
+    // A later successful expiry restores the small display cache.
+    await PATCH(request("PATCH"), context("offices"));
+    expect(mayCacheReferenceDisplay("offices")).toBe(true);
+    log.mockRestore();
+  });
+  it("supports disabling the process-local reference cache for multiple workers", () => {
+    vi.stubEnv("REFERENCE_DISPLAY_CACHE", "disabled");
+    expect(mayCacheReferenceDisplay("offices")).toBe(false);
+    vi.unstubAllEnvs();
   });
   it("reauthorizes every lookup request, including after an earlier successful response", async () => {
     expect((await GET(request("GET"), context("offices"))).status).toBe(200);

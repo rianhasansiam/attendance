@@ -11,13 +11,13 @@ export function GET(
   context: { params: Promise<{ resource: string }> },
 ) {
   return api(async () => {
-    await requireAdmin();
+    const actor = await requireAdmin();
     const resource = lookupResourceSchema.parse(
       (await context.params).resource,
     );
     const query = paginationSchema.parse(
       Object.fromEntries(new URL(request.url).searchParams),
     );
-    return listLookupOptions(resource, query);
+    return listLookupOptions(actor, resource, query);
   });
 }

@@ -1,6 +1,8 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { authorizeRole } from "@/modules/auth/authorization";
+import type { Actor } from "@/modules/management/permissions";
 import { DomainError } from "@/lib/errors";
 import { createReportPdf } from "@/modules/reports/pdf";
 import { driveCostWhere, type DriveCostFilters } from "./filters";
@@ -17,7 +19,11 @@ const reportSelect = {
   totalCost: true,
 } satisfies Prisma.DriveCostSelect;
 
-export async function getDriveCostReport(filters: DriveCostFilters) {
+export async function getDriveCostReport(
+  actor: Actor,
+  filters: DriveCostFilters,
+) {
+  authorizeRole(actor.role, "MANAGE_DRIVER");
   // Fetch the complete filtered set in one bounded query. Summing these same
   // rows keeps the PDF detail and totals consistent during concurrent edits.
   const records = await db.driveCost.findMany({

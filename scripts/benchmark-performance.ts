@@ -23,6 +23,7 @@ async function main() {
   db.$on("query", () => queries++);
   Object.assign(globalThis, { attendanceDb: db });
   try {
+    const admin = { id: "benchmark-admin", role: "ADMIN" } as const;
     const now = new Date("2026-09-20T12:00:00.000Z");
     const offices = Array.from({ length: 12 }, (_, i) => ({
       id: `perf-office-${i}`,
@@ -119,11 +120,13 @@ async function main() {
     }
     const results = [];
     results.push(
-      await measure("admin-dashboard-12-offices", () => getAdminDashboard(now)),
+      await measure("admin-dashboard-12-offices", () =>
+        getAdminDashboard(admin, now),
+      ),
     );
     results.push(
       await measure("report-first-page-30-days", () =>
-        getReport({
+        getReport(admin, {
           from: "2026-08-22",
           to: "2026-09-20",
           format: "json",

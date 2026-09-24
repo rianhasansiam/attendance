@@ -1,8 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState, type FormEvent } from "react";
-import type { startAuthentication } from "@simplewebauthn/browser";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -38,19 +43,33 @@ import {
   time,
   type DataRow,
 } from "./ui";
-import { api, useResource } from "./use-resource";
+import { baseApi } from "@/store/api/base-api";
+import { errorMessage } from "@/store/api/errors";
+import { useAppDispatch } from "@/store/hooks";
+import { useQueryView } from "@/store/use-query-view";
+import { useFreshness } from "@/store/freshness";
+import {
+  attendanceChangedTags,
+  devicesChangedTags,
+  useEmployeeDayQuery,
+  useEmployeeHistoryQuery,
+  useEmployeeDevicesQuery,
+  useRevokeEmployeeDeviceMutation,
+} from "@/store/features/attendance/api";
+import {
+  useEmployeeLeavesQuery,
+  useCreateEmployeeLeaveMutation,
+  useCancelEmployeeLeaveMutation,
+} from "@/store/features/leave/api";
+import {
+  recordAttendance,
+  registerDevice,
+  UncertainCeremonyError,
+  isAmbiguousWrite,
+} from "@/lib/client/attendance-ceremony";
+import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { LateReasonDialog } from "./late-reason-dialog";
 
-type EmployeeState = {
-  employee: DataRow;
-  shift: DataRow | null;
-  today: DataRow | null;
-  recent: DataRow[];
-  devices: DataRow[];
-  network: { verified: boolean | null };
-  serverTime?: string;
-  attendanceDate?: string;
-};
 const attendanceColumns = [
   { key: "attendanceDate", label: "Date", format: "date" as const },
   { key: "checkInAt", label: "Check in", format: "time" as const },
@@ -65,55 +84,38 @@ const attendanceColumns = [
   { key: "lateReason", label: "Late reason", format: "text" as const },
   { key: "status", label: "Status", format: "badge" as const },
 ];
-function getLocation(): Promise<{
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-}> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation)
-      return reject(
-        new Error(
-          "Location is unavailable in this browser. Use a supported browser with location enabled.",
-        ),
-      );
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) =>
-        resolve({
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
-        }),
-      (error) =>
-        reject(
-          new Error(
-            error.code === 1
-              ? "Location permission is required. Allow location access in your browser and try again."
-              : "Your location could not be determined. Move near a window and try again.",
-          ),
-        ),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
-    );
-  });
-}
 function friendlyError(error: unknown) {
   if (error instanceof Error && error.name === "NotAllowedError")
     return "Device verification was cancelled or timed out. Please try again.";
-  return error instanceof Error
-    ? error.message
-    : "Something went wrong. Please try again.";
+  return errorMessage(error);
 }
 export function EmployeeDashboard() {
-  const { data, error, loading, refresh } =
-    useResource<EmployeeState>("/api/attendance/me");
+  const dispatch = useAppDispatch();
+  const dayQuery = useEmployeeDayQuery(undefined, useFreshness(true));
+  const { data, error, loading, refresh, isFetching } = useQueryView(dayQuery);
+  const submitting = useRef(false);
+  const ceremony = useRef<AbortController | null>(null);
+  useEffect(() => () => ceremony.current?.abort(), []);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
+  async function refreshDay() {
+    try {
+      await refresh().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // Keep the operation disabled until an authoritative read succeeds.
+    }
+  }
   const [busy, setBusy] = useState("");
+  const [confirmedOperation, setConfirmedOperation] = useState<{
+    action: "CHECK_IN" | "CHECK_OUT";
+    attendanceDate: string;
+    observedRead?: number;
+  }>();
   const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
-  const [submittedAttendance, setSubmittedAttendance] =
-    useState<DataRow | null>(null);
   const [dismissedReasonId, setDismissedReasonId] = useState("");
   const [savedReasonId, setSavedReasonId] = useState("");
-  const reasonAttendance = data?.today ?? submittedAttendance;
+  const reasonAttendance = data?.today;
   const pendingReason =
     reasonAttendance?.id &&
     reasonAttendance.checkInAt &&
@@ -126,15 +128,10 @@ export function EmployeeDashboard() {
   const closeReason = useCallback(() => {
     setDismissedReasonId(pendingReasonId);
   }, [pendingReasonId]);
-  const saveReason = useCallback(
-    (record: DataRow) => {
-      setSavedReasonId(String(record.id));
-      setSubmittedAttendance(null);
-      setSuccess("Your late attendance reason has been saved.");
-      refresh();
-    },
-    [refresh],
-  );
+  const saveReason = useCallback((record: DataRow) => {
+    setSavedReasonId(String(record.id));
+    setSuccess("Your late attendance reason has been saved.");
+  }, []);
   const reasonDialog =
     pendingReason && dismissedReasonId !== pendingReasonId ? (
       <LateReasonDialog
@@ -145,6 +142,7 @@ export function EmployeeDashboard() {
       />
     ) : null;
   async function attend(action: "CHECK_IN" | "CHECK_OUT") {
+    if (submitting.current || needsReconcile) return;
     setActionError("");
     setSuccess("");
     if (!navigator.onLine) {
@@ -153,55 +151,45 @@ export function EmployeeDashboard() {
       );
       return;
     }
+    submitting.current = true;
+    const controller = new AbortController();
+    ceremony.current = controller;
     try {
-      setBusy("Preparing verification…");
-      const challenge = await api<{
-        required?: boolean;
-        challengeId?: string;
-        options?: Parameters<typeof startAuthentication>[0]["optionsJSON"];
-      }>("/api/webauthn/authenticate/options", {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      });
-      let response;
-      if (challenge.required !== false && challenge.options) {
-        setBusy("Verify with your registered device…");
-        const { startAuthentication } = await import("@simplewebauthn/browser");
-        response = await startAuthentication({
-          optionsJSON: challenge.options,
-        });
-      }
-      let location;
-      if (
-        nested(data?.employee || {}, "office.policy.requireGeofence") !== false
-      ) {
-        setBusy("Getting your location…");
-        location = await getLocation();
-      }
-      setBusy("Recording your attendance…");
-      const record = await api<DataRow>(
-        `/api/attendance/${action === "CHECK_IN" ? "check-in" : "check-out"}`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            challengeId: challenge.challengeId,
-            response,
-            location,
-          }),
+      const record = await recordAttendance({
+        action,
+        requireGeofence: data?.employee.office.policy.requireGeofence !== false,
+        progress: (message) => {
+          if (!controller.signal.aborted) setBusy(message);
         },
-      );
-      setSubmittedAttendance(record);
+        signal: controller.signal,
+      });
+      controller.signal.throwIfAborted();
+      setConfirmedOperation({
+        action,
+        attendanceDate: record.attendanceDate,
+        observedRead: dayQuery.fulfilledTimeStamp,
+      });
       if (action === "CHECK_IN") setDismissedReasonId("");
       setSuccess(
         action === "CHECK_IN"
           ? "You’re checked in. Have a good workday!"
           : "You’re checked out. Your attendance has been recorded.",
       );
-      refresh();
+      dispatch(baseApi.util.invalidateTags([...attendanceChangedTags]));
     } catch (error) {
+      if (controller.signal.aborted) return;
       setActionError(friendlyError(error));
+      if (error instanceof UncertainCeremonyError) {
+        setNeedsReconcile(true);
+        setBusy("Checking the latest attendance…");
+        await refreshDay();
+      }
     } finally {
-      setBusy("");
+      if (ceremony.current === controller) {
+        ceremony.current = null;
+        submitting.current = false;
+        setBusy("");
+      }
     }
   }
   if (loading && !data)
@@ -216,7 +204,7 @@ export function EmployeeDashboard() {
       <>
         <PageHeader title="My day" description="Your workday, at a glance." />
         <ErrorNotice message={error} />
-        <Refresh onClick={refresh} />
+        <Refresh onClick={() => void refreshDay()} />
         {reasonDialog}
       </>
     );
@@ -224,6 +212,13 @@ export function EmployeeDashboard() {
   const policy = (office.policy || {}) as DataRow;
   const user = data.employee.user as DataRow;
   const today = data.today;
+  const awaitingConfirmedState =
+    !!confirmedOperation &&
+    (dayQuery.fulfilledTimeStamp === confirmedOperation.observedRead ||
+      (confirmedOperation.attendanceDate === today?.attendanceDate &&
+        (confirmedOperation.action === "CHECK_IN"
+          ? !today?.checkInAt
+          : !today?.checkOutAt)));
   const approved = data.devices.filter(
     (device) => device.approved && !device.revokedAt,
   );
@@ -233,9 +228,17 @@ export function EmployeeDashboard() {
         eyebrow="YOUR WORKDAY"
         title={`Hello, ${String(user?.name || "there").split(" ")[0]}.`}
         description="A fresh start. A clear view of your day."
-        action={<Refresh onClick={refresh} />}
+        action={<Refresh onClick={() => void refreshDay()} />}
       />
       <ErrorNotice message={error || actionError} />
+      {isFetching && data && (
+        <p className="muted" role="status">
+          Refreshing attendance…
+        </p>
+      )}
+      {needsReconcile && (
+        <Notice>Refresh attendance successfully before trying again.</Notice>
+      )}
       {success && (
         <Notice>
           <Check size={17} />
@@ -281,7 +284,14 @@ export function EmployeeDashboard() {
           <div className="checkin-actions">
             <button
               className="button"
-              disabled={!!busy || !!today?.checkInAt || !data.shift}
+              disabled={
+                !!busy ||
+                needsReconcile ||
+                awaitingConfirmedState ||
+                isFetching ||
+                !!today?.checkInAt ||
+                !data.shift
+              }
               onClick={() => attend("CHECK_IN")}
             >
               <LogIn size={17} />
@@ -289,7 +299,14 @@ export function EmployeeDashboard() {
             </button>
             <button
               className="button secondary"
-              disabled={!!busy || !today?.checkInAt || !!today?.checkOutAt}
+              disabled={
+                !!busy ||
+                needsReconcile ||
+                awaitingConfirmedState ||
+                isFetching ||
+                !today?.checkInAt ||
+                !!today?.checkOutAt
+              }
               onClick={() => attend("CHECK_OUT")}
             >
               <LogOut size={17} />
@@ -441,19 +458,17 @@ function Verification({
   );
 }
 export function EmployeeHistory() {
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [page, setPage] = useState(1);
-  const query = new URLSearchParams({
-    page: String(page),
-    ...(from ? { from } : {}),
-    ...(to ? { to } : {}),
-  });
-  const { data, error, loading, refresh } = useResource<{
-    records: DataRow[];
-    total: number;
-    pageSize: number;
-  }>(`/api/attendance/history?${query}`);
+  const { params, update } = useUrlFilters();
+  const from = params.get("from") || "";
+  const to = params.get("to") || "";
+  const page = pageFromSearch(params.get("page"), 10000);
+  const setPage = (page: number) => update({ page });
+  const historyQuery = useEmployeeHistoryQuery(
+    { page, ...(from ? { from } : {}), ...(to ? { to } : {}) },
+    useFreshness(),
+  );
+  const { data, error, loading, refresh, isFetching } =
+    useQueryView(historyQuery);
   return (
     <>
       <PageHeader
@@ -463,6 +478,11 @@ export function EmployeeHistory() {
         action={<Refresh onClick={refresh} />}
       />
       <ErrorNotice message={error} />
+      {isFetching && data && (
+        <p className="muted" role="status">
+          Refreshing records…
+        </p>
+      )}
       <section className="card">
         <div className="card-body">
           <div className="filter-grid">
@@ -473,8 +493,7 @@ export function EmployeeHistory() {
                 type="date"
                 value={from}
                 onChange={(e) => {
-                  setFrom(e.target.value);
-                  setPage(1);
+                  update({ from: e.target.value, page: 1 });
                 }}
               />
             </div>
@@ -485,8 +504,7 @@ export function EmployeeHistory() {
                 type="date"
                 value={to}
                 onChange={(e) => {
-                  setTo(e.target.value);
-                  setPage(1);
+                  update({ to: e.target.value, page: 1 });
                 }}
               />
             </div>
@@ -509,68 +527,84 @@ export function EmployeeHistory() {
   );
 }
 export function EmployeeDevices() {
-  const [page, setPage] = useState(1);
-  const { data, error, loading, refresh } = useResource<{
-    items: DataRow[];
-    total: number;
-    pageSize: number;
-  }>(`/api/webauthn/devices?page=${page}`);
+  const dispatch = useAppDispatch();
+  const { params, update } = useUrlFilters();
+  const page = pageFromSearch(params.get("page"));
+  const setPage = (page: number) => update({ page });
+  const devicesQuery = useEmployeeDevicesQuery({ page }, useFreshness());
+  const { data, error, loading, refresh, isFetching } =
+    useQueryView(devicesQuery);
+  const [revokeDevice] = useRevokeEmployeeDeviceMutation();
+  const submitting = useRef(false);
+  const ceremony = useRef<AbortController | null>(null);
+  useEffect(() => () => ceremony.current?.abort(), []);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
+  async function refreshDevices() {
+    try {
+      await refresh().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // Do not offer another write while the preceding outcome is unknown.
+    }
+  }
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
   async function register(event: FormEvent) {
     event.preventDefault();
+    if (submitting.current || needsReconcile) return;
+    submitting.current = true;
+    const controller = new AbortController();
+    ceremony.current = controller;
     setBusy(true);
     setActionError("");
     setSuccess("");
     try {
-      const challenge = await api<{
-        challengeId: string;
-        options: Parameters<typeof startRegistration>[0]["optionsJSON"];
-      }>("/api/webauthn/register/options", { method: "POST", body: "{}" });
-      const { startRegistration } = await import("@simplewebauthn/browser");
-      const response = await startRegistration({
-        optionsJSON: challenge.options,
-      });
-      await api("/api/webauthn/register/verify", {
-        method: "POST",
-        body: JSON.stringify({
-          challengeId: challenge.challengeId,
-          response,
-          name,
-        }),
-      });
+      await registerDevice(name, controller.signal);
+      controller.signal.throwIfAborted();
       setSuccess(
         "Device registered. Your administrator may need to approve it before you record attendance.",
       );
       setName("");
       setPage(1);
-      refresh();
+      dispatch(baseApi.util.invalidateTags([...devicesChangedTags]));
     } catch (error) {
+      if (controller.signal.aborted) return;
       setActionError(friendlyError(error));
+      if (error instanceof UncertainCeremonyError) {
+        setNeedsReconcile(true);
+        await refreshDevices();
+      }
     } finally {
-      setBusy(false);
+      if (ceremony.current === controller) {
+        ceremony.current = null;
+        submitting.current = false;
+        setBusy(false);
+      }
     }
   }
   async function revoke(id: string) {
+    if (submitting.current || needsReconcile) return;
     if (
       !window.confirm(
         "Revoke this device? It will no longer be able to verify attendance.",
       )
     )
       return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     try {
-      await api("/api/webauthn/devices", {
-        method: "DELETE",
-        body: JSON.stringify({ id }),
-      });
-      refresh();
+      await revokeDevice(id).unwrap();
     } catch (error) {
       setActionError(friendlyError(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await refreshDevices();
+      }
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -581,9 +615,17 @@ export function EmployeeDevices() {
         eyebrow="SECURITY"
         title="My devices"
         description="A familiar device. An extra layer of confidence."
-        action={<Refresh onClick={refresh} />}
+        action={<Refresh onClick={() => void refreshDevices()} />}
       />
       <ErrorNotice message={error || actionError} />
+      {isFetching && data && (
+        <p className="muted" role="status">
+          Refreshing devices…
+        </p>
+      )}
+      {needsReconcile && (
+        <Notice>Refresh devices successfully before trying again.</Notice>
+      )}
       {success && <Notice>{success}</Notice>}
       <div className="content-grid">
         <section className="card">
@@ -610,7 +652,11 @@ export function EmployeeDevices() {
                     onChange={(e) => setName(e.target.value)}
                   />
                 </div>
-                <button disabled={busy} className="button" type="submit">
+                <button
+                  disabled={busy || needsReconcile}
+                  className="button"
+                  type="submit"
+                >
                   <Plus size={16} />
                   {busy ? "Verifying…" : "Register device"}
                 </button>
@@ -673,7 +719,7 @@ export function EmployeeDevices() {
                 />
                 {!device.revokedAt && (
                   <button
-                    disabled={busy}
+                    disabled={busy || needsReconcile}
                     className="button small secondary"
                     onClick={() => revoke(String(device.id))}
                   >
@@ -696,48 +742,73 @@ export function EmployeeDevices() {
   );
 }
 export function EmployeeLeaves() {
-  const [page, setPage] = useState(1);
-  const { data, error, loading, refresh } = useResource<{
-    items: DataRow[];
-    total: number;
-    pageSize: number;
-  }>(`/api/employee/leaves?page=${page}`);
+  const { params, update } = useUrlFilters();
+  const page = pageFromSearch(params.get("page"));
+  const setPage = (page: number) => update({ page });
+  const leavesQuery = useEmployeeLeavesQuery({ page }, useFreshness());
+  const { data, error, loading, refresh, isFetching } =
+    useQueryView(leavesQuery);
+  const [createLeave] = useCreateEmployeeLeaveMutation();
+  const [cancelLeave] = useCancelEmployeeLeaveMutation();
+  const submitting = useRef(false);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
+  async function refreshLeaves() {
+    try {
+      await refresh().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // An uncertain write must be reconciled before another submission.
+    }
+  }
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting.current || needsReconcile) return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     const form = new FormData(event.currentTarget);
     try {
-      await api("/api/employee/leaves", {
-        method: "POST",
-        body: JSON.stringify(Object.fromEntries(form)),
-      });
+      await createLeave({
+        startDate: String(form.get("startDate") || ""),
+        endDate: String(form.get("endDate") || ""),
+        reason: String(form.get("reason") || ""),
+      }).unwrap();
       setShow(false);
       setPage(1);
       setSuccess("Leave request submitted for review.");
-      refresh();
     } catch (error) {
       setActionError(friendlyError(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await refreshLeaves();
+      }
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
   async function cancel(id: string) {
+    if (submitting.current || needsReconcile) return;
     if (!window.confirm("Cancel this leave request?")) return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     setSuccess("");
     try {
-      await api(`/api/employee/leaves/${id}`, { method: "DELETE" });
+      await cancelLeave(id).unwrap();
       setSuccess("Your leave request has been cancelled.");
-      refresh();
     } catch (error) {
       setActionError(friendlyError(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await refreshLeaves();
+      }
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -748,13 +819,26 @@ export function EmployeeLeaves() {
         title="Leave requests"
         description="Plan a little space for life outside work."
         action={
-          <button className="button" onClick={() => setShow(!show)}>
-            <Plus size={16} />
-            Request leave
-          </button>
+          <div className="page-header-actions">
+            <Refresh onClick={() => void refreshLeaves()} />
+            <button className="button" onClick={() => setShow(!show)}>
+              <Plus size={16} />
+              Request leave
+            </button>
+          </div>
         }
       />
       <ErrorNotice message={error || (!show ? actionError : "")} />
+      {isFetching && data && (
+        <p className="muted" role="status">
+          Refreshing leave requests…
+        </p>
+      )}
+      {needsReconcile && (
+        <Notice>
+          Refresh leave requests successfully before trying again.
+        </Notice>
+      )}
       {success && <Notice>{success}</Notice>}
       {show && (
         <section className="card" style={{ marginBottom: 24 }}>
@@ -792,7 +876,11 @@ export function EmployeeLeaves() {
               >
                 Cancel
               </button>
-              <button disabled={busy} className="button" type="submit">
+              <button
+                disabled={busy || needsReconcile}
+                className="button"
+                type="submit"
+              >
                 {busy ? "Submitting…" : "Submit request"}
                 <ArrowRight size={15} />
               </button>
@@ -821,7 +909,7 @@ export function EmployeeLeaves() {
               row.status === "PENDING" ? (
                 <button
                   className="button small secondary"
-                  disabled={busy}
+                  disabled={busy || needsReconcile}
                   onClick={() => cancel(String(row.id))}
                 >
                   Cancel request

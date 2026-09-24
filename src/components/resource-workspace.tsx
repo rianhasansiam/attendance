@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,29 +20,45 @@ import {
   nested,
   Notice,
   PageHeader,
+  Refresh,
   Table,
   type DataRow,
 } from "./ui";
-import { api, useDebouncedValue, useResource } from "./use-resource";
+import { useDebouncedValue } from "@/lib/client/use-debounced-value";
+import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
+import { errorMessage } from "@/store/api/errors";
+import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
+import { useFreshness } from "@/store/freshness";
+import { useQueryView } from "@/store/use-query-view";
+import {
+  useGetManagementQuery,
+  useGetReferenceQuery,
+  useLazyGetOfficeDefaultsQuery,
+  useWriteManagementMutation,
+} from "@/store/features/management/api";
+import type {
+  JsonRecord,
+  ManagementResource,
+  ReferenceResource,
+} from "@/store/features/management/contracts";
 import { Modal } from "./modal";
 export { Modal } from "./modal";
 import { fieldValue, resourceConfigs, type Field } from "./resource-config";
 
-type ResourceData = {
-  items: DataRow[];
-  total: number;
-  page: number;
-  pageSize: number;
-};
 function ReferenceField({ field, value }: { field: Field; value: string }) {
   const [query, setQuery] = useState("");
   const search = useDebouncedValue(query);
   const [pagination, setPagination] = useState({ query: "", page: 1 });
   const page = pagination.query === search ? pagination.page : 1;
   const [selection, setSelection] = useState(value);
-  const { data, loading, error } = useResource<ResourceData>(
-    `/api/admin/lookups/${field.resource}?page=${page}&pageSize=100&q=${encodeURIComponent(search)}`,
+  const result = useGetReferenceQuery(
+    {
+      resource: field.resource as ReferenceResource,
+      params: { page, pageSize: 100, q: search },
+    },
+    useFreshness(),
   );
+  const { data, loading, error, refresh } = useQueryView(result);
   const rows = items(data);
   return (
     <>
@@ -93,7 +109,18 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
           </button>
         </div>
       )}
-      {error && <small role="alert">{error}</small>}
+      {error && (
+        <>
+          <small role="alert">{error}</small>
+          <button
+            type="button"
+            className="button small secondary"
+            onClick={refresh}
+          >
+            Retry options
+          </button>
+        </>
+      )}
     </>
   );
 }
@@ -182,23 +209,41 @@ export function FormField({ field, row }: { field: Field; row: DataRow }) {
     </div>
   );
 }
-export function AdminResource({ resource }: { resource: string }) {
+export function AdminResource({ resource }: { resource: ManagementResource }) {
   const config = resourceConfigs[resource];
-  const [query, setQuery] = useState("");
+  const { params, update } = useUrlFilters();
+  const query = params.get("q") || "";
   const search = useDebouncedValue(query);
-  const [pagination, setPagination] = useState({ query: "", page: 1 });
-  const page = pagination.query === search ? pagination.page : 1;
+  const page = pageFromSearch(params.get("page"));
   function setPage(next: number) {
-    setPagination({ query: search, page: next });
+    update({ page: next });
   }
   const [editing, setEditing] = useState<DataRow | null>(null);
   const [viewing, setViewing] = useState<DataRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
-  const { data, error, loading, refresh } = useResource<ResourceData>(
-    `/api/admin/${resource}?page=${page}&pageSize=25&q=${encodeURIComponent(search)}`,
+  const result = useGetManagementQuery(
+    { resource, params: { page, pageSize: 25, q: search } },
+    useFreshness(),
   );
+  const view = useQueryView(result);
+  const searching = query !== search;
+  const data = searching ? undefined : view.data;
+  const loading = searching || view.loading;
+  const { error, refresh, isFetching } = view;
+  const [writeManagement] = useWriteManagementMutation();
+  const [loadOfficeDefaults] = useLazyGetOfficeDefaultsQuery();
+  async function refreshResource() {
+    try {
+      await refresh().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // A failed read cannot establish the outcome of an interrupted write.
+    }
+  }
   if (!config) return null;
   const fields = config.fields
     .filter((field) =>
@@ -223,31 +268,36 @@ export function AdminResource({ resource }: { resource: string }) {
     );
   async function mutate(
     id: string | null,
-    payload: DataRow,
-    method = id ? "PATCH" : "POST",
+    payload: JsonRecord,
+    method: "PATCH" | "POST" | "DELETE" = id ? "PATCH" : "POST",
   ) {
+    if (submitting.current || needsReconcile || isFetching) return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     setMessage("");
     try {
-      await api(`/api/admin/${resource}${id ? `/${id}` : ""}`, {
+      await writeManagement({
+        resource,
+        id: id || undefined,
         method,
-        body: JSON.stringify(payload),
-      });
+        body: payload,
+      }).unwrap();
       setEditing(null);
       setMessage("Your changes have been saved.");
-      refresh();
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save. Please try again.",
-      );
+      setActionError(errorMessage(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await refreshResource();
+      }
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
   async function openNew() {
+    if (submitting.current || needsReconcile || isFetching) return;
     setActionError("");
     if (resource !== "offices") {
       setEditing({});
@@ -255,14 +305,10 @@ export function AdminResource({ resource }: { resource: string }) {
     }
     setBusy(true);
     try {
-      const defaults = await api<DataRow>("/api/admin/office-defaults");
+      const defaults = await loadOfficeDefaults().unwrap();
       setEditing(defaults);
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to load office defaults.",
-      );
+      setActionError(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -270,7 +316,7 @@ export function AdminResource({ resource }: { resource: string }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const payload: DataRow = {};
+    const payload: JsonRecord = {};
     for (const field of fields) {
       const value = form.get(field.name);
       payload[field.name] =
@@ -288,7 +334,7 @@ export function AdminResource({ resource }: { resource: string }) {
                     "description",
                   ].includes(field.name)
                 ? null
-                : value;
+                : String(value ?? "");
     }
     await mutate(editing?.id ? String(editing.id) : null, payload);
   }
@@ -300,7 +346,11 @@ export function AdminResource({ resource }: { resource: string }) {
         description={config.description}
         action={
           !config.readOnly && !config.noCreate ? (
-            <button disabled={busy} className="button" onClick={openNew}>
+            <button
+              disabled={busy || needsReconcile || isFetching}
+              className="button"
+              onClick={openNew}
+            >
               <Plus size={16} />
               Add {config.singular}
             </button>
@@ -308,6 +358,11 @@ export function AdminResource({ resource }: { resource: string }) {
         }
       />
       <ErrorNotice message={error || (!editing ? actionError : "")} />
+      {needsReconcile && !editing && (
+        <Notice>
+          Refresh these records successfully before trying another change.
+        </Notice>
+      )}
       {message && (
         <Notice>
           <Check size={16} />
@@ -323,13 +378,18 @@ export function AdminResource({ resource }: { resource: string }) {
               placeholder={`Search ${config.title.toLowerCase()}…`}
               value={query}
               onChange={(event) => {
-                setQuery(event.target.value);
+                update({ q: event.target.value || null, page: null });
               }}
             />
           </div>
-          <span className="muted" style={{ fontSize: 11 }}>
-            {data?.total || 0} records
-          </span>
+          <div className="buttons">
+            <span className="muted" role="status" style={{ fontSize: 11 }}>
+              {isFetching && data
+                ? "Refreshing…"
+                : `${data?.total || 0} records`}
+            </span>
+            <Refresh onClick={() => void refreshResource()} />
+          </div>
         </div>
         {loading ? (
           <Loading />
@@ -343,7 +403,7 @@ export function AdminResource({ resource }: { resource: string }) {
                   <>
                     {!row.revokedAt && !row.approved && (
                       <button
-                        disabled={busy}
+                        disabled={busy || needsReconcile || isFetching}
                         className="button small"
                         onClick={() =>
                           mutate(String(row.id), { approved: true })
@@ -354,7 +414,7 @@ export function AdminResource({ resource }: { resource: string }) {
                     )}
                     {!row.revokedAt && (
                       <button
-                        disabled={busy}
+                        disabled={busy || needsReconcile || isFetching}
                         className="button small secondary"
                         onClick={() => {
                           if (
@@ -374,7 +434,7 @@ export function AdminResource({ resource }: { resource: string }) {
                     {row.status === "PENDING" && (
                       <>
                         <button
-                          disabled={busy}
+                          disabled={busy || needsReconcile || isFetching}
                           className="button small"
                           onClick={() => {
                             const reviewNote = window.prompt(
@@ -391,7 +451,7 @@ export function AdminResource({ resource }: { resource: string }) {
                           Approve
                         </button>
                         <button
-                          disabled={busy}
+                          disabled={busy || needsReconcile || isFetching}
                           className="button small secondary"
                           onClick={() => {
                             const reviewNote = window.prompt(
@@ -431,6 +491,7 @@ export function AdminResource({ resource }: { resource: string }) {
                     )}
                     <button
                       aria-label={`Edit ${config.singular}`}
+                      disabled={busy || needsReconcile || isFetching}
                       className="icon-button"
                       onClick={() => {
                         setEditing(row);
@@ -441,7 +502,7 @@ export function AdminResource({ resource }: { resource: string }) {
                     </button>
                     {!config.noDelete && (
                       <button
-                        disabled={busy}
+                        disabled={busy || needsReconcile || isFetching}
                         aria-label={`Delete ${config.singular}`}
                         className="icon-button"
                         onClick={() => {
@@ -495,6 +556,21 @@ export function AdminResource({ resource }: { resource: string }) {
         >
           <form onSubmit={submit}>
             <ErrorNotice message={actionError} />
+            {needsReconcile && (
+              <>
+                <Notice>
+                  The result is uncertain. Refresh these records before another
+                  change.
+                </Notice>
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => void refreshResource()}
+                >
+                  Refresh records
+                </button>
+              </>
+            )}
             <div className="form-grid">
               {fields.map((field) => (
                 <FormField key={field.name} field={field} row={editing} />
@@ -509,7 +585,11 @@ export function AdminResource({ resource }: { resource: string }) {
               >
                 Cancel
               </button>
-              <button disabled={busy} type="submit" className="button">
+              <button
+                disabled={busy || needsReconcile || isFetching}
+                type="submit"
+                className="button"
+              >
                 {busy ? "Saving…" : "Save changes"}
               </button>
             </div>

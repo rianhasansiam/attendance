@@ -3,6 +3,9 @@ import { cacheLife, cacheTag } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { CACHE_TAGS, type CachedReference } from "@/lib/cache/tags";
+import { mayCacheReferenceDisplay } from "@/lib/cache/invalidation";
+import { authorizeRole } from "@/modules/auth/authorization";
+import type { Actor } from "./permissions";
 import { paginationSchema } from "./validation";
 
 export const lookupResourceSchema = z.enum([
@@ -48,17 +51,24 @@ async function initialReferenceOptions(resource: CachedReference) {
   return referencePage(resource, { page: 1, pageSize: 100 });
 }
 
-/** Admin-only display data; the caller must authenticate before entering here.
+/** Accept only a server-authenticated actor, never an identity from request input.
  * No status, role, policy, coordinates, schedule, or credential data is cached.
  */
 export async function listLookupOptions(
+  actor: Actor,
   resource: LookupResource,
   query: Query,
 ) {
+  authorizeRole(actor.role, "ADMIN");
   if (resource !== "employees") {
     // Only three fixed cache entries. Search text and arbitrary page windows
     // stay dynamic rather than filling memory with one-use search entries.
-    if (!query.q && query.page === 1 && query.pageSize === 100)
+    if (
+      !query.q &&
+      query.page === 1 &&
+      query.pageSize === 100 &&
+      mayCacheReferenceDisplay(resource)
+    )
       return initialReferenceOptions(resource);
     return referencePage(resource, query);
   }

@@ -93,7 +93,10 @@ beforeEach(() => {
   mocks.db.user.findUnique.mockResolvedValue(user);
   mocks.db.user.updateMany.mockResolvedValue({ count: 1 });
   mocks.db.session.findUnique.mockResolvedValue({ id: "session-id" });
-  mocks.db.session.findFirst.mockResolvedValue({ id: "session-id" });
+  mocks.db.session.findFirst.mockResolvedValue({
+    id: "session-id",
+    expires: new Date("2030-01-01T00:00:00Z"),
+  });
   mocks.db.auditLog.create.mockResolvedValue({});
   mocks.db.$transaction.mockImplementation(
     async (callback: (tx: typeof mocks.db) => Promise<unknown>) =>

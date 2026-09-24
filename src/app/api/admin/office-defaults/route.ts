@@ -4,7 +4,7 @@ import { getOfficePolicyDefaults } from "@/modules/management/catalog";
 
 export function GET() {
   return api(async () => {
-    await requireAdmin();
-    return getOfficePolicyDefaults();
+    const actor = await requireAdmin();
+    return getOfficePolicyDefaults(actor);
   });
 }

@@ -1,8 +1,11 @@
+import "server-only";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { authorizeRole } from "@/modules/auth/authorization";
 import { driveCostWhere } from "@/modules/drive-costs/filters";
+import { auditDisplaySnapshot } from "@/modules/audit/display";
 import {
   createEmployee,
   employeeInclude,
@@ -60,6 +63,28 @@ function authorizeResource(actor: Actor, resource: Resource) {
     actor.role,
     resource === "drive-costs" ? "MANAGE_DRIVER" : "ADMIN",
   );
+}
+
+function displayRecord(resource: Resource, value: unknown) {
+  if (!value || typeof value !== "object") return value;
+  if (resource === "audit" && "previousState" in value && "newState" in value) {
+    const row = value as {
+      previousState: Prisma.JsonValue;
+      newState: Prisma.JsonValue;
+    };
+    return {
+      ...value,
+      previousState: auditDisplaySnapshot(row.previousState),
+      newState: auditDisplaySnapshot(row.newState),
+    };
+  }
+  if (resource === "events" && "metadata" in value) {
+    return {
+      ...value,
+      metadata: auditDisplaySnapshot(value.metadata as Prisma.JsonValue),
+    };
+  }
+  return value;
 }
 
 const employeeName = (q?: string) =>
@@ -282,7 +307,12 @@ export async function listRecords(
       break;
     }
   }
-  return { items: result[0], total: result[1], page, pageSize };
+  return {
+    items: result[0].map((record) => displayRecord(resource, record)),
+    total: result[1],
+    page,
+    pageSize,
+  };
 }
 
 export async function getRecord(actor: Actor, resource: Resource, id: string) {
@@ -365,7 +395,7 @@ export async function getRecord(actor: Actor, resource: Resource, id: string) {
       break;
   }
   if (!record) throw new DomainError("NOT_FOUND", "Record not found.", 404);
-  return record;
+  return displayRecord(resource, record);
 }
 
 export async function createRecord(

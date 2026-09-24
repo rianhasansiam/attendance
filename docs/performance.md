@@ -1,5 +1,7 @@
 # Attendance performance audit and implementation
 
+This is the historical performance record. The later [state-management refactor](state-management.md) replaces `useResource` with RTK Query and adds client-memory caching; its client behavior and deployment guidance supersede the corresponding sections below.
+
 Measured and implemented on 20 September 2026. Next.js remains **16.3.5**, React **19.2.8**, Prisma **7.10.0**, with the existing pnpm package manager and PostgreSQL driver. No runtime dependencies or external cache infrastructure were added.
 
 ## Audit before implementation

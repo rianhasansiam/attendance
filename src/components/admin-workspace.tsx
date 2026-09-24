@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,24 +28,32 @@ import {
   Table,
   type DataRow,
 } from "./ui";
-import { api, useResource } from "./use-resource";
+import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
+import { errorMessage } from "@/store/api/errors";
+import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
+import { useFreshness } from "@/store/freshness";
+import { useQueryView } from "@/store/use-query-view";
+import {
+  useGetManagementQuery,
+  useWriteManagementMutation,
+} from "@/store/features/management/api";
+import type { JsonRecord } from "@/store/features/management/contracts";
+import {
+  useCorrectAttendanceMutation,
+  useGetAdminDashboardQuery,
+  useGetAdminReportQuery,
+} from "@/store/features/reports/api";
+import type {
+  AttendanceStatus,
+  CorrectionInput,
+  ReportFilters,
+} from "@/store/features/reports/contracts";
 import { FormField, Modal } from "./resource-workspace";
 import { PdfDownloadButton } from "./pdf-download-button";
 
-type DashboardData = {
-  totalEmployees: number;
-  presentToday: number;
-  lateToday: number;
-  absentToday: number;
-  currentlyCheckedIn: number;
-  checkedOut: number;
-  recentAttendance: DataRow[];
-  serverTime?: string;
-};
 export function AdminDashboard() {
-  const { data, error, loading, refresh } = useResource<DashboardData>(
-    "/api/admin/dashboard",
-  );
+  const result = useGetAdminDashboardQuery(undefined, useFreshness(true));
+  const { data, error, loading, refresh, isFetching } = useQueryView(result);
   return (
     <>
       <PageHeader
@@ -53,10 +61,13 @@ export function AdminDashboard() {
         title="A good day starts here."
         description="A little clarity on your people and their workday."
         action={
-          <Link className="button" href="/admin/reports">
-            <Download size={15} />
-            View reports
-          </Link>
+          <div className="buttons">
+            <Refresh onClick={refresh} />
+            <Link className="button" href="/admin/reports">
+              <Download size={15} />
+              View reports
+            </Link>
+          </div>
         }
       />
       <ErrorNotice message={error} />
@@ -96,9 +107,18 @@ export function AdminDashboard() {
               <div className="card-header">
                 <div>
                   <h2>Today’s attendance</h2>
-                  <p>A live perspective on the workday.</p>
+                  <p>Refreshes periodically while this view is active.</p>
                 </div>
-                <span className="badge green">Live overview</span>
+                <span
+                  className={`badge ${error ? "amber" : "green"}`}
+                  role="status"
+                >
+                  {isFetching
+                    ? "Refreshing…"
+                    : error
+                      ? "Refresh needed"
+                      : "Latest loaded overview"}
+                </span>
               </div>
               <div className="card-body">
                 <div
@@ -232,80 +252,111 @@ const reportColumns = [
 ];
 export function AdminReports({
   attendance = false,
-  employeeId = "",
   canCorrectAttendance = false,
 }: {
   attendance?: boolean;
   employeeId?: string;
   canCorrectAttendance?: boolean;
 }) {
-  const [filters, setFilters] = useState<Record<string, string>>(
-    employeeId ? { employeeId } : {},
-  );
-  const [filterDefaults, setFilterDefaults] = useState({ key: 0, employeeId });
-  const [page, setPage] = useState(1);
+  const { params, update } = useUrlFilters();
+  const filterKeys = [
+    "employeeId",
+    "departmentId",
+    "officeId",
+    "shiftId",
+    "status",
+    "from",
+    "to",
+  ] as const;
+  const filters = Object.fromEntries(
+    filterKeys.flatMap((key) => {
+      const value = params.get(key);
+      return value ? [[key, value]] : [];
+    }),
+  ) as ReportFilters;
+  const page = pageFromSearch(params.get("page"));
+  const [resetVersion, setResetVersion] = useState(0);
   const [editing, setEditing] = useState<DataRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
-  const query = new URLSearchParams({
-    ...filters,
-    page: String(page),
-    pageSize: "25",
-  });
-  const { data, error, loading, refresh } = useResource<{
-    items: DataRow[];
-    total: number;
-    summary: { overtimeMinutes: number; unknownOvertimeRecords: number };
-  }>(`/api/admin/reports?${query}`);
+  const result = useGetAdminReportQuery(
+    { ...filters, page, pageSize: 25 },
+    useFreshness(attendance),
+  );
+  const { data, error, loading, refresh, isFetching } = useQueryView(result);
+  const [correctAttendance] = useCorrectAttendanceMutation();
+  async function refreshReport() {
+    try {
+      await refresh().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // Preserve the uncertainty gate until an authoritative read succeeds.
+    }
+  }
+  function setPage(next: number) {
+    update({ page: next });
+  }
   function filter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    setFilters(
-      Object.fromEntries(
-        [...form.entries()]
-          .filter(([key, value]) => key !== "" && value !== "")
-          .map(([key, value]) => [key, String(value)]),
+    update({
+      ...Object.fromEntries(
+        filterKeys.map((key) => [key, String(form.get(key) || "") || null]),
       ),
-    );
-    setPage(1);
+      page: null,
+    });
   }
   async function correct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCorrectAttendance) return;
+    if (
+      !canCorrectAttendance ||
+      submitting.current ||
+      needsReconcile ||
+      isFetching
+    )
+      return;
+    submitting.current = true;
     setBusy(true);
     setActionError("");
     const form = new FormData(event.currentTarget);
-    const payload: DataRow = {
-      reason: form.get("reason"),
-      status: form.get("status"),
-    };
-    for (const field of ["checkInAt", "checkOutAt"]) {
-      const value = String(form.get(field) || "");
-      payload[field] = value ? new Date(value).toISOString() : null;
-    }
     try {
-      if (editing?.derived) {
-        payload.employeeId = (editing.employee as DataRow).id;
-        payload.attendanceDate = String(editing.attendanceDate).slice(0, 10);
-      }
-      await api(
-        `/api/admin/attendance${editing?.derived ? "" : `/${editing?.id}`}`,
-        {
-          method: editing?.derived ? "POST" : "PATCH",
-          body: JSON.stringify(payload),
-        },
-      );
+      const toIso = (key: string) => {
+        const value = String(form.get(key) || "");
+        return value ? new Date(value).toISOString() : null;
+      };
+      const payload: CorrectionInput = {
+        reason: String(form.get("reason") || ""),
+        status: String(form.get("status")) as AttendanceStatus,
+        checkInAt: toIso("checkInAt"),
+        checkOutAt: toIso("checkOutAt"),
+      };
+      if (!editing) return;
+      await correctAttendance(
+        editing.derived
+          ? {
+              body: {
+                ...payload,
+                employeeId: String((editing.employee as DataRow).id),
+                attendanceDate: String(editing.attendanceDate).slice(0, 10),
+              },
+            }
+          : { id: String(editing.id), body: payload },
+      ).unwrap();
       setEditing(null);
       setMessage(
         "Attendance updated. The correction has been added to the audit log.",
       );
-      refresh();
     } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "Unable to save correction.",
-      );
+      setActionError(errorMessage(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await refreshReport();
+      }
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -327,14 +378,22 @@ export function AdminReports({
             : "Turn everyday records into a clearer picture."
         }
         action={
-          <PdfDownloadButton
-            href={`/api/admin/reports?${new URLSearchParams({ ...filters, format: "pdf" })}`}
-            filename="attendance-report.pdf"
-            disabled={loading}
-          />
+          <div className="buttons">
+            <Refresh onClick={() => void refreshReport()} />
+            <PdfDownloadButton
+              href={`/api/admin/reports?${new URLSearchParams({ ...filters, format: "pdf" })}`}
+              filename="attendance-report.pdf"
+              disabled={loading}
+            />
+          </div>
         }
       />
       <ErrorNotice message={error || (!editing ? actionError : "")} />
+      {needsReconcile && !editing && (
+        <Notice>
+          Refresh attendance successfully before another correction.
+        </Notice>
+      )}
       {message && <Notice>{message}</Notice>}
       <section className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
@@ -344,22 +403,21 @@ export function AdminReports({
           </div>
         </div>
         <form
-          key={filterDefaults.key}
+          key={`${JSON.stringify(filters)}:${resetVersion}`}
           className="card-body"
           onSubmit={filter}
           onReset={(event) => {
             event.preventDefault();
-            setFilterDefaults((previous) => ({
-              key: previous.key + 1,
-              employeeId: "",
-            }));
-            setFilters({});
-            setPage(1);
+            setResetVersion((value) => value + 1);
+            update({
+              ...Object.fromEntries(filterKeys.map((key) => [key, null])),
+              page: null,
+            });
           }}
         >
           <div className="filter-grid">
             <FormField
-              row={{ employeeId: filterDefaults.employeeId }}
+              row={filters}
               field={{
                 name: "employeeId",
                 label: "Employee",
@@ -367,7 +425,7 @@ export function AdminReports({
               }}
             />
             <FormField
-              row={{}}
+              row={filters}
               field={{
                 name: "departmentId",
                 label: "Department",
@@ -375,24 +433,28 @@ export function AdminReports({
               }}
             />
             <FormField
-              row={{}}
+              row={filters}
               field={{ name: "officeId", label: "Office", resource: "offices" }}
             />
             <FormField
-              row={{}}
+              row={filters}
               field={{ name: "shiftId", label: "Shift", resource: "shifts" }}
             />
             <FormField
-              row={{}}
+              row={filters}
               field={{ name: "from", label: "From date", type: "date" }}
             />
             <FormField
-              row={{}}
+              row={filters}
               field={{ name: "to", label: "To date", type: "date" }}
             />
             <div className="field">
               <label htmlFor="status-filter">Status</label>
-              <select id="status-filter" name="status">
+              <select
+                id="status-filter"
+                name="status"
+                defaultValue={filters.status || ""}
+              >
                 <option value="">All statuses</option>
                 {[
                   "PRESENT",
@@ -435,8 +497,8 @@ export function AdminReports({
       <section className="card">
         <div className="card-header">
           <h2>{attendance ? "Attendance records" : "Report results"}</h2>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {data?.total || 0} records
+          <span className="muted" role="status" style={{ fontSize: 12 }}>
+            {isFetching && data ? "Refreshing…" : `${data?.total || 0} records`}
           </span>
         </div>
         {loading ? (
@@ -451,6 +513,7 @@ export function AdminReports({
                 ? (row) => (
                     <button
                       aria-label="Correct attendance"
+                      disabled={busy || needsReconcile || isFetching}
                       className="icon-button"
                       onClick={() => {
                         setEditing(row);
@@ -495,6 +558,21 @@ export function AdminReports({
         >
           <form onSubmit={correct}>
             <ErrorNotice message={actionError} />
+            {needsReconcile && (
+              <>
+                <Notice>
+                  The result is uncertain. Refresh attendance before another
+                  correction.
+                </Notice>
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => void refreshReport()}
+                >
+                  Refresh attendance
+                </button>
+              </>
+            )}
             <p className="muted" style={{ fontSize: 12, marginBottom: 22 }}>
               Corrections are recorded in the audit log. Enter times in your
               browser’s local timezone.
@@ -553,7 +631,11 @@ export function AdminReports({
               >
                 Cancel
               </button>
-              <button disabled={busy} type="submit" className="button">
+              <button
+                disabled={busy || needsReconcile || isFetching}
+                type="submit"
+                className="button"
+              >
                 {busy ? "Saving…" : "Save correction"}
               </button>
             </div>
@@ -564,10 +646,23 @@ export function AdminReports({
   );
 }
 export function AdminSettings() {
-  const { data, error, loading, refresh } = useResource<unknown>(
-    "/api/admin/settings",
+  const result = useGetManagementQuery(
+    { resource: "settings", params: { page: 1, pageSize: 100 } },
+    useFreshness(),
   );
+  const { data, error, loading, refresh, isFetching } = useQueryView(result);
+  const [writeManagement] = useWriteManagementMutation();
   const [busy, setBusy] = useState("");
+  const submitting = useRef(false);
+  const [needsReconcile, setNeedsReconcile] = useState(false);
+  async function refreshSettings() {
+    try {
+      await refresh().unwrap();
+      setNeedsReconcile(false);
+    } catch {
+      // Keep saves disabled while the previous write outcome is unknown.
+    }
+  }
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
   const settings = items(data);
@@ -577,13 +672,18 @@ export function AdminSettings() {
     ?.value || {}) as DataRow;
   async function save(event: FormEvent<HTMLFormElement>, key: string) {
     event.preventDefault();
+    if (submitting.current || needsReconcile || isFetching) return;
+    submitting.current = true;
     setBusy(key);
     setActionError("");
     setMessage("");
     const form = new FormData(event.currentTarget);
-    const value: DataRow =
+    const value: JsonRecord =
       key === "organization"
-        ? { name: form.get("name"), timezone: form.get("timezone") }
+        ? {
+            name: String(form.get("name") || ""),
+            timezone: String(form.get("timezone") || ""),
+          }
         : {
             requireWebAuthn: form.has("requireWebAuthn"),
             requireGeofence: form.has("requireGeofence"),
@@ -594,17 +694,20 @@ export function AdminSettings() {
             ),
           };
     try {
-      await api("/api/admin/settings", {
+      await writeManagement({
+        resource: "settings",
         method: "POST",
-        body: JSON.stringify({ key, value }),
-      });
+        body: { key, value },
+      }).unwrap();
       setMessage("Workspace settings saved.");
-      refresh();
     } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "Unable to save settings.",
-      );
+      setActionError(errorMessage(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await refreshSettings();
+      }
     } finally {
+      submitting.current = false;
       setBusy("");
     }
   }
@@ -614,8 +717,17 @@ export function AdminSettings() {
         eyebrow="SUPER ADMIN"
         title="Workspace settings"
         description="A secure foundation for your organization."
+        action={<Refresh onClick={() => void refreshSettings()} />}
       />
+      {isFetching && data && (
+        <p className="muted" role="status">
+          Refreshing…
+        </p>
+      )}
       <ErrorNotice message={error || actionError} />
+      {needsReconcile && (
+        <Notice>Refresh settings successfully before another change.</Notice>
+      )}
       {message && (
         <Notice>
           <Check size={16} />
@@ -624,7 +736,7 @@ export function AdminSettings() {
       )}
       {loading ? (
         <Loading />
-      ) : (
+      ) : data ? (
         <div className="stack">
           <section className="card">
             <div className="card-header">
@@ -659,7 +771,11 @@ export function AdminSettings() {
                 />
               </div>
               <div className="form-actions">
-                <button className="button" disabled={!!busy} type="submit">
+                <button
+                  className="button"
+                  disabled={!!busy || needsReconcile || isFetching}
+                  type="submit"
+                >
                   {busy === "organization" ? "Saving…" : "Save organization"}
                 </button>
               </div>
@@ -716,7 +832,11 @@ export function AdminSettings() {
                 />
               </div>
               <div className="form-actions">
-                <button className="button" disabled={!!busy} type="submit">
+                <button
+                  className="button"
+                  disabled={!!busy || needsReconcile || isFetching}
+                  type="submit"
+                >
                   {busy === "attendance.defaultPolicy"
                     ? "Saving…"
                     : "Save attendance policy"}
@@ -725,6 +845,8 @@ export function AdminSettings() {
             </form>
           </section>
         </div>
+      ) : (
+        <Refresh onClick={() => void refreshSettings()} />
       )}
     </>
   );

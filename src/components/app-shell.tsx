@@ -1,6 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { signOut } from "next-auth/react";
+import { useAppStore } from "@/store/hooks";
+import { clearWorkspaceData } from "@/store/make-store";
+import { workspaceClosed } from "@/store/features/workspace-ui/slice";
+import { canManageDailyExpenses } from "@/modules/daily-expenses/permissions";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -24,6 +29,7 @@ import {
   ShieldCheck,
   UserRound,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 
@@ -33,6 +39,12 @@ const adminNavigation = [
   { label: "Attendance", href: "attendance", icon: CalendarCheck2 },
   { label: "Reports", href: "reports", icon: ChartNoAxesCombined },
   { label: "Drive Cost", href: "drive-cost", icon: CarFront },
+  {
+    label: "Daily Expenses",
+    href: "/daily-expenses",
+    icon: Wallet,
+    canAccess: canManageDailyExpenses,
+  },
   { label: "Leave requests", href: "leaves", icon: CalendarDays },
   { label: "Devices", href: "devices", icon: Fingerprint },
   { label: "Departments", href: "departments", icon: Layers3 },
@@ -66,7 +78,6 @@ export function AppShell({
   children,
   user,
   mode,
-  signOutAction,
 }: {
   children: ReactNode;
   user: {
@@ -76,14 +87,21 @@ export function AppShell({
     image?: string | null;
   };
   mode: "admin" | "employee";
-  signOutAction: () => Promise<void>;
 }) {
+  const store = useAppStore();
   const pathname = usePathname();
+  async function signOutAction() {
+    store.dispatch(workspaceClosed("signed-out"));
+    clearWorkspaceData(store);
+    await signOut({ redirectTo: "/login" });
+  }
   const [open, setOpen] = useState(false);
   const navigation =
     mode === "admin"
       ? [
-          ...adminNavigation,
+          ...adminNavigation.filter(
+            (item) => !item.canAccess || item.canAccess(user.role),
+          ),
           ...(user.role === "SUPER_ADMIN"
             ? [
                 { label: "Administrators", href: "users", icon: ShieldCheck },
@@ -97,8 +115,10 @@ export function AppShell({
             ? [{ label: "Drive Cost", href: "drive-cost", icon: CarFront }]
             : []),
         ];
+  const navigationHref = (href: string) =>
+    href.startsWith("/") ? href : `/${mode}/${href}`;
   const current = navigation.find(
-    (item) => pathname === `/${mode}/${item.href}`,
+    (item) => pathname === navigationHref(item.href),
   );
   return (
     <div className="workspace">
@@ -124,10 +144,10 @@ export function AppShell({
             <Link
               onClick={() => setOpen(false)}
               key={href}
-              href={`/${mode}/${href}`}
-              className={`nav-item ${pathname === `/${mode}/${href}` ? "active" : ""}`}
+              href={navigationHref(href)}
+              className={`nav-item ${pathname === navigationHref(href) ? "active" : ""}`}
               aria-current={
-                pathname === `/${mode}/${href}` ? "page" : undefined
+                pathname === navigationHref(href) ? "page" : undefined
               }
             >
               <Icon size={18} />

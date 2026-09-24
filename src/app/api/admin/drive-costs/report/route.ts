@@ -10,6 +10,7 @@ export function GET(request: Request) {
     await rateLimit(`drive-cost-reports:${actor.id}`, 30, 60);
     const params = new URL(request.url).searchParams;
     return getDriveCostReport(
+      actor,
       driveCostFilterSchema.parse({
         from: params.get("from") ?? undefined,
         to: params.get("to") ?? undefined,

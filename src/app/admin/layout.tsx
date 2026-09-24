@@ -1,5 +1,5 @@
 import { requirePageUser } from "@/lib/auth";
-import { signOut } from "@/auth";
+import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
 import { Suspense } from "react";
 import { connection } from "next/server";
@@ -24,20 +24,25 @@ async function AuthenticatedAdminLayout({
   await connection();
   const user = await requirePageUser("ADMIN");
   return (
-    <AppShell
-      mode="admin"
-      user={{
-        name: user.name,
-        email: user.email,
+    <StoreProvider
+      identity={{
+        id: user.id,
         role: user.role,
-        image: user.image,
-      }}
-      signOutAction={async () => {
-        "use server";
-        await signOut({ redirectTo: "/login" });
+        sessionId: user.sessionId,
+        expires: user.sessionExpires,
       }}
     >
-      {children}
-    </AppShell>
+      <AppShell
+        mode="admin"
+        user={{
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          image: user.image,
+        }}
+      >
+        {children}
+      </AppShell>
+    </StoreProvider>
   );
 }

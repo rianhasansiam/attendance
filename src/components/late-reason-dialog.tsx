@@ -9,7 +9,12 @@ import {
 } from "react";
 import { Modal } from "./modal";
 import { ErrorNotice, type DataRow } from "./ui";
-import { api } from "./use-resource";
+import {
+  useSaveLateReasonMutation,
+  useLazyEmployeeDayQuery,
+} from "@/store/features/attendance/api";
+import { errorMessage } from "@/store/api/errors";
+import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
 
 export function LateReasonDialog({
   attendance,
@@ -21,7 +26,11 @@ export function LateReasonDialog({
   onSaved: (attendance: DataRow) => void;
 }) {
   const [reason, setReason] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [saveReason, { isLoading: writing }] = useSaveLateReasonMutation();
+  const [readDay, { isFetching: checking }] = useLazyEmployeeDayQuery();
+  const [needsReconcile, setNeedsReconcile] = useState(false);
+  const saving = writing || checking;
+  const submitting = useRef(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
   const close = useCallback(() => {
@@ -32,31 +41,44 @@ export function LateReasonDialog({
     if (!saving) input.current?.focus();
   }, [saving]);
 
+  async function reconcile() {
+    try {
+      const day = await readDay(undefined, false).unwrap();
+      const current = [day.today, ...day.recent].find(
+        (record) => record?.id === attendance.id,
+      );
+      setNeedsReconcile(false);
+      if (current?.lateReason) onSaved(current);
+    } catch (error) {
+      setError(errorMessage(error));
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving) return;
+    if (submitting.current || needsReconcile) return;
     const trimmed = reason.trim();
     if (!trimmed) {
       setError("Please enter a reason for your late attendance.");
       input.current?.focus();
       return;
     }
-    setSaving(true);
+    submitting.current = true;
     setError("");
     try {
-      const saved = await api<DataRow>("/api/attendance/late-reason", {
-        method: "POST",
-        body: JSON.stringify({ attendanceId: attendance.id, reason: trimmed }),
-      });
+      const saved = await saveReason({
+        attendanceId: String(attendance.id),
+        reason: trimmed,
+      }).unwrap();
       onSaved(saved);
     } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save your reason. Please try again.",
-      );
+      setError(errorMessage(error));
+      if (isAmbiguousWrite(error)) {
+        setNeedsReconcile(true);
+        await reconcile();
+      }
     } finally {
-      setSaving(false);
+      submitting.current = false;
     }
   }
 
@@ -91,6 +113,16 @@ export function LateReasonDialog({
           />
           <small id="late-reason-limit">{reason.length}/1000 characters</small>
         </div>
+        {needsReconcile && (
+          <button
+            type="button"
+            className="button secondary"
+            disabled={saving}
+            onClick={() => void reconcile()}
+          >
+            Refresh attendance before trying again
+          </button>
+        )}
         <div className="form-actions">
           <button
             type="button"
@@ -100,7 +132,11 @@ export function LateReasonDialog({
           >
             Later
           </button>
-          <button type="submit" className="button" disabled={saving}>
+          <button
+            type="submit"
+            className="button"
+            disabled={saving || needsReconcile}
+          >
             {saving ? "Saving…" : "Submit reason"}
           </button>
         </div>

@@ -381,7 +381,11 @@ test("super administrator manages departments and downloads a PDF report", async
     .getByLabel("Name", { exact: false })
     .fill(name);
   await page.getByRole("dialog").getByRole("button", { name: /save/i }).click();
-  await expect(page.getByRole("status")).toContainText("saved");
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Your changes have been saved." }),
+  ).toBeVisible();
   await page.getByLabel("Search departments").fill(name);
   await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
   const response = await context.request.get("/api/admin/reports?format=pdf");

@@ -1,5 +1,7 @@
+import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { authorizeRole } from "@/modules/auth/authorization";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";
 import { calculateDriveCost } from "@/modules/drive-costs/calculations";
@@ -21,6 +23,7 @@ const missing = () =>
   new DomainError("NOT_FOUND", "The requested record was not found.", 404);
 
 export async function saveDepartment(actor: Actor, raw: unknown, id?: string) {
+  authorizeRole(actor.role, "ADMIN");
   const input = id
     ? departmentSchema.partial().parse(raw)
     : departmentSchema.parse(raw);
@@ -45,7 +48,8 @@ export async function saveDepartment(actor: Actor, raw: unknown, id?: string) {
   });
 }
 
-export async function getOfficePolicyDefaults() {
+export async function getOfficePolicyDefaults(actor: Actor) {
+  authorizeRole(actor.role, "ADMIN");
   const setting = await db.systemSetting.findUnique({
     where: { key: "attendance.defaultPolicy" },
   });
@@ -61,7 +65,8 @@ export async function getOfficePolicyDefaults() {
 }
 
 export async function saveOffice(actor: Actor, raw: unknown, id?: string) {
-  const defaults = id ? {} : await getOfficePolicyDefaults();
+  authorizeRole(actor.role, "ADMIN");
+  const defaults = id ? {} : await getOfficePolicyDefaults(actor);
   const input = id
     ? officeSchema.partial().parse(raw)
     : officeSchema.parse({ ...defaults, ...zObject(raw) });
@@ -115,6 +120,7 @@ function zObject(raw: unknown): Record<string, unknown> {
 }
 
 export async function saveNetwork(actor: Actor, raw: unknown, id?: string) {
+  authorizeRole(actor.role, "ADMIN");
   const input = id
     ? networkSchema.partial().parse(raw)
     : networkSchema.parse(raw);
@@ -145,6 +151,7 @@ export async function saveNetwork(actor: Actor, raw: unknown, id?: string) {
 }
 
 export async function saveShift(actor: Actor, raw: unknown, id?: string) {
+  authorizeRole(actor.role, "ADMIN");
   return db.$transaction(async (tx) => {
     const previous = id ? await tx.shift.findUnique({ where: { id } }) : null;
     if (id && !previous) throw missing();
@@ -179,6 +186,7 @@ export async function saveShift(actor: Actor, raw: unknown, id?: string) {
 }
 
 export async function saveAssignment(actor: Actor, raw: unknown, id?: string) {
+  authorizeRole(actor.role, "ADMIN");
   const input = assignmentSchema.parse(raw);
   const startDate = utcDate(input.startDate);
   const endDate = input.endDate ? utcDate(input.endDate) : null;
@@ -239,6 +247,7 @@ export async function saveAssignment(actor: Actor, raw: unknown, id?: string) {
 }
 
 export async function saveHoliday(actor: Actor, raw: unknown, id?: string) {
+  authorizeRole(actor.role, "ADMIN");
   const input = holidaySchema.parse(raw);
   const data = {
     name: input.name,
@@ -284,6 +293,7 @@ export async function saveHoliday(actor: Actor, raw: unknown, id?: string) {
 }
 
 export async function saveDriveCost(actor: Actor, raw: unknown, id?: string) {
+  authorizeRole(actor.role, "MANAGE_DRIVER");
   const input = (id ? driveCostUpdateSchema : driveCostSchema).parse(raw);
   if (input.paymentStatus !== undefined) assertSuperAdmin(actor);
   const data =
@@ -336,6 +346,10 @@ export async function removeCatalogRecord(
   resource: string,
   id: string,
 ) {
+  authorizeRole(
+    actor.role,
+    resource === "drive-costs" ? "MANAGE_DRIVER" : "ADMIN",
+  );
   return db.$transaction(async (tx) => {
     let previous: unknown;
     switch (resource) {

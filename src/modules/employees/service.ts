@@ -1,3 +1,4 @@
+import "server-only";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -27,6 +28,35 @@ export const employeeInclude = {
   office: true,
   department: true,
 } satisfies Prisma.EmployeeInclude;
+
+/** Own-profile read shared by the Server Component and the JSON endpoint.
+ * The actor comes from requireUser/requirePageUser, never request input.
+ */
+export async function getOwnEmployeeProfile(actor: {
+  id: string;
+  employee: { id: string } | null;
+}) {
+  if (!actor.employee)
+    throw new DomainError(
+      "NO_EMPLOYEE",
+      "An employee profile is required.",
+      403,
+    );
+  const employee = await db.employee.findUnique({
+    where: { id: actor.employee.id, userId: actor.id },
+    include: {
+      ...employeeInclude,
+      shifts: { include: { shift: true }, orderBy: { startDate: "desc" } },
+    },
+  });
+  if (!employee)
+    throw new DomainError(
+      "NO_EMPLOYEE",
+      "An employee profile is required.",
+      403,
+    );
+  return employee;
+}
 
 async function validateAssignments(
   tx: Prisma.TransactionClient,

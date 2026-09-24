@@ -1,0 +1,15 @@
+export const tagTypes = [
+  "Management",
+  "Reference",
+  "Attendance",
+  "Dashboard",
+  "Leave",
+  "Devices",
+  "Reports",
+  "DriveCosts",
+  "Profile",
+  "Audit",
+  "DailyExpensesSummary",
+  "DailyExpensesTransactions",
+  "DailyExpensesCategories",
+] as const;

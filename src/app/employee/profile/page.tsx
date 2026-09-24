@@ -1,21 +1,19 @@
 import { Suspense } from "react";
 import { EmployeeProfile } from "@/components/employee-profile";
+import { ProfileRefresh } from "@/components/profile-refresh";
 import { Loading } from "@/components/ui";
 import { requirePageEmployee } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { getOwnEmployeeProfile } from "@/modules/employees/service";
 
 async function Profile() {
   const user = await requirePageEmployee();
-  const employee = await db.employee.findUniqueOrThrow({
-    where: { id: user.employee.id },
-    select: {
-      employeeCode: true,
-      joinedAt: true,
-      department: { select: { name: true } },
-      office: { select: { name: true, timezone: true } },
-    },
-  });
-  return <EmployeeProfile employee={employee} user={user} />;
+  const employee = await getOwnEmployeeProfile(user);
+  return (
+    <>
+      <ProfileRefresh />
+      <EmployeeProfile employee={employee} user={user} />
+    </>
+  );
 }
 
 export default function Page() {

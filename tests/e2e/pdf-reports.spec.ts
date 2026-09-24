@@ -177,6 +177,9 @@ test("attendance PDF downloads all filtered pages with exact minute totals", asy
   await signIn(context, admin.id);
   await page.goto("/admin/reports");
   await page
+    .getByLabel("Find employee", { exact: true })
+    .fill(employee.employee!.employeeCode);
+  await page
     .getByLabel("Employee", { exact: true })
     .selectOption(employee.employee!.id);
   await page.getByLabel("From date", { exact: true }).fill(mayDay(1));

@@ -1,3 +1,4 @@
+import "server-only";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";

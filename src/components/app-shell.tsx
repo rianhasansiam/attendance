@@ -70,7 +70,7 @@ export function Brand() {
         <CheckCheck size={24} strokeWidth={2.5} />
       </span>
 
-      <span>BangBuy</span>
+      <span>XHYD</span>
     </div>
   );
 }
@@ -208,7 +208,7 @@ export function AppShell({
           {children}
         </main>
         <footer className="workspace-footer">
-          <span>BangBuy Attendance System</span>
+          <span>XHYD Attendance System</span>
           <span>A little more clarity in every workday.</span>
         </footer>
       </div>

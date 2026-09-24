@@ -36,7 +36,7 @@ async function LoginContent({
           <CheckCheck size={40} />
         </span>
         <h1>
-          BangBuy Attendance
+          XHYD Attendance
           <br />
           System
         </h1>

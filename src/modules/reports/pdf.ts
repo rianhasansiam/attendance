@@ -92,7 +92,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     bufferPages: true,
     info: {
       Title: report.title,
-      Author: "BangBuy Attendance System",
+      Author: "XHYD Attendance System",
       Subject: report.subtitle.join(" | "),
     },
   });
@@ -139,7 +139,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     doc.rect(margin, margin, 3, 24).fill(colors.green);
     doc.font("Bold").fontSize(9).fillColor(colors.green);
     paintLine(
-      "BANGBUY ATTENDANCE SYSTEM",
+      "XHYD ATTENDANCE SYSTEM",
       margin + 12,
       margin - 1,
       contentWidth - 12,
@@ -374,7 +374,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       .stroke();
     doc.font("Regular").fontSize(8).fillColor(colors.muted);
     paintLine(
-      "BangBuy Attendance System",
+      "XHYD Attendance System",
       margin,
       pageHeight - 28,
       contentWidth / 2,

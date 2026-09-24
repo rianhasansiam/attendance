@@ -15,7 +15,7 @@ const envSchema = z
     GOOGLE_CLIENT_SECRET: z.string().min(1),
     ALLOWED_GOOGLE_DOMAIN: z.string().trim().toLowerCase().optional(),
     WEBAUTHN_RP_ID: z.string().min(1),
-    WEBAUTHN_RP_NAME: z.string().min(1).default("BangBuy Attendance"),
+    WEBAUTHN_RP_NAME: z.string().min(1).default("XHYD Attendance"),
     WEBAUTHN_ORIGIN: z.string().url(),
     TRUSTED_PROXY_MODE: z.enum(["none", "nginx"]).default("none"),
     TRUSTED_PROXY_SECRET: z.string().optional(),

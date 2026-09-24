@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "BangBuy Attendance System",
+    name: "XHYD Attendance System",
     short_name: "Attend",
     description: "Secure attendance for your workday.",
     start_url: "/employee/dashboard",

@@ -172,7 +172,7 @@ Most interactive dashboards/lists still fetch their dynamic data after hydration
 | Validation and measurement | `tests/{api,auth-callbacks,attendance-integration,cache-invalidation,reports}.test.ts`; `tests/e2e/workflows.spec.ts`; `scripts/benchmark-performance.ts`; `scripts/measure-client-bundles.mjs` |
 | Test-build isolation and documentation | `playwright.config.ts`; `tsconfig.json`; `.gitignore`; `eslint.config.mjs`; this report and its JSON observations; README link |
 
-`src/components/app-shell.tsx` already contained the user's BangBuy branding edit; it was not changed by this optimization. `.env` was not edited. Package versions and lockfile were preserved.
+`src/components/app-shell.tsx` already contained the user's XHYD branding edit; it was not changed by this optimization. `.env` was not edited. Package versions and lockfile were preserved.
 
 ## Reproduce
 

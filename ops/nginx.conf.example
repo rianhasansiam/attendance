@@ -28,6 +28,10 @@ server {
         # Same random value as TRUSTED_PROXY_SECRET; root-readable config only.
         proxy_set_header X-Attendance-Proxy-Secret REPLACE_WITH_RANDOM_32_PLUS_CHARACTER_SECRET;
         proxy_read_timeout 60s;
+        # Allow larger OAuth response headers and cookies while preserving streaming.
+        proxy_buffer_size 16k;
+        proxy_buffers 4 16k;
+        proxy_busy_buffers_size 32k;
         proxy_buffering off;
     }
 }

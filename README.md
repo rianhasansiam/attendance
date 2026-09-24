@@ -111,6 +111,8 @@ The flag preserves the local environment without pulling storage credentials for
 
 Use Nginx `limit_req_zone`/`limit_req` at the HTTP/server level for ingress abuse protection in addition to application database-backed per-user mutation limits. Scope limits to authentication and write endpoints and test normal office-wide traffic so a shared egress IP is not inadvertently blocked.
 
+If **Continue with Google** returns HTTP 502 and Nginx logs `upstream sent too big header while reading response header from upstream`, the OAuth response exceeded the [proxy header buffer](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffer_size). Apply the example's `proxy_buffer_size 16k`, `proxy_buffers 4 16k`, and `proxy_busy_buffers_size 32k` settings in the app's `location /` block, keeping `proxy_buffering off` for Next.js streaming. Run `sudo nginx -t`, then `sudo systemctl reload nginx`, and retry sign-in.
+
 ## Operational acceptance checks
 
 Before enabling attendance for staff, verify Google callbacks and unauthorized-account denial, admin/employee isolation, device registration/approval/revocation, inside/outside/low-accuracy GPS outcomes, approved/wrong office networks, concurrent check-ins, check-out, overnight shifts, leave/holiday reports, and both exports. Confirm secure cookies and HTTPS WebAuthn on the actual hostname. Passkeys are origin-bound: changing the hostname/RP ID requires registering compatible credentials again.

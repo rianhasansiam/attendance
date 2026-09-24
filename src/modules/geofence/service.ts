@@ -59,7 +59,7 @@ export function verifyGeofence(
   if (distance > office.geofenceRadiusMeters) {
     throw new DomainError(
       "OUTSIDE_GEOFENCE",
-      "You are outside the BangBuy attendance area.",
+      "You are outside the XHYD attendance area.",
     );
   }
   return distance;

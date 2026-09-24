@@ -106,6 +106,29 @@ integration("drive cost round-trip migration", () => {
         });
         await client.query("ROLLBACK TO SAVEPOINT invalid_drive_cost");
       }
+
+      const beforePaymentStatus = (
+        await client.query('SELECT * FROM "DriveCost" ORDER BY id')
+      ).rows;
+      await client.query(migration("20260926000000_drive_cost_payment_status"));
+      expect(
+        (await client.query('SELECT * FROM "DriveCost" ORDER BY id')).rows,
+      ).toEqual(
+        beforePaymentStatus.map((record) => ({
+          ...record,
+          paymentStatus: "UNPAID",
+        })),
+      );
+      await client.query(
+        `UPDATE "DriveCost" SET "paymentStatus"='PAID' WHERE id='legacy-in'`,
+      );
+      expect(
+        (
+          await client.query(
+            `SELECT "paymentStatus" FROM "DriveCost" WHERE id='legacy-in'`,
+          )
+        ).rows[0],
+      ).toEqual({ paymentStatus: "PAID" });
     } finally {
       await client.query("ROLLBACK");
       await client.end();

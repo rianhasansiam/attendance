@@ -39,6 +39,10 @@ enum DriveCostRateType {
   IN_TIME
   OVER_TIME
 }
+enum DriveCostPaymentStatus {
+  UNPAID
+  PAID
+}
 model User {
   id String @id @default(cuid())
   name String?
@@ -272,6 +276,7 @@ model DriveCost {
   kilometers Decimal @db.Decimal(10, 2)
   isRoundTrip Boolean @default(false)
   rateType DriveCostRateType
+  paymentStatus DriveCostPaymentStatus @default(UNPAID)
   ratePerKilometer Decimal @db.Decimal(10, 2)
   totalCost Decimal @db.Decimal(12, 2)
   createdById String

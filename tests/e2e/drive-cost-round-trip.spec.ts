@@ -101,6 +101,123 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
+test("only super admins can change payment status, and trip edits preserve it", async ({
+  page,
+}) => {
+  await db.employee.create({
+    data: {
+      user: { connect: { id: adminId! } },
+      employeeCode: randomUUID(),
+      office: {
+        create: {
+          name: office,
+          address: "Test office",
+          latitude: 23.8,
+          longitude: 90.4,
+        },
+      },
+    },
+  });
+  const trip = await db.driveCost.create({
+    data: {
+      date: new Date(`${tripDate}T00:00:00Z`),
+      destinationFrom: office,
+      destinationTo: "Client destination",
+      kilometers: 10,
+      rateType: "IN_TIME",
+      ratePerKilometer: 5,
+      totalCost: 50,
+      createdById: adminId!,
+    },
+  });
+  expect(trip.paymentStatus).toBe("UNPAID");
+
+  const openList = async (path: string) => {
+    await page.goto(path);
+    await page
+      .getByRole("searchbox", { name: "Search drive costs" })
+      .fill(office);
+    await expect(recordList(page).locator("tbody tr")).toHaveCount(1);
+  };
+  const statusButton = (status: "paid" | "unpaid") =>
+    recordList(page).getByRole("button", {
+      name: `Mark ${status} for drive cost from ${office} to Client destination`,
+      exact: true,
+    });
+
+  for (const role of ["ADMIN", "MANAGE_DRIVER"] as const) {
+    await db.user.update({ where: { id: adminId }, data: { role } });
+    await openList(
+      role === "ADMIN" ? "/admin/drive-cost" : "/employee/drive-cost",
+    );
+    await expect(statusButton("paid")).toHaveCount(0);
+    const response = await page.request.patch(
+      `/api/admin/drive-costs/${trip.id}/payment-status`,
+      {
+        data: { paymentStatus: "PAID" },
+        headers: { Origin: "http://localhost:3100" },
+      },
+    );
+    expect(response.status()).toBe(403);
+  }
+
+  await db.user.update({
+    where: { id: adminId },
+    data: { role: "SUPER_ADMIN" },
+  });
+  await openList("/admin/drive-cost");
+  const request = page.waitForRequest(
+    (req) =>
+      req.method() === "PATCH" &&
+      req.url().endsWith(`${trip.id}/payment-status`),
+  );
+  await statusButton("paid").click();
+  expect((await request).postDataJSON()).toEqual({ paymentStatus: "PAID" });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(statusButton("unpaid")).toBeVisible();
+  await expect(
+    recordList(page).getByRole("cell", { name: "paid", exact: true }),
+  ).toBeVisible();
+  const paid = await db.driveCost.findUniqueOrThrow({ where: { id: trip.id } });
+  expect(paid.paymentStatus).toBe("PAID");
+  expect(paid.kilometers.toFixed(2)).toBe("10.00");
+  expect(paid.totalCost.toFixed(2)).toBe("50.00");
+
+  await db.user.update({ where: { id: adminId }, data: { role: "ADMIN" } });
+  await openList("/admin/drive-cost");
+  await expect(statusButton("unpaid")).toHaveCount(0);
+  await recordList(page)
+    .getByRole("button", {
+      name: `Edit drive cost from ${office} to Client destination`,
+      exact: true,
+    })
+    .click();
+  const edit = page.getByRole("dialog", { name: "Edit drive cost" });
+  await expect(edit.getByLabel("Payment status", { exact: true })).toHaveCount(
+    0,
+  );
+  await edit.getByLabel("Kilometers (one way) *", { exact: true }).fill("12");
+  await edit.getByRole("button", { name: "Save drive cost" }).click();
+  await expect(edit).toBeHidden();
+  const updated = await db.driveCost.findUniqueOrThrow({
+    where: { id: trip.id },
+  });
+  expect(updated.paymentStatus).toBe("PAID");
+  expect(updated.kilometers.toFixed(2)).toBe("12.00");
+
+  await db.user.update({
+    where: { id: adminId },
+    data: { role: "SUPER_ADMIN" },
+  });
+  await openList("/admin/drive-cost");
+  await statusButton("unpaid").click();
+  await expect(statusButton("paid")).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    recordList(page).getByRole("cell", { name: "unpaid", exact: true }),
+  ).toBeVisible();
+});
+
 test("round trips double distance and cost once, survive editing, and can return to one way", async ({
   page,
 }) => {

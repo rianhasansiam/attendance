@@ -14,6 +14,8 @@ export default function Page() {
 
 async function AuthorizedDriveCosts() {
   await connection();
-  await requirePageUser("MANAGE_DRIVER");
-  return <DriveCostWorkspace />;
+  const user = await requirePageUser("MANAGE_DRIVER");
+  return (
+    <DriveCostWorkspace canEditPaymentStatus={user.role === "SUPER_ADMIN"} />
+  );
 }

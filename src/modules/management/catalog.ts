@@ -3,11 +3,12 @@ import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit/service";
 import { calculateDriveCost } from "@/modules/drive-costs/calculations";
-import type { Actor } from "./permissions";
+import { assertSuperAdmin, type Actor } from "./permissions";
 import {
   assignmentSchema,
   departmentSchema,
   driveCostSchema,
+  driveCostUpdateSchema,
   holidaySchema,
   networkSchema,
   officeSchema,
@@ -283,20 +284,12 @@ export async function saveHoliday(actor: Actor, raw: unknown, id?: string) {
 }
 
 export async function saveDriveCost(actor: Actor, raw: unknown, id?: string) {
-  const input = driveCostSchema.parse(raw);
-  const calculation = calculateDriveCost(
-    input.kilometers,
-    input.rateType,
-    input.isRoundTrip,
-  );
-  const data = {
-    date: utcDate(input.date),
-    destinationFrom: input.destinationFrom,
-    destinationTo: input.destinationTo,
-    isRoundTrip: input.isRoundTrip,
-    rateType: input.rateType,
-    ...calculation,
-  };
+  const input = (id ? driveCostUpdateSchema : driveCostSchema).parse(raw);
+  if (input.paymentStatus !== undefined) assertSuperAdmin(actor);
+  const data =
+    "date" in input
+      ? driveCostData(input)
+      : { paymentStatus: input.paymentStatus };
 
   return db.$transaction(async (tx) => {
     const previous = id
@@ -306,7 +299,10 @@ export async function saveDriveCost(actor: Actor, raw: unknown, id?: string) {
     const result = id
       ? await tx.driveCost.update({ where: { id }, data })
       : await tx.driveCost.create({
-          data: { ...data, createdById: actor.id },
+          data: {
+            ...driveCostData(driveCostSchema.parse(raw)),
+            createdById: actor.id,
+          },
         });
     await writeAudit(
       actor.id,
@@ -319,6 +315,20 @@ export async function saveDriveCost(actor: Actor, raw: unknown, id?: string) {
     );
     return result;
   });
+}
+
+function driveCostData(input: ReturnType<typeof driveCostSchema.parse>) {
+  return {
+    date: utcDate(input.date),
+    destinationFrom: input.destinationFrom,
+    destinationTo: input.destinationTo,
+    isRoundTrip: input.isRoundTrip,
+    rateType: input.rateType,
+    ...calculateDriveCost(input.kilometers, input.rateType, input.isRoundTrip),
+    ...(input.paymentStatus !== undefined
+      ? { paymentStatus: input.paymentStatus }
+      : {}),
+  };
 }
 
 export async function removeCatalogRecord(

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(),
   trips: vi.fn(),
   report: vi.fn(),
+  paymentStatus: vi.fn(),
   rateLimit: vi.fn(),
 }));
 
@@ -40,6 +41,9 @@ vi.mock("@/modules/management/service", async (original) => ({
 vi.mock("@/modules/drive-costs/report", () => ({
   getDriveCostReport: mocks.report,
 }));
+vi.mock("@/modules/drive-costs/payment-status", () => ({
+  updateDriveCostPaymentStatus: mocks.paymentStatus,
+}));
 
 import { GET as list, POST as create } from "@/app/api/admin/[resource]/route";
 import {
@@ -49,6 +53,7 @@ import {
 } from "@/app/api/admin/[resource]/[id]/route";
 import { GET as calculate } from "@/app/api/admin/drive-costs/calculate/route";
 import { GET as report } from "@/app/api/admin/drive-costs/report/route";
+import { PATCH as paymentStatus } from "@/app/api/admin/drive-costs/[id]/payment-status/route";
 import { resourceSchema } from "@/modules/management/service";
 import type { Role } from "@/modules/auth/authorization";
 
@@ -212,4 +217,58 @@ describe("management service permission boundary", () => {
       expect(mocks.user).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("dedicated payment status API", () => {
+  function updateStatus(body: unknown = { paymentStatus: "PAID" }) {
+    return paymentStatus(
+      new Request(
+        "https://attendance.example.test/api/admin/drive-costs/trip-1/payment-status",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+      { params: Promise.resolve({ id: "trip-1" }) },
+    );
+  }
+
+  it.each(["EMPLOYEE", "MANAGE_DRIVER", "ADMIN"] as const)(
+    "rejects %s before changing status",
+    async (role) => {
+      mocks.user.mockResolvedValue(user(role));
+      expect((await updateStatus()).status).toBe(403);
+      expect(mocks.paymentStatus).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts only the status from a super admin without requiring trip details", async () => {
+    mocks.user.mockResolvedValue(user("SUPER_ADMIN"));
+    mocks.paymentStatus.mockResolvedValue({
+      id: "trip-1",
+      paymentStatus: "PAID",
+    });
+    const response = await updateStatus();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { paymentStatus: "PAID" },
+    });
+    expect(mocks.paymentStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "SUPER_ADMIN" }),
+      "trip-1",
+      { paymentStatus: "PAID" },
+    );
+  });
+
+  it.each([
+    {},
+    { paymentStatus: "INVALID" },
+    { paymentStatus: "PAID", kilometers: 10 },
+  ])("rejects invalid status payloads %j", async (body) => {
+    mocks.user.mockResolvedValue(user("SUPER_ADMIN"));
+    expect((await updateStatus(body)).status).toBe(400);
+    expect(mocks.paymentStatus).not.toHaveBeenCalled();
+  });
 });

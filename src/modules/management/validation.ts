@@ -166,8 +166,15 @@ export const driveCostSchema = z
         return Math.max(0, fractionLength - exponent) <= 2;
       }, "Kilometers can have at most two decimal places."),
     rateType: z.enum(["IN_TIME", "OVER_TIME"]),
+    paymentStatus: z.enum(["UNPAID", "PAID"]).optional(),
   })
   .strict();
+export const driveCostPaymentStatusSchema = z
+  .object({ paymentStatus: z.enum(["UNPAID", "PAID"]) })
+  .strict();
+export const driveCostUpdateSchema = driveCostSchema.or(
+  driveCostPaymentStatusSchema,
+);
 export const leaveSchema = z
   .object({
     startDate: dateSchema,

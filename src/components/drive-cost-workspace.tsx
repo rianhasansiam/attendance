@@ -36,6 +36,7 @@ type DriveCostRecord = {
   kilometers: string | number;
   isRoundTrip?: boolean;
   rateType: RateType;
+  paymentStatus: "UNPAID" | "PAID";
   ratePerKilometer: string | number;
   totalCost: string | number;
 };
@@ -128,7 +129,11 @@ function formatDateLabel(dateString: string): string {
   });
 }
 
-export function DriveCostWorkspace() {
+export function DriveCostWorkspace({
+  canEditPaymentStatus = false,
+}: {
+  canEditPaymentStatus?: boolean;
+}) {
   const [query, setQuery] = useState("");
   const search = useDebouncedValue(query);
   const [dateDraft, setDateDraft] = useState({ from: "", to: "" });
@@ -235,6 +240,46 @@ export function DriveCostWorkspace() {
     }
   }
 
+  async function changePaymentStatus(row: DataRow) {
+    setBusy(true);
+    setActionError("");
+    setMessage("");
+    const paymentStatus = row.paymentStatus === "PAID" ? "UNPAID" : "PAID";
+    try {
+      const updated = await api<DriveCostRecord>(
+        `/api/admin/drive-costs/${String(row.id)}/payment-status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ paymentStatus }),
+        },
+      );
+      setMessage(
+        `Drive cost marked as ${paymentStatus === "PAID" ? "paid" : "unpaid"}.`,
+      );
+      setCalcResult((current) =>
+        current
+          ? {
+              ...current,
+              records: current.records.map((record) =>
+                record.id === updated.id
+                  ? { ...record, paymentStatus: updated.paymentStatus }
+                  : record,
+              ),
+            }
+          : current,
+      );
+      refresh();
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update payment status.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove(row: DataRow) {
     const from = String(row.destinationFrom ?? "this destination");
     const to = String(row.destinationTo ?? "this destination");
@@ -289,6 +334,7 @@ export function DriveCostWorkspace() {
     ...record,
     rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
     tripTypeLabel: record.isRoundTrip ? "Round trip (×2)" : "One way",
+    paymentStatusLabel: record.paymentStatus === "PAID" ? "Paid" : "Unpaid",
     kilometersLabel: formatNumber(
       numberValue(record.kilometers) * (record.isRoundTrip ? 2 : 1),
     ),
@@ -305,6 +351,7 @@ export function DriveCostWorkspace() {
       ...record,
       rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
       tripTypeLabel: record.isRoundTrip ? "Round trip (×2)" : "One way",
+      paymentStatusLabel: record.paymentStatus === "PAID" ? "Paid" : "Unpaid",
       kilometersLabel: formatNumber(
         numberValue(record.kilometers) * (record.isRoundTrip ? 2 : 1),
       ),
@@ -510,6 +557,11 @@ export function DriveCostWorkspace() {
                         { key: "kilometersLabel", label: "Total km" },
                         { key: "rateLabel", label: "Rate" },
                         { key: "totalLabel", label: "Total" },
+                        {
+                          key: "paymentStatusLabel",
+                          label: "Payment status",
+                          format: "badge",
+                        },
                       ]}
                     />
                   </div>
@@ -602,9 +654,25 @@ export function DriveCostWorkspace() {
               { key: "kilometersLabel", label: "Total km" },
               { key: "rateLabel", label: "Rate" },
               { key: "totalLabel", label: "Total" },
+              {
+                key: "paymentStatusLabel",
+                label: "Payment status",
+                format: "badge",
+              },
             ]}
             actions={(row) => (
               <div className="row-actions">
+                {canEditPaymentStatus && (
+                  <button
+                    type="button"
+                    disabled={busy || loading}
+                    className="button small secondary"
+                    aria-label={`Mark ${row.paymentStatus === "PAID" ? "unpaid" : "paid"} for drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
+                    onClick={() => void changePaymentStatus(row)}
+                  >
+                    {row.paymentStatus === "PAID" ? "Mark unpaid" : "Mark paid"}
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={busy}

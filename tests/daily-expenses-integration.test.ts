@@ -43,7 +43,11 @@ import {
   listDailyExpenseCategories,
   listDailyExpenseTransactions,
   updateDailyExpenseCategory,
+  updateDailyExpenseTransaction,
+  deleteDailyExpenseTransaction,
+  getDailyExpenseReportData,
 } from "@/modules/daily-expenses/service";
+import type { DailyExpenseTransactionDTO } from "@/modules/daily-expenses/contracts";
 
 const testDatabase = process.env.TEST_DATABASE_URL;
 const integration = testDatabase ? describe : describe.skip;
@@ -51,6 +55,7 @@ const schema = `daily_expenses_test_${randomUUID().replaceAll("-", "")}`;
 const date = "2024-01-01";
 let db: PrismaClient;
 let admin: { id: string; role: "ADMIN"; status: "ACTIVE" };
+let superAdmin: { id: string; role: "SUPER_ADMIN"; status: "ACTIVE" };
 let control: Client;
 
 const input = (amount = "1.00", extra: Record<string, unknown> = {}) => ({
@@ -65,6 +70,17 @@ const category = (name = "Supplies") =>
   createDailyExpenseCategory(admin, { name });
 const history = (query: Record<string, unknown> = {}) =>
   listDailyExpenseTransactions(admin, { page: 1, pageSize: 25, ...query });
+const correction = (
+  transaction: DailyExpenseTransactionDTO,
+  extra: Record<string, unknown> = {},
+) => ({
+  amount: transaction.amount,
+  date: transaction.date,
+  note: transaction.note ?? "",
+  categoryId: transaction.category?.id ?? null,
+  expectedVersion: transaction.version,
+  ...extra,
+});
 const expectTotals = async (
   currentBalance: string,
   totalBalanceAdded: string,
@@ -132,6 +148,13 @@ integration(
         },
       });
       admin = { id: user.id, role: "ADMIN", status: "ACTIVE" };
+      const editor = await db.user.create({
+        data: {
+          email: `daily-super-${randomUUID()}@example.test`,
+          role: "SUPER_ADMIN",
+        },
+      });
+      superAdmin = { id: editor.id, role: "SUPER_ADMIN", status: "ACTIVE" };
     });
 
     afterAll(async () => {
@@ -596,7 +619,7 @@ integration(
       expect(await db.dailyExpenseTransaction.count()).toBe(0);
     });
 
-    it("prevents rewriting/deleting posted entries, changing ledger configuration, or deleting their authors", async () => {
+    it("prevents uncontrolled rewrites/deletes, ledger configuration changes, and author deletion", async () => {
       const posted = await balance("12.50");
       const { ledger } = await getDailyExpensesSummary(admin);
       await expect(
@@ -628,6 +651,809 @@ integration(
       await expectTotals("12.50", "12.50", "0.00");
       expect((await history()).items[0].createdBy.id).toBe(admin.id);
     });
+
+    it("only permits active persisted super admins to edit records", async () => {
+      const { transaction } = await balance("12.50");
+      const edit = correction(transaction, { amount: "99.00" });
+      for (const actor of [
+        admin,
+        { ...admin, role: "EMPLOYEE" },
+        { ...admin, role: "MANAGE_DRIVER" },
+        { ...admin, role: "SUPER_ADMIN" },
+        { ...superAdmin, status: "INACTIVE" },
+        { ...superAdmin, id: "missing" },
+      ]) {
+        await expect(
+          updateDailyExpenseTransaction(actor, transaction.id, edit),
+        ).rejects.toMatchObject({ status: 403 });
+      }
+      await db.user.update({
+        where: { id: superAdmin.id },
+        data: { status: "INACTIVE" },
+      });
+      await expect(
+        updateDailyExpenseTransaction(superAdmin, transaction.id, edit),
+      ).rejects.toMatchObject({ status: 403 });
+      await expectTotals("12.50", "12.50", "0.00");
+      expect(
+        await db.auditLog.count({
+          where: { action: "DAILY_EXPENSE_TRANSACTION_UPDATED" },
+        }),
+      ).toBe(0);
+    });
+
+    it("audits expense and balance edits atomically while preserving creators and creation retries", async () => {
+      const supplies = await category();
+      const travel = await category("Travel");
+      const creation = input("100.00", { note: "Opening" });
+      const originalBalance = await addDailyExpenseBalance(admin, creation);
+      const originalExpense = await addDailyExpense(
+        admin,
+        input("25.00", { categoryId: supplies.id }),
+      );
+      const expenseEdit = correction(originalExpense.transaction, {
+        amount: "30.50",
+        date: "2024-01-02",
+        categoryId: travel.id,
+        note: "Corrected receipt",
+      });
+      const updatedExpense = await updateDailyExpenseTransaction(
+        superAdmin,
+        originalExpense.transaction.id,
+        expenseEdit,
+      );
+      expect(updatedExpense).toMatchObject({
+        replayed: false,
+        transaction: {
+          id: originalExpense.transaction.id,
+          type: "EXPENSE",
+          amount: "30.50",
+          date: "2024-01-02",
+          note: "Corrected receipt",
+          category: { id: travel.id },
+          version: 2,
+          createdBy: originalExpense.transaction.createdBy,
+          createdAt: originalExpense.transaction.createdAt,
+        },
+      });
+      await updateDailyExpenseTransaction(
+        superAdmin,
+        originalBalance.transaction.id,
+        correction(originalBalance.transaction, {
+          amount: "120.00",
+          note: "Corrected opening",
+        }),
+      );
+      await expectTotals("89.50", "120.00", "30.50");
+      expect(await db.dailyExpenseTransaction.count()).toBe(2);
+      const audits = await db.auditLog.findMany({
+        where: { action: "DAILY_EXPENSE_TRANSACTION_UPDATED" },
+      });
+      expect(audits).toHaveLength(2);
+      expect(audits).toContainEqual(
+        expect.objectContaining({
+          actorId: superAdmin.id,
+          resourceId: originalExpense.transaction.id,
+          previousState: expect.objectContaining({
+            amount: "25.00",
+            version: 1,
+          }),
+          newState: expect.objectContaining({ amount: "30.50", version: 2 }),
+        }),
+      );
+      await expect(
+        addDailyExpenseBalance(admin, creation),
+      ).resolves.toMatchObject({
+        replayed: true,
+        transaction: {
+          id: originalBalance.transaction.id,
+          amount: "120.00",
+          version: 2,
+        },
+      });
+      expect(await db.dailyExpenseTransaction.count()).toBe(2);
+      await expect(
+        updateDailyExpenseTransaction(
+          superAdmin,
+          originalExpense.transaction.id,
+          expenseEdit,
+        ),
+      ).resolves.toMatchObject({ replayed: true, transaction: { version: 2 } });
+      expect(
+        await db.auditLog.count({
+          where: { action: "DAILY_EXPENSE_TRANSACTION_UPDATED" },
+        }),
+      ).toBe(2);
+    });
+
+    it("rejects a stale edit instead of overwriting the winner under concurrency", async () => {
+      const { transaction } = await balance("10.00");
+      const results = await Promise.allSettled([
+        updateDailyExpenseTransaction(
+          superAdmin,
+          transaction.id,
+          correction(transaction, { amount: "11.00" }),
+        ),
+        updateDailyExpenseTransaction(
+          superAdmin,
+          transaction.id,
+          correction(transaction, { amount: "12.00" }),
+        ),
+      ]);
+      expect(
+        results.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        results.find((result) => result.status === "rejected"),
+      ).toMatchObject({
+        reason: { code: "TRANSACTION_CONFLICT", status: 409 },
+      });
+      expect((await history()).items[0].version).toBe(2);
+      expect(
+        await db.auditLog.count({
+          where: { action: "DAILY_EXPENSE_TRANSACTION_UPDATED" },
+        }),
+      ).toBe(1);
+    });
+
+    it("replays concurrent identical edits without creating a second audit or version", async () => {
+      const { transaction } = await balance("10.00");
+      const edit = correction(transaction, { amount: "12.00" });
+      const results = await Promise.all([
+        updateDailyExpenseTransaction(superAdmin, transaction.id, edit),
+        updateDailyExpenseTransaction(superAdmin, transaction.id, edit),
+      ]);
+      expect(results.map(({ replayed }) => replayed).sort()).toEqual([
+        false,
+        true,
+      ]);
+      await expectTotals("12.00", "12.00", "0.00");
+      expect((await history()).items[0].version).toBe(2);
+      expect(
+        await db.auditLog.count({
+          where: { action: "DAILY_EXPENSE_TRANSACTION_UPDATED" },
+        }),
+      ).toBe(1);
+    });
+
+    it("validates edited dates, category shape, and missing or foreign-ledger records", async () => {
+      const supplies = await category();
+      const { transaction } = await balance("10.00");
+      for (const patch of [
+        { amount: "0.00" },
+        { amount: "1.001" },
+        { date: "9999-01-01" },
+        { categoryId: supplies.id },
+        { type: "EXPENSE" },
+      ]) {
+        await expect(
+          updateDailyExpenseTransaction(
+            superAdmin,
+            transaction.id,
+            correction(transaction, patch),
+          ),
+        ).rejects.toBeDefined();
+      }
+      await expect(
+        updateDailyExpenseTransaction(
+          superAdmin,
+          "missing",
+          correction(transaction),
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      const otherLedger = await db.dailyExpenseLedger.create({
+        data: {
+          workspaceKey: `other-${randomUUID()}`,
+          currency: "BDT",
+          timezone: "Asia/Dhaka",
+        },
+      });
+      const foreignCategory = await db.dailyExpenseCategory.create({
+        data: { ledgerId: otherLedger.id, name: "Foreign" },
+      });
+      const foreignTransaction = await db.dailyExpenseTransaction.create({
+        data: {
+          ledgerId: otherLedger.id,
+          type: "BALANCE_ADDED",
+          amount: "5.00",
+          date: new Date(`${date}T00:00:00Z`),
+          createdById: admin.id,
+          idempotencyKey: randomUUID(),
+          payloadHash: "a".repeat(64),
+        },
+      });
+      await expect(
+        updateDailyExpenseTransaction(
+          superAdmin,
+          foreignTransaction.id,
+          correction(transaction),
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      const expense = await addDailyExpense(
+        admin,
+        input("1.00", { categoryId: supplies.id }),
+      );
+      for (const categoryId of [null, "missing", foreignCategory.id]) {
+        await expect(
+          updateDailyExpenseTransaction(
+            superAdmin,
+            expense.transaction.id,
+            correction(expense.transaction, { categoryId }),
+          ),
+        ).rejects.toBeDefined();
+      }
+      await expectTotals("9.00", "10.00", "1.00");
+    });
+
+    it("allows keeping a historical archived category but rejects switching to one", async () => {
+      const supplies = await category();
+      const travel = await category("Travel");
+      const { transaction } = await addDailyExpense(
+        admin,
+        input("1.00", { categoryId: supplies.id }),
+      );
+      await updateDailyExpenseCategory(admin, supplies.id, { archived: true });
+      await updateDailyExpenseCategory(admin, travel.id, { archived: true });
+      await expect(
+        updateDailyExpenseTransaction(
+          superAdmin,
+          transaction.id,
+          correction(transaction, { categoryId: travel.id }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_CATEGORY" });
+      await expect(
+        updateDailyExpenseTransaction(
+          superAdmin,
+          transaction.id,
+          correction(transaction, { amount: "2.00" }),
+        ),
+      ).resolves.toMatchObject({
+        transaction: {
+          amount: "2.00",
+          category: { id: supplies.id, archived: true },
+        },
+      });
+    });
+
+    it("rolls back the edit and version when its audit cannot be written", async () => {
+      const { transaction } = await balance("10.00");
+      await control.query(
+        `CREATE FUNCTION fail_edit_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Injected audit failure'; END; $$`,
+      );
+      await control.query(
+        'CREATE TRIGGER fail_edit_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION fail_edit_audit()',
+      );
+      try {
+        await expect(
+          updateDailyExpenseTransaction(
+            superAdmin,
+            transaction.id,
+            correction(transaction, { amount: "20.00" }),
+          ),
+        ).rejects.toBeDefined();
+        expect((await history()).items[0]).toMatchObject({
+          amount: "10.00",
+          version: 1,
+        });
+        await expectTotals("10.00", "10.00", "0.00");
+      } finally {
+        await control.query('DROP TRIGGER fail_edit_audit ON "AuditLog"');
+        await control.query("DROP FUNCTION fail_edit_audit()");
+      }
+    });
+
+    it("keeps database guards for edit authorization, immutable metadata, versions, and deletion", async () => {
+      const { transaction } = await balance("10.00");
+      const guarded = (actorId: string, sql: string, value: unknown) =>
+        db.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${actorId}, true)`;
+          return tx.$executeRawUnsafe(sql, value, transaction.id);
+        });
+      await expect(
+        guarded(
+          admin.id,
+          'UPDATE "DailyExpenseTransaction" SET "amount" = $1, "version" = "version" + 1 WHERE "id" = $2',
+          "20.00",
+        ),
+      ).rejects.toBeDefined();
+      for (const [field, value] of [
+        ["createdById", superAdmin.id],
+        ["payloadHash", "b".repeat(64)],
+        ["idempotencyKey", randomUUID()],
+        ["type", "EXPENSE"],
+        ["amount", "0.00"],
+        ["date", "9999-01-01"],
+      ]) {
+        await expect(
+          guarded(
+            superAdmin.id,
+            `UPDATE "DailyExpenseTransaction" SET "${field}" = $1, "version" = "version" + 1 WHERE "id" = $2`,
+            value,
+          ),
+        ).rejects.toBeDefined();
+      }
+      await expect(
+        guarded(
+          superAdmin.id,
+          'UPDATE "DailyExpenseTransaction" SET "amount" = $1 WHERE "id" = $2',
+          "20.00",
+        ),
+      ).rejects.toBeDefined();
+      await expect(
+        db.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${superAdmin.id}, true)`;
+          return tx.dailyExpenseTransaction.delete({
+            where: { id: transaction.id },
+          });
+        }),
+      ).rejects.toBeDefined();
+      await expectTotals("10.00", "10.00", "0.00");
+    });
+
+    it("deleting expense and balance records adjusts totals and removes them from every history filter", async () => {
+      const supplies = await category();
+      const deposit = await balance("100.00");
+      const expense = await addDailyExpense(
+        admin,
+        input("30.25", { categoryId: supplies.id, note: "Delete receipt" }),
+      );
+      await expectTotals("69.75", "100.00", "30.25");
+      await expect(
+        deleteDailyExpenseTransaction(superAdmin, expense.transaction.id, {
+          expectedVersion: expense.transaction.version,
+        }),
+      ).resolves.toEqual({ id: expense.transaction.id, replayed: false });
+      await expectTotals("100.00", "100.00", "0.00");
+      expect(
+        (
+          await history({
+            type: "EXPENSE",
+            categoryId: supplies.id,
+            search: "Delete receipt",
+          })
+        ).total,
+      ).toBe(0);
+      expect((await history()).items.map(({ id }) => id)).toEqual([
+        deposit.transaction.id,
+      ]);
+      await deleteDailyExpenseTransaction(superAdmin, deposit.transaction.id, {
+        expectedVersion: deposit.transaction.version,
+      });
+      await expectTotals("0.00", "0.00", "0.00");
+      expect(await history()).toMatchObject({
+        items: [],
+        total: 0,
+        totalPages: 0,
+      });
+      const retained = await db.dailyExpenseTransaction.findMany();
+      expect(retained).toHaveLength(2);
+      expect(
+        retained.every(
+          (record) => record.deletedAt instanceof Date && record.version === 2,
+        ),
+      ).toBe(true);
+      const audits = await db.auditLog.findMany({
+        where: { action: "DAILY_EXPENSE_TRANSACTION_DELETED" },
+      });
+      expect(audits).toHaveLength(2);
+      expect(audits).toContainEqual(
+        expect.objectContaining({
+          actorId: superAdmin.id,
+          resourceId: expense.transaction.id,
+          previousState: expect.objectContaining({
+            amount: "30.25",
+            version: 1,
+            deletedAt: null,
+          }),
+          newState: expect.objectContaining({
+            amount: "30.25",
+            version: 2,
+            deletedAt: expect.any(String),
+          }),
+        }),
+      );
+    });
+
+    it("prevents unauthorized or stale-role deletions and scopes records to this ledger", async () => {
+      const { transaction } = await balance("5.00");
+      const deletion = { expectedVersion: transaction.version };
+      for (const actor of [
+        admin,
+        { ...admin, role: "EMPLOYEE" },
+        { ...admin, role: "MANAGE_DRIVER" },
+        { ...admin, role: "SUPER_ADMIN" },
+        { ...superAdmin, status: "INACTIVE" },
+      ]) {
+        await expect(
+          deleteDailyExpenseTransaction(actor, transaction.id, deletion),
+        ).rejects.toMatchObject({ status: 403 });
+      }
+      await expect(
+        deleteDailyExpenseTransaction(superAdmin, "missing", deletion),
+      ).rejects.toMatchObject({ status: 404 });
+      const foreignLedger = await db.dailyExpenseLedger.create({
+        data: {
+          workspaceKey: `foreign-delete-${randomUUID()}`,
+          currency: "BDT",
+          timezone: "Asia/Dhaka",
+        },
+      });
+      const foreign = await db.dailyExpenseTransaction.create({
+        data: {
+          ledgerId: foreignLedger.id,
+          type: "BALANCE_ADDED",
+          amount: "7.00",
+          date: new Date(`${date}T00:00:00Z`),
+          createdById: admin.id,
+          idempotencyKey: randomUUID(),
+          payloadHash: "a".repeat(64),
+        },
+      });
+      await expect(
+        deleteDailyExpenseTransaction(superAdmin, foreign.id, deletion),
+      ).rejects.toMatchObject({ status: 404 });
+      await db.user.update({
+        where: { id: superAdmin.id },
+        data: { status: "SUSPENDED" },
+      });
+      await expect(
+        deleteDailyExpenseTransaction(superAdmin, transaction.id, deletion),
+      ).rejects.toMatchObject({ status: 403 });
+      await expectTotals("5.00", "5.00", "0.00");
+    });
+
+    it("replays simultaneous deletes once and never recreates or edits a deleted record", async () => {
+      const creation = input("10.00");
+      const { transaction } = await addDailyExpenseBalance(admin, creation);
+      const results = await Promise.all([
+        deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+          expectedVersion: 1,
+        }),
+        deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+          expectedVersion: 1,
+        }),
+      ]);
+      expect(results.map(({ replayed }) => replayed).sort()).toEqual([
+        false,
+        true,
+      ]);
+      await expect(
+        addDailyExpenseBalance(admin, creation),
+      ).rejects.toMatchObject({ code: "TRANSACTION_DELETED", status: 409 });
+      await expect(
+        updateDailyExpenseTransaction(
+          superAdmin,
+          transaction.id,
+          correction(transaction),
+        ),
+      ).rejects.toMatchObject({ code: "TRANSACTION_DELETED", status: 409 });
+      expect(await db.dailyExpenseTransaction.count()).toBe(1);
+      expect(
+        await db.auditLog.count({
+          where: { action: "DAILY_EXPENSE_TRANSACTION_DELETED" },
+        }),
+      ).toBe(1);
+      await expectTotals("0.00", "0.00", "0.00");
+    });
+
+    it("rejects deletion of an edited version until the latest amount has been reviewed", async () => {
+      const { transaction } = await balance("100.00");
+      const changed = await updateDailyExpenseTransaction(
+        superAdmin,
+        transaction.id,
+        correction(transaction, { amount: "200.00" }),
+      );
+      await expect(
+        deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+          expectedVersion: transaction.version,
+        }),
+      ).rejects.toMatchObject({ code: "TRANSACTION_CONFLICT", status: 409 });
+      await expectTotals("200.00", "200.00", "0.00");
+      await deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+        expectedVersion: changed.transaction.version,
+      });
+      await expectTotals("0.00", "0.00", "0.00");
+    });
+
+    it("serializes edit/delete races without overwriting a deleted or edited version", async () => {
+      const { transaction } = await balance("10.00");
+      const results = await Promise.allSettled([
+        updateDailyExpenseTransaction(
+          superAdmin,
+          transaction.id,
+          correction(transaction, { amount: "20.00" }),
+        ),
+        deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+          expectedVersion: 1,
+        }),
+      ]);
+      expect(
+        results.filter(({ status }) => status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(results.find(({ status }) => status === "rejected")).toMatchObject(
+        { reason: { status: 409 } },
+      );
+      const stored = await db.dailyExpenseTransaction.findUniqueOrThrow({
+        where: { id: transaction.id },
+      });
+      expect(stored.version).toBe(2);
+      await expectTotals(
+        stored.deletedAt ? "0.00" : "20.00",
+        stored.deletedAt ? "0.00" : "20.00",
+        "0.00",
+      );
+    });
+
+    it("deletes historical archived-category expenses and allows negative balances after deleting funds", async () => {
+      const supplies = await category();
+      const deposit = await balance("10.00");
+      const expense = await addDailyExpense(
+        admin,
+        input("20.00", { categoryId: supplies.id }),
+      );
+      await updateDailyExpenseCategory(admin, supplies.id, { archived: true });
+      await deleteDailyExpenseTransaction(superAdmin, deposit.transaction.id, {
+        expectedVersion: 1,
+      });
+      await expectTotals("-20.00", "0.00", "20.00");
+      await deleteDailyExpenseTransaction(superAdmin, expense.transaction.id, {
+        expectedVersion: 1,
+      });
+      await expectTotals("0.00", "0.00", "0.00");
+    });
+
+    it("rolls back a deletion and its balance effect when the audit fails", async () => {
+      const { transaction } = await balance("10.00");
+      await control.query(
+        `CREATE FUNCTION fail_delete_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Injected audit failure'; END; $$`,
+      );
+      await control.query(
+        'CREATE TRIGGER fail_delete_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION fail_delete_audit()',
+      );
+      try {
+        await expect(
+          deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+            expectedVersion: 1,
+          }),
+        ).rejects.toBeDefined();
+        expect((await history()).items[0]).toMatchObject({
+          id: transaction.id,
+          version: 1,
+        });
+        expect(
+          (
+            await db.dailyExpenseTransaction.findUniqueOrThrow({
+              where: { id: transaction.id },
+            })
+          ).deletedAt,
+        ).toBeNull();
+        await expectTotals("10.00", "10.00", "0.00");
+      } finally {
+        await control.query('DROP TRIGGER fail_delete_audit ON "AuditLog"');
+        await control.query("DROP FUNCTION fail_delete_audit()");
+      }
+    });
+
+    it("database guards prohibit unauthorized deletion, changing amounts while deleting, and restoring deleted records", async () => {
+      const { transaction } = await balance("10.00");
+      const direct = (actorId: string, data: Record<string, unknown>) =>
+        db.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${actorId}, true)`;
+          return tx.dailyExpenseTransaction.update({
+            where: { id: transaction.id },
+            data,
+          });
+        });
+      await expect(
+        direct(admin.id, { deletedAt: new Date(), version: { increment: 1 } }),
+      ).rejects.toBeDefined();
+      await expect(
+        direct(superAdmin.id, {
+          deletedAt: new Date(),
+          amount: "20.00",
+          version: { increment: 1 },
+        }),
+      ).rejects.toBeDefined();
+      await deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+        expectedVersion: 1,
+      });
+      await expect(
+        direct(superAdmin.id, { deletedAt: null, version: { increment: 1 } }),
+      ).rejects.toBeDefined();
+      await expect(
+        direct(superAdmin.id, { amount: "20.00", version: { increment: 1 } }),
+      ).rejects.toBeDefined();
+      await expectTotals("0.00", "0.00", "0.00");
+    });
+
+    it("exports all filtered records across pages with corrected values and no deleted records", async () => {
+      const supplies = await category();
+      await balance("100.00");
+      const entries = [];
+      for (let index = 0; index < 30; index++) {
+        entries.push(
+          await addDailyExpense(
+            admin,
+            input("0.10", {
+              categoryId: supplies.id,
+              note: `Paper ${index + 1}`,
+            }),
+          ),
+        );
+      }
+      const corrected = await updateDailyExpenseTransaction(
+        superAdmin,
+        entries[0].transaction.id,
+        correction(entries[0].transaction, { amount: "0.15" }),
+      );
+      await deleteDailyExpenseTransaction(
+        superAdmin,
+        entries[1].transaction.id,
+        { expectedVersion: 1 },
+      );
+      await addDailyExpense(
+        admin,
+        input("10.00", {
+          categoryId: supplies.id,
+          note: "Other supplies",
+          date: "2024-01-02",
+        }),
+      );
+      const filters = {
+        from: date,
+        to: date,
+        type: "EXPENSE",
+        categoryId: supplies.id,
+        search: "paper",
+        page: "2",
+        pageSize: "1",
+      };
+      const report = await getDailyExpenseReportData(superAdmin, filters);
+      expect(report.items).toHaveLength(29);
+      expect(report.items).toContainEqual(
+        expect.objectContaining({
+          id: corrected.transaction.id,
+          amount: "0.15",
+          version: 2,
+        }),
+      );
+      expect(report.items.map(({ id }) => id)).not.toContain(
+        entries[1].transaction.id,
+      );
+      expect(report).toMatchObject({
+        categoryName: "Supplies",
+        allTime: {
+          currentBalance: "87.05",
+          totalBalanceAdded: "100.00",
+          totalExpenses: "12.95",
+        },
+        filtered: {
+          count: 29,
+          totalBalanceAdded: "0.00",
+          totalExpenses: "2.95",
+          netChange: "-2.95",
+        },
+      });
+      expect(Number.isFinite(new Date(report.generatedAt).getTime())).toBe(
+        true,
+      );
+      const listed = await history({ ...filters, page: 1, pageSize: 100 });
+      expect(report.items.map(({ id }) => id)).toEqual(
+        listed.items.map(({ id }) => id),
+      );
+    });
+
+    it("uses literal note search and includes archived category names in an empty or matching report", async () => {
+      const supplies = await category("Office supplies");
+      await balance("25.00");
+      const expense = await addDailyExpense(
+        admin,
+        input("1.23", { categoryId: supplies.id, note: "100%_matched" }),
+      );
+      await addDailyExpense(
+        admin,
+        input("2.00", { categoryId: supplies.id, note: "100 percent matched" }),
+      );
+      await updateDailyExpenseCategory(admin, supplies.id, { archived: true });
+      const matched = await getDailyExpenseReportData(superAdmin, {
+        search: "%_",
+        categoryId: supplies.id,
+      });
+      expect(matched.items.map(({ id }) => id)).toEqual([
+        expense.transaction.id,
+      ]);
+      expect(matched.categoryName).toContain("Office supplies");
+      const empty = await getDailyExpenseReportData(superAdmin, {
+        from: "2024-02-01",
+        categoryId: supplies.id,
+      });
+      expect(empty).toMatchObject({
+        items: [],
+        filtered: {
+          count: 0,
+          totalBalanceAdded: "0.00",
+          totalExpenses: "0.00",
+          netChange: "0.00",
+        },
+        allTime: {
+          currentBalance: "21.77",
+          totalBalanceAdded: "25.00",
+          totalExpenses: "3.23",
+        },
+      });
+    });
+
+    it("rejects unauthorized report entry points and foreign category scope before exposing data", async () => {
+      for (const actor of [
+        admin,
+        { ...admin, role: "EMPLOYEE" },
+        { ...admin, role: "MANAGE_DRIVER" },
+        { ...superAdmin, status: "SUSPENDED" },
+      ]) {
+        await expect(
+          getDailyExpenseReportData(actor, {}),
+        ).rejects.toMatchObject({ status: 403 });
+      }
+      expect(await db.dailyExpenseLedger.count()).toBe(0);
+      const other = await db.dailyExpenseLedger.create({
+        data: {
+          workspaceKey: `report-foreign-${randomUUID()}`,
+          currency: "BDT",
+          timezone: "Asia/Dhaka",
+        },
+      });
+      const foreignCategory = await db.dailyExpenseCategory.create({
+        data: { ledgerId: other.id, name: "Foreign" },
+      });
+      await expect(
+        getDailyExpenseReportData(superAdmin, {
+          categoryId: foreignCategory.id,
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_CATEGORY" });
+      await expect(
+        getDailyExpenseReportData(superAdmin, { ledgerId: other.id }),
+      ).rejects.toBeDefined();
+      await expect(
+        getDailyExpenseReportData(superAdmin, {
+          from: "2024-02-01",
+          to: "2024-01-01",
+        }),
+      ).rejects.toBeDefined();
+    });
+
+    it("keeps large filtered totals exact and rejects reports above the row limit instead of truncating", async () => {
+      const { ledger } = await getDailyExpensesSummary(admin);
+      await db.dailyExpenseTransaction.createMany({
+        data: Array.from({ length: 10000 }, (_, index) => ({
+          ledgerId: ledger.id,
+          type: "BALANCE_ADDED" as const,
+          amount: index === 9999 ? "0.01" : "9999999999999999.99",
+          date: new Date(`${date}T00:00:00Z`),
+          createdById: admin.id,
+          idempotencyKey: randomUUID(),
+          payloadHash: "a".repeat(64),
+        })),
+      });
+      const expectedCents =
+        BigInt("999999999999999999") * BigInt(9999) + BigInt(1);
+      const expected = `${expectedCents / BigInt(100)}.${String(expectedCents % BigInt(100)).padStart(2, "0")}`;
+      const report = await getDailyExpenseReportData(superAdmin, {});
+      expect(report.items).toHaveLength(10000);
+      expect(report.filtered).toMatchObject({
+        count: 10000,
+        totalBalanceAdded: expected,
+        totalExpenses: "0.00",
+        netChange: expected,
+      });
+      expect(report.allTime).toMatchObject({
+        currentBalance: expected,
+        totalBalanceAdded: expected,
+      });
+      await balance("1.00");
+      await expect(
+        getDailyExpenseReportData(superAdmin, {}),
+      ).rejects.toMatchObject({ code: "REPORT_TOO_LARGE", status: 400 });
+    }, 30_000);
 
     it("does not change unrelated business records or attendance event tables", async () => {
       const trip = await db.driveCost.create({

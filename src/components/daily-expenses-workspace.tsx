@@ -5,11 +5,14 @@ import {
   Archive,
   Check,
   FolderOpen,
+  Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   Wallet,
 } from "lucide-react";
 import { Modal } from "./modal";
+import { PdfDownloadButton } from "./pdf-download-button";
 import {
   Empty,
   ErrorNotice,
@@ -30,10 +33,13 @@ import {
   formatMoney,
   historyQuerySchema,
   todayInTimezone,
+  transactionUpdateSchema,
   type BalanceInput,
   type DailyExpenseCategoryDTO,
   type DailyExpenseTransactionDTO,
   type ExpenseInput,
+  type TransactionUpdateInput,
+  type TransactionDeleteInput,
 } from "@/modules/daily-expenses/contracts";
 import {
   useAddDailyExpenseMutation,
@@ -43,6 +49,8 @@ import {
   useDailyExpensesSummaryQuery,
   useDailyExpensesTransactionsQuery,
   useUpdateDailyExpenseCategoryMutation,
+  useUpdateDailyExpenseTransactionMutation,
+  useDeleteDailyExpenseTransactionMutation,
   type DailyExpensesHistoryArgs,
 } from "@/store/features/daily-expenses/api";
 import styles from "./daily-expenses-workspace.module.css";
@@ -55,10 +63,14 @@ type Draft = {
   date: string;
   note: string;
   categoryId: string;
+  transaction?: DailyExpenseTransactionDTO;
+  deleting?: boolean;
 };
 type Submission =
   | { type: "BALANCE_ADDED"; input: BalanceInput }
-  | { type: "EXPENSE"; input: ExpenseInput };
+  | { type: "EXPENSE"; input: ExpenseInput }
+  | { type: "UPDATE"; id: string; input: TransactionUpdateInput }
+  | { type: "DELETE"; id: string; input: TransactionDeleteInput };
 type Filters = {
   from: string;
   to: string;
@@ -95,7 +107,15 @@ function fieldErrors(error: unknown) {
   return isApiError(error) ? (error.fields ?? error.fieldErrors ?? {}) : {};
 }
 
-export function DailyExpensesWorkspace() {
+export function DailyExpensesWorkspace({
+  canEditTransactions,
+  canDeleteTransactions,
+  canDownloadReport,
+}: {
+  canEditTransactions: boolean;
+  canDeleteTransactions: boolean;
+  canDownloadReport: boolean;
+}) {
   const { params, update } = useUrlFilters();
   const filters: Filters = {
     from: params.get("from") || "",
@@ -105,6 +125,11 @@ export function DailyExpensesWorkspace() {
     search: params.get("search") || "",
   };
   const filterKey = JSON.stringify(filters);
+  // Export every match for the applied URL filters, independent of pagination
+  // and any filter edits that have not been applied yet.
+  const reportQuery = new URLSearchParams(
+    Object.entries(filters).filter(([, value]) => Boolean(value)),
+  ).toString();
   const [filterEdit, setFilterEdit] = useState({
     key: filterKey,
     values: filters,
@@ -135,19 +160,37 @@ export function DailyExpensesWorkspace() {
   const categories = useQueryView(categoriesQuery);
   const [addBalance] = useAddDailyExpensesBalanceMutation();
   const [addExpense] = useAddDailyExpenseMutation();
+  const [updateTransaction] = useUpdateDailyExpenseTransactionMutation();
+  const [deleteTransaction] = useDeleteDailyExpenseTransactionMutation();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [uncertain, setUncertain] = useState(false);
+  const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
+  const deletionPageRecovery = useRef<{ requestId?: string } | null>(null);
   const [formError, setFormError] = useState("");
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [filterError, setFilterError] = useState("");
   const [message, setMessage] = useState("");
+  const [confirmedOperation, setConfirmedOperation] = useState<
+    Submission["type"] | null
+  >(null);
   const activeCategories =
     categories.data?.filter((category) => !category.archived) ?? [];
+  const retainedCategory = draft?.transaction?.category;
+  const selectableCategories =
+    retainedCategory &&
+    !activeCategories.some((category) => category.id === retainedCategory.id)
+      ? [
+          categories.data?.find(
+            (category) => category.id === retainedCategory.id,
+          ) ?? retainedCategory,
+          ...activeCategories,
+        ]
+      : activeCategories;
   const hasFilters = Object.values(filters).some(Boolean);
   const fetching =
     summary.isFetching || history.isFetching || categories.isFetching;
@@ -156,8 +199,32 @@ export function DailyExpensesWorkspace() {
     ? todayInTimezone(summary.data.ledger.timezone)
     : undefined;
 
-  // A browser reload must not casually discard the key for an unconfirmed write.
-  // The key and payload stay local; financial data is never persisted in browser storage.
+  // A confirmed deletion can remove the only row from the last history page.
+  // Wait for a fresh authoritative list before choosing its last valid page.
+  useEffect(() => {
+    const recovery = deletionPageRecovery.current;
+    if (
+      !recovery ||
+      !history.data ||
+      history.isFetching ||
+      historyQuery.error ||
+      historyQuery.requestId === recovery.requestId
+    )
+      return;
+    const lastPage = Math.max(1, history.data.totalPages);
+    if (page > lastPage) update({ page: lastPage });
+    deletionPageRecovery.current = null;
+  }, [
+    history.data,
+    history.isFetching,
+    historyQuery.error,
+    historyQuery.requestId,
+    page,
+    update,
+  ]);
+
+  // Keep the frozen payload and retry key/version for an unconfirmed write.
+  // Financial data is never persisted in browser storage.
   useEffect(() => {
     if (!submission) return;
     const guard = (event: BeforeUnloadEvent) => {
@@ -194,7 +261,7 @@ export function DailyExpensesWorkspace() {
       setCategoriesOpen(false);
       setDialogOpen(true);
       setFormError(
-        "Keep this page open until this transaction is confirmed. If its save was interrupted, use Safe retry before leaving the workspace.",
+        "Keep this page open until this transaction change is confirmed. If the request was interrupted, use Safe retry before leaving the workspace.",
       );
     };
     window.addEventListener("beforeunload", guard);
@@ -216,6 +283,35 @@ export function DailyExpensesWorkspace() {
     });
     setSubmission(null);
     setUncertain(false);
+    setConflict(false);
+    setErrors({});
+    setFormError("");
+    setMessage("");
+    setDialogOpen(true);
+  }
+
+  function openSavedTransaction(
+    transaction: DailyExpenseTransactionDTO,
+    deleting = false,
+  ) {
+    if (
+      !(deleting ? canDeleteTransactions : canEditTransactions) ||
+      locked ||
+      !summary.data
+    )
+      return;
+    setDraft({
+      type: transaction.type,
+      amount: transaction.amount,
+      date: transaction.date,
+      note: transaction.note ?? "",
+      categoryId: transaction.category?.id ?? "",
+      transaction,
+      deleting,
+    });
+    setSubmission(null);
+    setUncertain(false);
+    setConflict(false);
     setErrors({});
     setFormError("");
     setMessage("");
@@ -228,27 +324,55 @@ export function DailyExpensesWorkspace() {
     if (!uncertain) {
       setDraft(null);
       setSubmission(null);
+      if (conflict) refresh();
+      setConflict(false);
     }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draft || submitting.current) return;
+    if (!draft || submitting.current || conflict) return;
+    if (
+      draft.deleting
+        ? !canDeleteTransactions
+        : draft.transaction && !canEditTransactions
+    )
+      return;
     let attempt = submission;
-    if (!attempt) {
+    if (!attempt && draft.deleting && draft.transaction) {
+      attempt = {
+        type: "DELETE",
+        id: draft.transaction.id,
+        input: { expectedVersion: draft.transaction.version },
+      };
+      setSubmission(attempt);
+    } else if (!attempt) {
       const common = {
         amount: draft.amount,
         date: draft.date,
         note: draft.note,
-        idempotencyKey: crypto.randomUUID(),
       };
-      const parsed =
-        draft.type === "EXPENSE"
+      if (draft.type === "EXPENSE" && !draft.categoryId) {
+        setErrors({ categoryId: ["Choose a category."] });
+        setFormError("Check the highlighted fields before saving.");
+        return;
+      }
+      const parsed = draft.transaction
+        ? transactionUpdateSchema.safeParse({
+            ...common,
+            categoryId: draft.type === "EXPENSE" ? draft.categoryId : null,
+            expectedVersion: draft.transaction.version,
+          })
+        : draft.type === "EXPENSE"
           ? expenseInputSchema.safeParse({
               ...common,
               categoryId: draft.categoryId,
+              idempotencyKey: crypto.randomUUID(),
             })
-          : balanceInputSchema.safeParse(common);
+          : balanceInputSchema.safeParse({
+              ...common,
+              idempotencyKey: crypto.randomUUID(),
+            });
       if (!parsed.success) {
         setErrors(parsed.error.flatten().fieldErrors);
         setFormError("Check the highlighted fields before saving.");
@@ -264,8 +388,13 @@ export function DailyExpensesWorkspace() {
         setFormError("Future transactions are not supported.");
         return;
       }
-      attempt =
-        draft.type === "EXPENSE"
+      attempt = draft.transaction
+        ? {
+            type: "UPDATE",
+            id: draft.transaction.id,
+            input: parsed.data as TransactionUpdateInput,
+          }
+        : draft.type === "EXPENSE"
           ? { type: "EXPENSE", input: parsed.data as ExpenseInput }
           : { type: "BALANCE_ADDED", input: parsed.data as BalanceInput };
       setSubmission(attempt);
@@ -275,13 +404,30 @@ export function DailyExpensesWorkspace() {
     setErrors({});
     setFormError("");
     try {
-      const result =
-        attempt.type === "EXPENSE"
-          ? await addExpense(attempt.input).unwrap()
-          : await addBalance(attempt.input).unwrap();
-      setMessage(
-        `${result.transaction.type === "EXPENSE" ? "Expense" : "Balance addition"} saved${result.replayed ? " (the earlier submission was already recorded)" : ""}. History filters are preserved; the entry may be outside the current view.`,
-      );
+      if (attempt.type === "DELETE") {
+        const result = await deleteTransaction({
+          id: attempt.id,
+          input: attempt.input,
+        }).unwrap();
+        deletionPageRecovery.current = { requestId: historyQuery.requestId };
+        setMessage(
+          `${draft.type === "EXPENSE" ? "Expense" : "Balance addition"} deleted${result.replayed ? " (the record was already deleted)" : ""}. Balances and history are being refreshed.`,
+        );
+      } else {
+        const result =
+          attempt.type === "UPDATE"
+            ? await updateTransaction({
+                id: attempt.id,
+                input: attempt.input,
+              }).unwrap()
+            : attempt.type === "EXPENSE"
+              ? await addExpense(attempt.input).unwrap()
+              : await addBalance(attempt.input).unwrap();
+        setMessage(
+          `${result.transaction.type === "EXPENSE" ? "Expense" : "Balance addition"} ${attempt.type === "UPDATE" ? "updated" : "saved"}${result.replayed ? " (the earlier submission was already recorded)" : ""}. History filters are preserved; the entry may be outside the current view.`,
+        );
+      }
+      setConfirmedOperation(attempt.type);
       setSubmission(null);
       setUncertain(false);
       setDraft(null);
@@ -289,6 +435,30 @@ export function DailyExpensesWorkspace() {
       // Successful RTK invalidation refreshes the reads. A later read failure
       // cannot turn this confirmed write into a failed submission.
     } catch (error) {
+      if (isApiError(error) && error.code === "TRANSACTION_DELETED") {
+        setSubmission(null);
+        setUncertain(false);
+        setConflict(true);
+        setFormError(
+          "This transaction has been deleted. Close and refresh to load the current balances and history. It cannot be edited or recreated by retrying this submission.",
+        );
+        return;
+      }
+      if (
+        (attempt.type === "UPDATE" || attempt.type === "DELETE") &&
+        isApiError(error) &&
+        error.status === 409
+      ) {
+        setSubmission(null);
+        setUncertain(false);
+        setConflict(true);
+        setFormError(
+          attempt.type === "DELETE"
+            ? "This transaction has changed since you opened it. Close and refresh, then review the latest record before deleting it. This attempt did not delete the newer version."
+            : "This transaction has changed since you opened it. Close and refresh, then reopen the latest record to review your changes. This attempt did not overwrite the newer version.",
+        );
+        return;
+      }
       // Only business rejections reached after the server's replay check can
       // resolve an earlier uncertain attempt. A rate-limit or authorization
       // rejection alone says nothing about that earlier write.
@@ -299,7 +469,11 @@ export function DailyExpensesWorkspace() {
       if (requestMayHaveCommitted(error) || (uncertain && !resolvedRejection)) {
         setUncertain(true);
         setFormError(
-          "The save could not be confirmed. Use Safe retry to check or complete this exact transaction. Its values and retry key are preserved; no new transaction will be created for the same submission.",
+          attempt.type === "DELETE"
+            ? "The deletion could not be confirmed. Use Safe retry to check or complete this exact deletion. The original record and version are preserved; retrying cannot delete a newer edit."
+            : attempt.type === "UPDATE"
+              ? "The edit could not be confirmed. Use Safe retry to check or complete this exact edit. Its values and original version are preserved so a newer edit cannot be overwritten."
+              : "The save could not be confirmed. Use Safe retry to check or complete this exact transaction. Its values and retry key are preserved; no new transaction will be created for the same submission.",
         );
       } else {
         setSubmission(null);
@@ -394,7 +568,13 @@ export function DailyExpensesWorkspace() {
         </Notice>
       )}
       {message && (summaryError || historyError) && (
-        <ErrorNotice message="Your transaction was saved. The latest balances or history could not be loaded. Refresh the view; do not submit the saved transaction again." />
+        <ErrorNotice
+          message={
+            confirmedOperation === "DELETE"
+              ? "Your deletion was confirmed. The latest balances or history could not be loaded. Refresh the view to load the updated ledger."
+              : "Your transaction was saved. The latest balances or history could not be loaded. Refresh the view; do not submit the saved transaction again."
+          }
+        />
       )}
       <ErrorNotice message={summaryError} />
       <section
@@ -472,8 +652,8 @@ export function DailyExpensesWorkspace() {
       {uncertain && (
         <div className={`notice ${styles.pending}`} role="alert">
           <span>
-            A transaction is awaiting confirmation. Safely retry it before
-            starting another transaction.
+            A transaction change is awaiting confirmation. Safely retry it
+            before starting another transaction.
           </span>
           <button
             type="button"
@@ -488,18 +668,33 @@ export function DailyExpensesWorkspace() {
         </div>
       )}
       <section className="card" aria-labelledby="daily-history-heading">
-        <div className="card-header">
+        <div className={`card-header ${styles.historyHeader}`}>
           <div>
             <h2 id="daily-history-heading">Transaction history</h2>
             <p>
-              Newest transaction date first. Posted transactions are permanent.
+              Newest transaction date first. Only super admins can edit or
+              delete saved transactions.
             </p>
           </div>
-          {history.isFetching && (
-            <span className="muted" role="status">
-              Updating history…
-            </span>
-          )}
+          <div className={styles.historyActions}>
+            {canDownloadReport && (
+              <>
+                <PdfDownloadButton
+                  href={`/api/daily-expenses/report${reportQuery ? `?${reportQuery}` : ""}`}
+                  filename="daily-expenses-report.pdf"
+                  disabled={locked || !summary.data}
+                />
+                <p>
+                  PDF includes all matching records for the applied filters.
+                </p>
+              </>
+            )}
+            {history.isFetching && (
+              <span className="muted" role="status">
+                Updating history…
+              </span>
+            )}
+          </div>
         </div>
         <form className={styles.filters} onSubmit={applyFilters}>
           <div className="field">
@@ -621,6 +816,9 @@ export function DailyExpensesWorkspace() {
                   <th scope="col">Description / note</th>
                   <th scope="col">Amount</th>
                   <th scope="col">Recorded by</th>
+                  {(canEditTransactions || canDeleteTransactions) && (
+                    <th scope="col">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -654,6 +852,38 @@ export function DailyExpensesWorkspace() {
                       {transaction.createdBy.name ||
                         transaction.createdBy.email}
                     </td>
+                    {(canEditTransactions || canDeleteTransactions) && (
+                      <td data-label="Actions">
+                        <div className="buttons">
+                          {canEditTransactions && (
+                            <button
+                              type="button"
+                              className="button small secondary"
+                              disabled={
+                                !summary.data || locked || history.isFetching
+                              }
+                              onClick={() => openSavedTransaction(transaction)}
+                            >
+                              <Pencil size={14} /> Edit
+                            </button>
+                          )}
+                          {canDeleteTransactions && (
+                            <button
+                              type="button"
+                              className="button small danger"
+                              disabled={
+                                !summary.data || locked || history.isFetching
+                              }
+                              onClick={() =>
+                                openSavedTransaction(transaction, true)
+                              }
+                            >
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -684,22 +914,111 @@ export function DailyExpensesWorkspace() {
         )}
       </section>
 
-      {dialogOpen && draft && !categoriesOpen && (
+      {dialogOpen &&
+        draft?.deleting &&
+        draft.transaction &&
+        !categoriesOpen && (
+          <Modal
+            title={
+              draft.type === "EXPENSE" ? "Delete Expense" : "Delete Balance"
+            }
+            close={closeTransaction}
+          >
+            <form onSubmit={submit}>
+              <p className={`muted ${styles.formIntro}`}>
+                Review this record before deleting it. The record will be
+                removed from transaction history and this action cannot be
+                undone.
+              </p>
+              <dl className={styles.deleteDetails}>
+                <dt>Type</dt>
+                <dd>
+                  {draft.type === "EXPENSE" ? "Expense" : "Balance Added"}
+                </dd>
+                <dt>Amount</dt>
+                <dd>
+                  {currency
+                    ? formatMoney(draft.amount, currency)
+                    : draft.amount}
+                </dd>
+                <dt>Transaction date</dt>
+                <dd>
+                  <time dateTime={draft.date}>{dateLabel(draft.date)}</time>
+                </dd>
+                {draft.transaction.category && (
+                  <>
+                    <dt>Category</dt>
+                    <dd>{draft.transaction.category.name}</dd>
+                  </>
+                )}
+                <dt>Description / note</dt>
+                <dd>{draft.note || "—"}</dd>
+              </dl>
+              <p className={styles.deleteImpact}>
+                {draft.type === "EXPENSE"
+                  ? `Deleting this expense will increase Current Balance by ${currency ? formatMoney(draft.amount, currency) : draft.amount}.`
+                  : `Deleting this balance addition will reduce Current Balance and Total Balance Added by ${currency ? formatMoney(draft.amount, currency) : draft.amount}. Current Balance may become negative.`}
+              </p>
+              <ErrorNotice message={formError} />
+              {uncertain && (
+                <p className={styles.retryHelp}>
+                  Safe retry uses the same record and its original version. Keep
+                  this page open until the deletion is confirmed.
+                </p>
+              )}
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={closeTransaction}
+                >
+                  {conflict
+                    ? "Close and refresh"
+                    : uncertain
+                      ? "Keep pending"
+                      : "Cancel"}
+                </button>
+                {!conflict && (
+                  <button
+                    className="button danger"
+                    type="submit"
+                    disabled={busy}
+                  >
+                    {busy
+                      ? "Confirming…"
+                      : uncertain
+                        ? "Safe retry"
+                        : "Delete record"}
+                  </button>
+                )}
+              </div>
+            </form>
+          </Modal>
+        )}
+      {dialogOpen && draft && !draft.deleting && !categoriesOpen && (
         <Modal
-          title={draft.type === "EXPENSE" ? "Add Expense" : "Add Balance"}
+          title={
+            draft.transaction
+              ? draft.type === "EXPENSE"
+                ? "Edit Expense"
+                : "Edit Balance"
+              : draft.type === "EXPENSE"
+                ? "Add Expense"
+                : "Add Balance"
+          }
           close={closeTransaction}
         >
           <form onSubmit={submit}>
             <p className={`muted ${styles.formIntro}`}>
-              {draft.type === "EXPENSE"
-                ? "Record an expense, even if it takes the balance below zero."
-                : "Record funds received into this ledger."}{" "}
-              Transactions cannot be edited or deleted after saving.
+              {draft.transaction
+                ? "Update this record. Its transaction type and original recorder stay the same. Balances update after the edit is confirmed."
+                : `${draft.type === "EXPENSE" ? "Record an expense, even if it takes the balance below zero." : "Record funds received into this ledger."} Only super admins can edit or delete saved transactions.`}
             </p>
             <ErrorNotice message={formError} />
             <fieldset
               className={`form-grid ${styles.fields}`}
-              disabled={locked}
+              disabled={locked || conflict}
             >
               <div className="field">
                 <label htmlFor="daily-amount">Amount ({currency})</label>
@@ -774,9 +1093,12 @@ export function DailyExpensesWorkspace() {
                     }
                   >
                     <option value="">Choose an active category</option>
-                    {activeCategories.map((category) => (
+                    {selectableCategories.map((category) => (
                       <option key={category.id} value={category.id}>
                         {category.name}
+                        {category.archived
+                          ? " (archived, current category)"
+                          : ""}
                       </option>
                     ))}
                   </select>
@@ -789,7 +1111,7 @@ export function DailyExpensesWorkspace() {
                     </span>
                   )}
                   {categoryError && <ErrorNotice message={categoryError} />}
-                  {!categories.loading && activeCategories.length === 0 && (
+                  {!categories.loading && selectableCategories.length === 0 && (
                     <p>
                       No active categories are available. Create or restore a
                       category to record an expense.
@@ -833,7 +1155,10 @@ export function DailyExpensesWorkspace() {
             {uncertain && (
               <p className={styles.retryHelp}>
                 Safe retry uses the original amount, date, category, note, and
-                submission key. Keep this page open until the save is confirmed.
+                {draft.transaction
+                  ? " record version."
+                  : " submission key."}{" "}
+                Keep this page open until the save is confirmed.
               </p>
             )}
             <div className="form-actions">
@@ -843,26 +1168,34 @@ export function DailyExpensesWorkspace() {
                 disabled={busy}
                 onClick={closeTransaction}
               >
-                {uncertain ? "Keep pending" : "Cancel"}
-              </button>
-              <button
-                className="button"
-                type="submit"
-                disabled={
-                  busy ||
-                  (!uncertain &&
-                    draft.type === "EXPENSE" &&
-                    !activeCategories.length)
-                }
-              >
-                {busy
-                  ? "Confirming…"
+                {conflict
+                  ? "Close and refresh"
                   : uncertain
-                    ? "Safe retry"
-                    : draft.type === "EXPENSE"
-                      ? "Save expense"
-                      : "Save balance addition"}
+                    ? "Keep pending"
+                    : "Cancel"}
               </button>
+              {!conflict && (
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={
+                    busy ||
+                    (!uncertain &&
+                      draft.type === "EXPENSE" &&
+                      !selectableCategories.length)
+                  }
+                >
+                  {busy
+                    ? "Confirming…"
+                    : uncertain
+                      ? "Safe retry"
+                      : draft.transaction
+                        ? "Save changes"
+                        : draft.type === "EXPENSE"
+                          ? "Save expense"
+                          : "Save balance addition"}
+                </button>
+              )}
             </div>
           </form>
         </Modal>

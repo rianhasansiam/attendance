@@ -360,6 +360,8 @@ model DailyExpenseCategory {
 
 model DailyExpenseTransaction {
   id String @id @default(cuid())
+  version Int @default(1)
+  deletedAt DateTime?
   ledgerId String
   type DailyExpenseTransactionType
   amount Decimal @db.Decimal(18, 2)

@@ -11,15 +11,30 @@ import {
   categoryUpdateSchema,
   dailyExpenseIdSchema,
   historyQuerySchema,
+  dailyExpenseReportQuerySchema,
+  transactionUpdateSchema,
+  transactionDeleteSchema,
   todayInTimezone,
   type DailyExpenseCategoryDTO,
   type DailyExpenseSummaryDTO,
   type DailyExpenseTransactionDTO,
   type DailyExpenseHistoryDTO,
   type DailyExpenseMutationDTO,
+  type DailyExpenseDeletionDTO,
+  type DailyExpenseReportData,
+  type DailyExpenseTotalsDTO,
   type DailyExpenseTransactionType,
 } from "./contracts";
-import { authorizeDailyExpenses, type DailyExpensesActor } from "./permissions";
+import {
+  authorizeDailyExpenses,
+  authorizeDailyExpenseTransactionEdit,
+  authorizeDailyExpenseTransactionDelete,
+  authorizeDailyExpenseReport,
+  type DailyExpensesActor,
+} from "./permissions";
+import { dailyExpenseWhere } from "./filters";
+
+export const MAX_DAILY_EXPENSE_REPORT_ROWS = 10000;
 
 const workspaceKey = "daily-expenses";
 const transactionInclude = {
@@ -45,6 +60,7 @@ function transactionDTO(
 ): DailyExpenseTransactionDTO {
   return {
     id: transaction.id,
+    version: transaction.version,
     type: transaction.type,
     amount: transaction.amount.toFixed(2),
     date: transaction.date.toISOString().slice(0, 10),
@@ -130,14 +146,13 @@ async function getLedger() {
   }
 }
 
-export async function getDailyExpensesSummary(
-  actor: DailyExpensesActor,
-): Promise<DailyExpenseSummaryDTO> {
-  authorizeDailyExpenses(actor);
-  const ledger = await getLedger();
+async function dailyExpenseTotals(
+  client: Pick<Prisma.TransactionClient, "$queryRaw">,
+  ledgerId: string,
+): Promise<DailyExpenseTotalsDTO> {
   // All totals share a single PostgreSQL statement snapshot. Compute subtraction
   // in exact numeric SQL too: aggregate totals may exceed Decimal(18,2).
-  const [totals] = await db.$queryRaw<
+  const [totals] = await client.$queryRaw<
     Array<{
       currentBalance: string;
       totalBalanceAdded: string;
@@ -148,19 +163,29 @@ export async function getDailyExpensesSummary(
       COALESCE(SUM(CASE WHEN "type" = 'BALANCE_ADDED' THEN "amount" ELSE -"amount" END), 0)::text AS "currentBalance",
       COALESCE(SUM("amount") FILTER (WHERE "type" = 'BALANCE_ADDED'), 0)::text AS "totalBalanceAdded",
       COALESCE(SUM("amount") FILTER (WHERE "type" = 'EXPENSE'), 0)::text AS "totalExpenses"
-    FROM "DailyExpenseTransaction" WHERE "ledgerId" = ${ledger.id}
+    FROM "DailyExpenseTransaction" WHERE "ledgerId" = ${ledgerId} AND "deletedAt" IS NULL
   `);
   // Decimal construction and fixed-point serialization do not use JS Number or
   // perform arithmetic; zero is normalized to the same two-decimal contract.
+  return {
+    currentBalance: new Prisma.Decimal(totals.currentBalance).toFixed(2),
+    totalBalanceAdded: new Prisma.Decimal(totals.totalBalanceAdded).toFixed(2),
+    totalExpenses: new Prisma.Decimal(totals.totalExpenses).toFixed(2),
+  };
+}
+
+export async function getDailyExpensesSummary(
+  actor: DailyExpensesActor,
+): Promise<DailyExpenseSummaryDTO> {
+  authorizeDailyExpenses(actor);
+  const ledger = await getLedger();
   return {
     ledger: {
       id: ledger.id,
       currency: ledger.currency,
       timezone: ledger.timezone,
     },
-    currentBalance: new Prisma.Decimal(totals.currentBalance).toFixed(2),
-    totalBalanceAdded: new Prisma.Decimal(totals.totalBalanceAdded).toFixed(2),
-    totalExpenses: new Prisma.Decimal(totals.totalExpenses).toFixed(2),
+    ...(await dailyExpenseTotals(db, ledger.id)),
     today: todayInTimezone(ledger.timezone),
   };
 }
@@ -183,31 +208,7 @@ export async function listDailyExpenseTransactions(
         "Choose a category from this ledger.",
       );
   }
-  const where: Prisma.DailyExpenseTransactionWhereInput = {
-    ledgerId: ledger.id,
-    ...(filters.type ? { type: filters.type } : {}),
-    ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
-    ...(filters.search
-      ? {
-          note: {
-            contains: filters.search.replace(/[\\%_]/g, "\\$&"),
-            mode: "insensitive",
-          },
-        }
-      : {}),
-    ...(filters.from || filters.to
-      ? {
-          date: {
-            ...(filters.from
-              ? { gte: new Date(`${filters.from}T00:00:00.000Z`) }
-              : {}),
-            ...(filters.to
-              ? { lte: new Date(`${filters.to}T00:00:00.000Z`) }
-              : {}),
-          },
-        }
-      : {}),
-  };
+  const where = dailyExpenseWhere(ledger.id, filters);
   const [total, items] = await db.$transaction(
     [
       db.dailyExpenseTransaction.count({ where }),
@@ -228,6 +229,77 @@ export async function listDailyExpenseTransactions(
     pageSize: filters.pageSize,
     totalPages: Math.ceil(total / filters.pageSize),
   };
+}
+
+export async function getDailyExpenseReportData(
+  actor: DailyExpensesActor,
+  raw: unknown = {},
+): Promise<DailyExpenseReportData> {
+  authorizeDailyExpenseReport(actor);
+  const filters = dailyExpenseReportQuerySchema.parse(raw);
+  const ledger = await getLedger();
+
+  return db.$transaction(
+    async (tx) => {
+      const generatedAt = new Date().toISOString();
+      let categoryName: string | null = null;
+      if (filters.categoryId) {
+        const category = await tx.dailyExpenseCategory.findFirst({
+          where: { id: filters.categoryId, ledgerId: ledger.id },
+          select: { name: true },
+        });
+        if (!category) {
+          throw new DomainError(
+            "INVALID_CATEGORY",
+            "Choose a category from this ledger.",
+          );
+        }
+        categoryName = category.name;
+      }
+      const records = await tx.dailyExpenseTransaction.findMany({
+        where: dailyExpenseWhere(ledger.id, filters),
+        include: transactionInclude,
+        orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        take: MAX_DAILY_EXPENSE_REPORT_ROWS + 1,
+      });
+      if (records.length > MAX_DAILY_EXPENSE_REPORT_ROWS) {
+        throw new DomainError(
+          "REPORT_TOO_LARGE",
+          "Choose narrower filters to export 10,000 Daily Expenses records or fewer.",
+        );
+      }
+      const allTime = await dailyExpenseTotals(tx, ledger.id);
+      // 10,000 maximum Decimal(18,2) amounts need 22 significant digits. Use an
+      // isolated wider context so accumulated cents never round at precision 20.
+      const ExactDecimal = Prisma.Decimal.clone({ precision: 40 });
+      let added = new ExactDecimal(0);
+      let expenses = new ExactDecimal(0);
+      for (const record of records) {
+        if (record.type === "BALANCE_ADDED")
+          added = added.add(record.amount.toString());
+        else expenses = expenses.add(record.amount.toString());
+      }
+      return {
+        ledger: {
+          id: ledger.id,
+          currency: ledger.currency,
+          timezone: ledger.timezone,
+        },
+        generatedAt,
+        filters,
+        categoryName,
+        allTime,
+        filtered: {
+          count: records.length,
+          totalBalanceAdded: added.toFixed(2),
+          totalExpenses: expenses.toFixed(2),
+          netChange: added.sub(expenses).toFixed(2),
+        },
+        items: records.map(transactionDTO),
+      };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
 }
 
 type NormalizedTransactionInput = {
@@ -268,6 +340,13 @@ async function postTransaction(
       throw new DomainError(
         "IDEMPOTENCY_CONFLICT",
         "This submission key was already used for different transaction data. Start a new submission.",
+        409,
+      );
+    }
+    if (existing.deletedAt) {
+      throw new DomainError(
+        "TRANSACTION_DELETED",
+        "This transaction was deleted. Its original submission cannot be restored or submitted again.",
         409,
       );
     }
@@ -355,6 +434,226 @@ export async function addDailyExpense(
 ): Promise<DailyExpenseMutationDTO> {
   authorizeDailyExpenses(actor);
   return postTransaction(actor, "EXPENSE", expenseInputSchema.parse(raw));
+}
+
+export async function updateDailyExpenseTransaction(
+  actor: DailyExpensesActor,
+  id: string,
+  raw: unknown,
+): Promise<DailyExpenseMutationDTO> {
+  authorizeDailyExpenseTransactionEdit(actor);
+  dailyExpenseIdSchema.parse(id);
+  const input = transactionUpdateSchema.parse(raw);
+
+  return db.$transaction(async (tx) => {
+    // The session role can become stale. Hold a shared user lock so a role or
+    // status change cannot race the permission check and the financial update.
+    const [currentActor] = await tx.$queryRaw<DailyExpensesActor[]>(Prisma.sql`
+      SELECT "id", "role", "status" FROM "User" WHERE "id" = ${actor.id} FOR SHARE
+    `);
+    if (!currentActor) {
+      throw new DomainError(
+        "FORBIDDEN",
+        "Your account cannot edit Daily Expenses records.",
+        403,
+      );
+    }
+    authorizeDailyExpenseTransactionEdit(currentActor);
+
+    // An edit must target an existing record; it never creates a ledger.
+    const ledger = await tx.dailyExpenseLedger.findUnique({
+      where: { workspaceKey },
+    });
+    if (!ledger) {
+      throw new DomainError(
+        "NOT_FOUND",
+        "The requested transaction was not found.",
+        404,
+      );
+    }
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "DailyExpenseTransaction"
+      WHERE "id" = ${id} AND "ledgerId" = ${ledger.id} FOR UPDATE
+    `);
+    if (!rows.length) {
+      throw new DomainError(
+        "NOT_FOUND",
+        "The requested transaction was not found.",
+        404,
+      );
+    }
+    const previous = await tx.dailyExpenseTransaction.findUniqueOrThrow({
+      where: { id },
+      include: transactionInclude,
+    });
+    if (previous.deletedAt) {
+      throw new DomainError(
+        "TRANSACTION_DELETED",
+        "This record was deleted. Refresh the transaction history.",
+        409,
+      );
+    }
+    const categoryId = input.categoryId ?? null;
+    if (
+      (previous.type === "EXPENSE" && categoryId === null) ||
+      (previous.type === "BALANCE_ADDED" && categoryId !== null)
+    ) {
+      throw new DomainError(
+        "INVALID_CATEGORY",
+        previous.type === "EXPENSE"
+          ? "Choose a category for this expense."
+          : "Balance additions cannot have a category.",
+      );
+    }
+    const note = input.note || null;
+    const sameFields =
+      previous.amount.toFixed(2) === input.amount &&
+      previous.date.toISOString().slice(0, 10) === input.date &&
+      previous.categoryId === categoryId &&
+      previous.note === note;
+    if (previous.version !== input.expectedVersion) {
+      // A lost response can be retried with the frozen fields and old version.
+      // A later intervening edit must never be overwritten by that retry.
+      if (previous.version === input.expectedVersion + 1 && sameFields) {
+        return { transaction: transactionDTO(previous), replayed: true };
+      }
+      throw new DomainError(
+        "TRANSACTION_CONFLICT",
+        "This record changed since you opened it. Refresh and review it before editing again.",
+        409,
+      );
+    }
+    if (input.date > todayInTimezone(ledger.timezone)) {
+      throw new DomainError(
+        "FUTURE_DATE",
+        "Use today or an earlier transaction date.",
+      );
+    }
+    if (previous.type === "EXPENSE") {
+      const [category] = await tx.$queryRaw<
+        Array<{ id: string; archived: boolean }>
+      >(Prisma.sql`
+        SELECT "id", "archived" FROM "DailyExpenseCategory"
+        WHERE "id" = ${categoryId} AND "ledgerId" = ${ledger.id} FOR SHARE
+      `);
+      if (
+        !category ||
+        (category.archived && category.id !== previous.categoryId)
+      ) {
+        throw new DomainError(
+          "INVALID_CATEGORY",
+          "Choose an active category from this ledger.",
+        );
+      }
+    }
+    // Transaction-local state is discarded on commit/rollback and is safe with
+    // pooled connections. The database guard independently checks this actor.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT set_config('app.daily_expenses_editor_id', ${actor.id}, true)
+    `);
+    const updated = await tx.dailyExpenseTransaction.update({
+      where: { id },
+      data: {
+        amount: new Prisma.Decimal(input.amount),
+        date: new Date(`${input.date}T00:00:00.000Z`),
+        note,
+        categoryId,
+        version: { increment: 1 },
+      },
+      include: transactionInclude,
+    });
+    await writeAudit(
+      actor.id,
+      "DAILY_EXPENSE_TRANSACTION_UPDATED",
+      "DailyExpenseTransaction",
+      id,
+      transactionDTO(previous),
+      transactionDTO(updated),
+      tx,
+    );
+    return { transaction: transactionDTO(updated), replayed: false };
+  });
+}
+
+export async function deleteDailyExpenseTransaction(
+  actor: DailyExpensesActor,
+  id: string,
+  raw: unknown,
+): Promise<DailyExpenseDeletionDTO> {
+  authorizeDailyExpenseTransactionDelete(actor);
+  dailyExpenseIdSchema.parse(id);
+  const input = transactionDeleteSchema.parse(raw);
+
+  return db.$transaction(async (tx) => {
+    const [currentActor] = await tx.$queryRaw<DailyExpensesActor[]>(Prisma.sql`
+      SELECT "id", "role", "status" FROM "User" WHERE "id" = ${actor.id} FOR SHARE
+    `);
+    if (!currentActor) {
+      throw new DomainError(
+        "FORBIDDEN",
+        "Your account cannot delete Daily Expenses records.",
+        403,
+      );
+    }
+    authorizeDailyExpenseTransactionDelete(currentActor);
+
+    const ledger = await tx.dailyExpenseLedger.findUnique({
+      where: { workspaceKey },
+    });
+    if (!ledger) {
+      throw new DomainError(
+        "NOT_FOUND",
+        "The requested transaction was not found.",
+        404,
+      );
+    }
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "DailyExpenseTransaction"
+      WHERE "id" = ${id} AND "ledgerId" = ${ledger.id} FOR UPDATE
+    `);
+    if (!rows.length) {
+      throw new DomainError(
+        "NOT_FOUND",
+        "The requested transaction was not found.",
+        404,
+      );
+    }
+    const previous = await tx.dailyExpenseTransaction.findUniqueOrThrow({
+      where: { id },
+      include: transactionInclude,
+    });
+    // Keeping the row and original submission key lets retries confirm deletion
+    // without issuing another audit or allowing the original POST to recreate it.
+    if (previous.deletedAt) return { id, replayed: true };
+    if (previous.version !== input.expectedVersion) {
+      throw new DomainError(
+        "TRANSACTION_CONFLICT",
+        "This record changed since you opened it. Refresh and review it before deleting it.",
+        409,
+      );
+    }
+    await tx.$queryRaw(Prisma.sql`
+      SELECT set_config('app.daily_expenses_editor_id', ${actor.id}, true)
+    `);
+    const deleted = await tx.dailyExpenseTransaction.update({
+      where: { id },
+      data: { deletedAt: new Date(), version: { increment: 1 } },
+      include: transactionInclude,
+    });
+    await writeAudit(
+      actor.id,
+      "DAILY_EXPENSE_TRANSACTION_DELETED",
+      "DailyExpenseTransaction",
+      id,
+      { ...transactionDTO(previous), deletedAt: null },
+      {
+        ...transactionDTO(deleted),
+        deletedAt: deleted.deletedAt!.toISOString(),
+      },
+      tx,
+    );
+    return { id, replayed: false };
+  });
 }
 
 export async function listDailyExpenseCategories(

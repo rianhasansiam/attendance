@@ -22,6 +22,17 @@ const submission = {
   date: "2026-09-24",
   idempotencyKey: "safe-retry-key-123456",
 };
+const edit = {
+  id: "saved-transaction",
+  input: {
+    amount: "7.50",
+    date: "2026-09-23",
+    note: "Corrected amount",
+    categoryId: "category",
+    expectedVersion: 3,
+  },
+};
+const deletion = { id: edit.id, input: { expectedVersion: 3 } };
 const response = (data: unknown, status = 200) =>
   Response.json(
     status === 200
@@ -36,6 +47,8 @@ const result = (request: Request) => {
   if (request.url.endsWith("/summary")) return response(summary);
   if (request.url.endsWith("/categories") && request.method === "GET")
     return response([]);
+  if (request.method === "DELETE")
+    return response({ id: deletion.id, replayed: false });
   if (request.method !== "GET")
     return response({
       transaction: { id: "saved-transaction" },
@@ -131,6 +144,14 @@ describe("Daily Expenses RTK Query isolation and confirmed-save behavior", () =>
         }),
       ),
       store.dispatch(
+        dailyExpensesApi.endpoints.updateDailyExpenseTransaction.initiate(edit),
+      ),
+      store.dispatch(
+        dailyExpensesApi.endpoints.deleteDailyExpenseTransaction.initiate(
+          deletion,
+        ),
+      ),
+      store.dispatch(
         dailyExpensesApi.endpoints.createDailyExpenseCategory.initiate({
           name: "Duplicate",
         }),
@@ -144,7 +165,7 @@ describe("Daily Expenses RTK Query isolation and confirmed-save behavior", () =>
     ];
     for (const operation of operations)
       expect(await operation).toHaveProperty("error");
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(6);
     expect(
       fetch.mock.calls.every(([request]) => request.method !== "GET"),
     ).toBe(true);
@@ -154,7 +175,7 @@ describe("Daily Expenses RTK Query isolation and confirmed-save behavior", () =>
     ).toEqual(summary);
   });
 
-  it.each(["balance", "expense"])(
+  it.each(["balance", "expense", "edit", "deletion"])(
     "refreshes summary and every active history page after a successful %s",
     async (kind) => {
       const fetch = vi.fn(async (request: Request) => result(request));
@@ -169,13 +190,29 @@ describe("Daily Expenses RTK Query isolation and confirmed-save behavior", () =>
             ),
           )
           .unwrap();
-      else
+      else if (kind === "expense")
         await store
           .dispatch(
             dailyExpensesApi.endpoints.addDailyExpense.initiate({
               ...submission,
               categoryId: "category",
             }),
+          )
+          .unwrap();
+      else if (kind === "edit")
+        await store
+          .dispatch(
+            dailyExpensesApi.endpoints.updateDailyExpenseTransaction.initiate(
+              edit,
+            ),
+          )
+          .unwrap();
+      else
+        await store
+          .dispatch(
+            dailyExpensesApi.endpoints.deleteDailyExpenseTransaction.initiate(
+              deletion,
+            ),
           )
           .unwrap();
       await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
@@ -198,6 +235,128 @@ describe("Daily Expenses RTK Query isolation and confirmed-save behavior", () =>
             cache === "no-store" && credentials === "same-origin",
         ),
       ).toBe(true);
+    },
+  );
+
+  it.each([
+    { kind: "edit", status: 403 },
+    { kind: "edit", status: 409 },
+    { kind: "deletion", status: 403 },
+    { kind: "deletion", status: 409 },
+  ])(
+    "keeps existing balances and history after $kind is rejected with $status",
+    async ({ kind, status }) => {
+      const fetch = vi.fn(async (request: Request) =>
+        request.method !== "GET" ? response({}, status) : result(request),
+      );
+      vi.stubGlobal("fetch", fetch);
+      const store = await subscribedStore();
+      const before = store.getState();
+      fetch.mockClear();
+      const saved =
+        kind === "edit"
+          ? await store.dispatch(
+              dailyExpensesApi.endpoints.updateDailyExpenseTransaction.initiate(
+                edit,
+              ),
+            )
+          : await store.dispatch(
+              dailyExpensesApi.endpoints.deleteDailyExpenseTransaction.initiate(
+                deletion,
+              ),
+            );
+      expect(saved).toHaveProperty("error.status", status);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(
+        dailyExpensesApi.endpoints.dailyExpensesSummary.select()(
+          store.getState(),
+        ).data,
+      ).toEqual(summary);
+      expect(
+        dailyExpensesApi.endpoints.dailyExpensesTransactions.select({
+          page: 1,
+          pageSize: 20,
+        })(store.getState()).data,
+      ).toEqual(
+        dailyExpensesApi.endpoints.dailyExpensesTransactions.select({
+          page: 1,
+          pageSize: 20,
+        })(before).data,
+      );
+      const request = fetch.mock.calls[0][0];
+      expect(new URL(request.url).pathname).toBe(
+        "/api/daily-expenses/transactions/saved-transaction",
+      );
+      expect(request.method).toBe(kind === "edit" ? "PATCH" : "DELETE");
+      expect(await request.clone().json()).toEqual(
+        kind === "edit" ? edit.input : deletion.input,
+      );
+    },
+  );
+
+  it.each(["edit", "deletion"])(
+    "preserves the authoritative balance while %s is unconfirmed and retries only when explicitly submitted",
+    async (kind) => {
+      let rejectWrite!: (error: Error) => void;
+      let retry = false;
+      const fetch = vi.fn((request: Request) => {
+        if (request.method === "GET") return Promise.resolve(result(request));
+        if (retry)
+          return Promise.resolve(
+            response(
+              kind === "edit"
+                ? { transaction: { id: edit.id, version: 4 }, replayed: true }
+                : { id: deletion.id, replayed: true },
+            ),
+          );
+        return new Promise<Response>((_resolve, reject) => {
+          rejectWrite = reject;
+        });
+      });
+      vi.stubGlobal("fetch", fetch);
+      const store = await subscribedStore();
+      fetch.mockClear();
+      const run = () =>
+        kind === "edit"
+          ? store.dispatch(
+              dailyExpensesApi.endpoints.updateDailyExpenseTransaction.initiate(
+                edit,
+              ),
+            )
+          : store.dispatch(
+              dailyExpensesApi.endpoints.deleteDailyExpenseTransaction.initiate(
+                deletion,
+              ),
+            );
+      const pending = run();
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      expect(
+        dailyExpensesApi.endpoints.dailyExpensesSummary.select()(
+          store.getState(),
+        ).data,
+      ).toEqual(summary);
+      rejectWrite(new Error("Connection lost after mutation"));
+      expect(await pending).toHaveProperty("error");
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(
+        dailyExpensesApi.endpoints.dailyExpensesSummary.select()(
+          store.getState(),
+        ).data,
+      ).toEqual(summary);
+
+      retry = true;
+      await expect(run().unwrap()).resolves.toMatchObject({ replayed: true });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
+      const writes = fetch.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method !== "GET");
+      expect(writes).toHaveLength(2);
+      expect(await writes[0].clone().json()).toEqual(
+        kind === "edit" ? edit.input : deletion.input,
+      );
+      expect(await writes[1].clone().json()).toEqual(
+        kind === "edit" ? edit.input : deletion.input,
+      );
     },
   );
 

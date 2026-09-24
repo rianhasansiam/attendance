@@ -13,6 +13,10 @@ import {
 import { POST as balance } from "@/app/api/daily-expenses/balance/route";
 import { POST as expense } from "@/app/api/daily-expenses/expenses/route";
 import { PATCH as updateCategory } from "@/app/api/daily-expenses/categories/[id]/route";
+import {
+  PATCH as updateTransaction,
+  DELETE as deleteTransaction,
+} from "@/app/api/daily-expenses/transactions/[id]/route";
 
 vi.mock("@/lib/auth", () => ({ requireUser: vi.fn() }));
 vi.mock("@/lib/security", () => ({
@@ -27,6 +31,8 @@ vi.mock("@/modules/daily-expenses/service", () => ({
   updateDailyExpenseCategory: vi.fn(),
   addDailyExpenseBalance: vi.fn(),
   addDailyExpense: vi.fn(),
+  updateDailyExpenseTransaction: vi.fn(),
+  deleteDailyExpenseTransaction: vi.fn(),
 }));
 
 const request = (method = "GET", body?: unknown) =>
@@ -50,6 +56,14 @@ const routes: [string, () => Promise<Response>][] = [
   ["update category", () => updateCategory(request("PATCH", {}), context)],
   ["balance", () => balance(request("POST", {}))],
   ["expense", () => expense(request("POST", {}))],
+  [
+    "update transaction",
+    () => updateTransaction(request("PATCH", {}), context),
+  ],
+  [
+    "delete transaction",
+    () => deleteTransaction(request("DELETE", {}), context),
+  ],
 ];
 function actor(role: string) {
   vi.mocked(requireUser).mockResolvedValue({
@@ -110,6 +124,7 @@ describe("Daily Expenses API boundaries", () => {
     },
   );
   it("checks origin before mutations reach business logic", async () => {
+    actor("SUPER_ADMIN");
     vi.mocked(assertSameOrigin).mockImplementation(() => {
       throw new DomainError("INVALID_ORIGIN", "Invalid origin", 403);
     });
@@ -118,6 +133,8 @@ describe("Daily Expenses API boundaries", () => {
       () => expense(request("POST", {})),
       () => createCategory(request("POST", {})),
       () => updateCategory(request("PATCH", {}), context),
+      () => updateTransaction(request("PATCH", {}), context),
+      () => deleteTransaction(request("DELETE", {}), context),
     ]) {
       expect((await run()).status).toBe(403);
     }
@@ -159,5 +176,107 @@ describe("Daily Expenses API boundaries", () => {
         idempotencyKey: body.idempotencyKey,
       }),
     );
+  });
+
+  it("rejects ADMIN transaction edits before validation or business logic", async () => {
+    const response = await updateTransaction(request("PATCH", {}), context);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(service.updateDailyExpenseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects ADMIN deletion before validation or business logic", async () => {
+    const response = await deleteTransaction(request("DELETE", {}), context);
+    expect(response.status).toBe(403);
+    expect(service.deleteDailyExpenseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("deletes with the authenticated super admin and required version", async () => {
+    actor("SUPER_ADMIN");
+    vi.mocked(service.deleteDailyExpenseTransaction).mockResolvedValue({
+      id: "transaction-1",
+      replayed: false,
+    });
+    const response = await deleteTransaction(
+      request("DELETE", { expectedVersion: 2 }),
+      { params: Promise.resolve({ id: "transaction-1" }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { id: "transaction-1", replayed: false },
+    });
+    expect(service.deleteDailyExpenseTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "session-actor", role: "SUPER_ADMIN" }),
+      "transaction-1",
+      { expectedVersion: 2 },
+    );
+  });
+
+  it("rejects invalid delete versions and client-controlled deletion metadata", async () => {
+    actor("SUPER_ADMIN");
+    for (const body of [
+      {},
+      { expectedVersion: 0 },
+      { expectedVersion: "1" },
+      { expectedVersion: 1, deletedAt: "2024-01-01" },
+      { expectedVersion: 1, actorId: "forged" },
+    ]) {
+      expect(
+        (await deleteTransaction(request("DELETE", body), context)).status,
+      ).toBe(400);
+    }
+    expect(service.deleteDailyExpenseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("forwards a super admin's validated edit with the server identity and version", async () => {
+    actor("SUPER_ADMIN");
+    const response = await updateTransaction(
+      request("PATCH", {
+        amount: "12.3",
+        date: "2024-01-01",
+        note: "  corrected  ",
+        categoryId: null,
+        expectedVersion: 1,
+      }),
+      { params: Promise.resolve({ id: "transaction-1" }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(service.updateDailyExpenseTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "session-actor", role: "SUPER_ADMIN" }),
+      "transaction-1",
+      {
+        amount: "12.30",
+        date: "2024-01-01",
+        note: "corrected",
+        categoryId: null,
+        expectedVersion: 1,
+      },
+    );
+  });
+
+  it("rejects forged transaction metadata and missing edit versions", async () => {
+    actor("SUPER_ADMIN");
+    const base = { amount: "1.00", date: "2024-01-01", expectedVersion: 1 };
+    for (const patch of [
+      { expectedVersion: undefined },
+      { expectedVersion: 0 },
+      { createdById: "forged" },
+      { ledgerId: "other" },
+      { type: "EXPENSE" },
+      { idempotencyKey: randomUUID() },
+    ]) {
+      expect(
+        (
+          await updateTransaction(
+            request("PATCH", { ...base, ...patch }),
+            context,
+          )
+        ).status,
+      ).toBe(400);
+    }
+    expect(service.updateDailyExpenseTransaction).not.toHaveBeenCalled();
   });
 });

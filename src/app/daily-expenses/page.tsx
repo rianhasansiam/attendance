@@ -3,7 +3,12 @@ import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { DomainError } from "@/lib/errors";
-import { authorizeDailyExpenses } from "@/modules/daily-expenses/permissions";
+import {
+  authorizeDailyExpenses,
+  canEditDailyExpenseTransactions,
+  canDeleteDailyExpenseTransactions,
+  canDownloadDailyExpenseReport,
+} from "@/modules/daily-expenses/permissions";
 import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
 import LoadingWorkspace from "@/app/loading";
@@ -35,7 +40,11 @@ async function AuthorizedWorkspace() {
           image: user.image,
         }}
       >
-        <DailyExpensesWorkspace />
+        <DailyExpensesWorkspace
+          canEditTransactions={canEditDailyExpenseTransactions(user.role)}
+          canDeleteTransactions={canDeleteDailyExpenseTransactions(user.role)}
+          canDownloadReport={canDownloadDailyExpenseReport(user.role)}
+        />
       </AppShell>
     </StoreProvider>
   );

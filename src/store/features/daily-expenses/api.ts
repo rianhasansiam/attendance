@@ -4,11 +4,14 @@ import type {
   CategoryCreateInput,
   CategoryUpdateInput,
   DailyExpenseCategoryDTO,
+  DailyExpenseDeletionDTO,
   DailyExpenseHistoryDTO,
   DailyExpenseMutationDTO,
   DailyExpenseSummaryDTO,
   DailyExpenseTransactionDTO,
   ExpenseInput,
+  TransactionUpdateInput,
+  TransactionDeleteInput,
 } from "@/modules/daily-expenses/contracts";
 
 export type DailyExpensesHistoryArgs = {
@@ -64,6 +67,28 @@ export const dailyExpensesApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: (_result, error) => (error ? [] : transactionTags),
     }),
+    updateDailyExpenseTransaction: build.mutation<
+      DailyExpenseMutationDTO,
+      { id: string; input: TransactionUpdateInput }
+    >({
+      query: ({ id, input }) => ({
+        url: `/api/daily-expenses/transactions/${encodeURIComponent(id)}`,
+        method: "PATCH",
+        body: input,
+      }),
+      invalidatesTags: (_result, error) => (error ? [] : transactionTags),
+    }),
+    deleteDailyExpenseTransaction: build.mutation<
+      DailyExpenseDeletionDTO,
+      { id: string; input: TransactionDeleteInput }
+    >({
+      query: ({ id, input }) => ({
+        url: `/api/daily-expenses/transactions/${encodeURIComponent(id)}`,
+        method: "DELETE",
+        body: input,
+      }),
+      invalidatesTags: (_result, error) => (error ? [] : transactionTags),
+    }),
     createDailyExpenseCategory: build.mutation<
       DailyExpenseCategoryDTO,
       CategoryCreateInput
@@ -96,6 +121,8 @@ export const {
   useDailyExpensesCategoriesQuery,
   useAddDailyExpensesBalanceMutation,
   useAddDailyExpenseMutation,
+  useUpdateDailyExpenseTransactionMutation,
+  useDeleteDailyExpenseTransactionMutation,
   useCreateDailyExpenseCategoryMutation,
   useUpdateDailyExpenseCategoryMutation,
 } = dailyExpensesApi;

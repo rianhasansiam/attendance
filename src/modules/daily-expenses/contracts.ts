@@ -22,6 +22,7 @@ export type DailyExpenseCategoryDTO = {
 };
 export type DailyExpenseTransactionDTO = {
   id: string;
+  version: number;
   type: DailyExpenseTransactionType;
   amount: string;
   date: string;
@@ -40,6 +41,29 @@ export type DailyExpenseHistoryDTO = {
 export type DailyExpenseMutationDTO = {
   transaction: DailyExpenseTransactionDTO;
   replayed: boolean;
+};
+export type DailyExpenseDeletionDTO = {
+  id: string;
+  replayed: boolean;
+};
+export type DailyExpenseTotalsDTO = {
+  currentBalance: string;
+  totalBalanceAdded: string;
+  totalExpenses: string;
+};
+export type DailyExpenseReportData = {
+  ledger: DailyExpenseLedgerDTO;
+  generatedAt: string;
+  filters: DailyExpenseReportFilters;
+  categoryName: string | null;
+  allTime: DailyExpenseTotalsDTO;
+  filtered: {
+    count: number;
+    totalBalanceAdded: string;
+    totalExpenses: string;
+    netChange: string;
+  };
+  items: DailyExpenseTransactionDTO[];
 };
 
 /** Only decimal text reaches Prisma. Canonicalization never rounds. */
@@ -89,6 +113,20 @@ export const balanceInputSchema = z.object(transactionFields).strict();
 export const expenseInputSchema = z
   .object({ ...transactionFields, categoryId: dailyExpenseIdSchema })
   .strict();
+// Leave room for the next PostgreSQL INTEGER version without overflow.
+const transactionVersionSchema = z.number().int().min(1).max(2147483646);
+export const transactionUpdateSchema = z
+  .object({
+    amount: amountSchema,
+    date: businessDateSchema,
+    note: noteSchema,
+    categoryId: dailyExpenseIdSchema.nullable().optional(),
+    expectedVersion: transactionVersionSchema,
+  })
+  .strict();
+export const transactionDeleteSchema = z
+  .object({ expectedVersion: transactionVersionSchema })
+  .strict();
 const categoryNameSchema = z
   .string()
   .transform((value) => value.normalize("NFKC").trim())
@@ -124,13 +162,16 @@ function pageNumber(max: number, fallback: number) {
     .pipe(z.number().int().min(1).max(max))
     .default(fallback);
 }
+const dailyExpenseFilterFields = {
+  from: businessDateSchema.optional(),
+  to: businessDateSchema.optional(),
+  type: z.enum(["BALANCE_ADDED", "EXPENSE"]).optional(),
+  categoryId: dailyExpenseIdSchema.optional(),
+  search: z.string().trim().max(200).optional(),
+};
 export const historyQuerySchema = z
   .object({
-    from: businessDateSchema.optional(),
-    to: businessDateSchema.optional(),
-    type: z.enum(["BALANCE_ADDED", "EXPENSE"]).optional(),
-    categoryId: dailyExpenseIdSchema.optional(),
-    search: z.string().trim().max(200).optional(),
+    ...dailyExpenseFilterFields,
     page: pageNumber(100000, 1),
     pageSize: pageNumber(100, 20),
   })
@@ -140,12 +181,37 @@ export const historyQuerySchema = z
     path: ["to"],
   });
 
+export const dailyExpenseReportQuerySchema = z.preprocess(
+  (raw) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+      return raw;
+    // Pagination is the only ignored input. Keep all other unknown fields so
+    // strict validation rejects forged actor or ledger scope.
+    const filters = { ...raw } as Record<string, unknown>;
+    delete filters.page;
+    delete filters.pageSize;
+    return filters;
+  },
+  z
+    .object(dailyExpenseFilterFields)
+    .strict()
+    .refine((value) => !value.from || !value.to || value.from <= value.to, {
+      message: "The start date must be on or before the end date.",
+      path: ["to"],
+    }),
+);
+
 export type BalanceInput = z.input<typeof balanceInputSchema>;
 export type ExpenseInput = z.input<typeof expenseInputSchema>;
+export type TransactionUpdateInput = z.input<typeof transactionUpdateSchema>;
+export type TransactionDeleteInput = z.input<typeof transactionDeleteSchema>;
 export type CategoryCreateInput = z.input<typeof categoryCreateSchema>;
 export type CategoryUpdateInput = z.input<typeof categoryUpdateSchema>;
 export type HistoryQuery = z.input<typeof historyQuerySchema>;
 export type ParsedHistoryQuery = z.output<typeof historyQuerySchema>;
+export type DailyExpenseReportFilters = z.output<
+  typeof dailyExpenseReportQuerySchema
+>;
 
 export function todayInTimezone(
   timezone: string,

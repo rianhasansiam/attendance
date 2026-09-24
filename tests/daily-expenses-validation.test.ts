@@ -9,13 +9,174 @@ import {
   formatMoney,
   historyQuerySchema,
   todayInTimezone,
+  transactionUpdateSchema,
+  transactionDeleteSchema,
+  dailyExpenseReportQuerySchema,
 } from "@/modules/daily-expenses/contracts";
 import {
   authorizeDailyExpenses,
   canManageDailyExpenses,
+  authorizeDailyExpenseTransactionEdit,
+  canEditDailyExpenseTransactions,
+  authorizeDailyExpenseTransactionDelete,
+  canDeleteDailyExpenseTransactions,
+  canDownloadDailyExpenseReport,
+  authorizeDailyExpenseReport,
 } from "@/modules/daily-expenses/permissions";
 
 describe("Daily Expenses client-safe validation", () => {
+  it("allows only active super admins to download daily expense reports", () => {
+    expect(canDownloadDailyExpenseReport("SUPER_ADMIN")).toBe(true);
+    expect(() =>
+      authorizeDailyExpenseReport({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE",
+      }),
+    ).not.toThrow();
+    for (const role of ["ADMIN", "EMPLOYEE", "MANAGE_DRIVER", "unknown"]) {
+      expect(canDownloadDailyExpenseReport(role)).toBe(false);
+      expect(() => authorizeDailyExpenseReport({ id: "user", role })).toThrow();
+    }
+    expect(() =>
+      authorizeDailyExpenseReport({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "INACTIVE",
+      }),
+    ).toThrow();
+  });
+
+  it("validates report filters and ignores list pagination without accepting caller scope", () => {
+    expect(
+      dailyExpenseReportQuerySchema.parse({
+        from: "2024-01-01",
+        to: "2024-01-31",
+        type: "EXPENSE",
+        categoryId: "supplies",
+        search: "  paper  ",
+        page: "2",
+        pageSize: "1",
+      }),
+    ).toEqual({
+      from: "2024-01-01",
+      to: "2024-01-31",
+      type: "EXPENSE",
+      categoryId: "supplies",
+      search: "paper",
+    });
+    for (const filters of [
+      { from: "2024-02-30" },
+      { from: "2024-02-01", to: "2024-01-01" },
+      { type: "OTHER" },
+      { search: "x".repeat(201) },
+      { ledgerId: "foreign" },
+      { deletedAt: null },
+      { createdById: "forged" },
+    ])
+      expect(dailyExpenseReportQuerySchema.safeParse(filters).success).toBe(
+        false,
+      );
+  });
+  it("reserves deletion for active super admins and requires the reviewed version", () => {
+    expect(canDeleteDailyExpenseTransactions("SUPER_ADMIN")).toBe(true);
+    expect(() =>
+      authorizeDailyExpenseTransactionDelete({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE",
+      }),
+    ).not.toThrow();
+    for (const role of ["ADMIN", "EMPLOYEE", "MANAGE_DRIVER", "unknown"]) {
+      expect(canDeleteDailyExpenseTransactions(role)).toBe(false);
+      expect(() =>
+        authorizeDailyExpenseTransactionDelete({ id: "user", role }),
+      ).toThrow();
+    }
+    expect(() =>
+      authorizeDailyExpenseTransactionDelete({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "INACTIVE",
+      }),
+    ).toThrow();
+    expect(transactionDeleteSchema.parse({ expectedVersion: 1 })).toEqual({
+      expectedVersion: 1,
+    });
+    for (const expectedVersion of [undefined, 0, -1, 1.5, "1", 2147483647]) {
+      expect(
+        transactionDeleteSchema.safeParse({ expectedVersion }).success,
+      ).toBe(false);
+    }
+    for (const field of ["deletedAt", "amount", "ledgerId", "actorId"]) {
+      expect(
+        transactionDeleteSchema.safeParse({
+          expectedVersion: 1,
+          [field]: "forged",
+        }).success,
+      ).toBe(false);
+    }
+  });
+  it("reserves transaction edits for active super admins", () => {
+    expect(canEditDailyExpenseTransactions("SUPER_ADMIN")).toBe(true);
+    expect(() =>
+      authorizeDailyExpenseTransactionEdit({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE",
+      }),
+    ).not.toThrow();
+    for (const role of ["ADMIN", "EMPLOYEE", "MANAGE_DRIVER", "unknown"]) {
+      expect(canEditDailyExpenseTransactions(role)).toBe(false);
+      expect(() =>
+        authorizeDailyExpenseTransactionEdit({ id: "user", role }),
+      ).toThrow();
+    }
+    expect(() =>
+      authorizeDailyExpenseTransactionEdit({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "INACTIVE",
+      }),
+    ).toThrow();
+    expect(() =>
+      authorizeDailyExpenseTransactionEdit({ id: "", role: "SUPER_ADMIN" }),
+    ).toThrow();
+  });
+
+  it("requires a valid version and rejects changes to transaction identity", () => {
+    const edit = {
+      amount: "001.2",
+      date: "2024-01-01",
+      note: "  corrected  ",
+      expectedVersion: 1,
+    };
+    expect(transactionUpdateSchema.parse(edit)).toMatchObject({
+      amount: "1.20",
+      note: "corrected",
+      expectedVersion: 1,
+    });
+    for (const expectedVersion of [undefined, 0, -1, 1.5, "1", 2147483647]) {
+      expect(
+        transactionUpdateSchema.safeParse({ ...edit, expectedVersion }).success,
+      ).toBe(false);
+    }
+    for (const field of [
+      "id",
+      "type",
+      "createdById",
+      "createdAt",
+      "ledgerId",
+      "idempotencyKey",
+      "payloadHash",
+      "role",
+    ]) {
+      expect(
+        transactionUpdateSchema.safeParse({ ...edit, [field]: "forged" })
+          .success,
+      ).toBe(false);
+    }
+  });
   it("formats negative and large monetary strings without losing cents", () => {
     expect(formatMoney("-150.00", "BDT")).toBe("-BDT 150.00");
     expect(formatMoney("10009999999999999989.98", "BDT")).toBe(

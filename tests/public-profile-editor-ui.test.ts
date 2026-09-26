@@ -22,6 +22,7 @@ vi.mock("@/lib/client/alerts", () => ({
 
 const profile: ManagedPublicProfile = {
   id: "test-user",
+  profileSlug: "example_person",
   name: "Example Person",
   designation: "Engineer",
   phone: "+880 1700000000",
@@ -88,9 +89,13 @@ async function submit() {
 
 it("shows all requested profile fields with the saved date and blood group", () => {
   for (const [name, value] of Object.entries(profile)) {
-    if (name !== "id") expect(input(name).value).toBe(value);
+    if (name !== "id" && name !== "profileSlug")
+      expect(input(name).value).toBe(value);
   }
   expect(input("dateOfBirth").type).toBe("date");
+  expect(
+    container.querySelector('a[href="/profile/example_person"]'),
+  ).not.toBeNull();
   expect(input("phone").type).toBe("tel");
   expect(input("homeAddress").tagName).toBe("TEXTAREA");
   expect(

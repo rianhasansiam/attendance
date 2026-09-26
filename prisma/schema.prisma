@@ -55,6 +55,8 @@ enum DailyExpenseTransactionType {
 model User {
   id String @id @default(cuid())
   name String?
+  /// Assigned from the name by a database trigger; stable across name changes.
+  profileSlug String @unique @default("") @db.VarChar(100)
   email String @unique
   emailVerified DateTime?
   image String?

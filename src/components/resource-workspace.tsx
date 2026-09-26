@@ -62,12 +62,16 @@ function PublicProfileLink({
 }) {
   if (resource !== "employees" && resource !== "users") return null;
   const id = resource === "employees" ? nested(row, "user.id") : row.id;
+  const slug =
+    resource === "employees"
+      ? nested(row, "user.profileSlug")
+      : row.profileSlug;
   const status =
     resource === "employees" ? nested(row, "user.status") : row.status;
   if (status !== "ACTIVE" || typeof id !== "string" || !id) return null;
   return (
     <Link
-      href={`/profile/${encodeURIComponent(id)}`}
+      href={`/profile/${encodeURIComponent(typeof slug === "string" && slug ? slug : id)}`}
       prefetch={false}
       target="_blank"
       rel="noopener noreferrer"

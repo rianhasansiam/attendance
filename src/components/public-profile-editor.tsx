@@ -120,7 +120,7 @@ export function PublicProfileEditor({
         action={
           <Link
             className="button secondary"
-            href={`/profile/${encodeURIComponent(profile.id)}`}
+            href={`/profile/${encodeURIComponent(savedProfile.profileSlug)}`}
             prefetch={false}
             target="_blank"
             rel="noopener noreferrer"

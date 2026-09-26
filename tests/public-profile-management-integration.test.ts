@@ -73,7 +73,12 @@ describe.skipIf(!databaseUrl)(
           dateOfBirth: "2000-02-29",
         };
         const result = await updatePublicProfile(superAdmin, target.id, fields);
-        const expected = { id: target.id, ...fields, name: "Public person" };
+        const expected = {
+          id: target.id,
+          profileSlug: result.profileSlug,
+          ...fields,
+          name: "Public person",
+        };
         expect(result).toEqual(expected);
         expect(await getManagedPublicProfile(superAdmin, target.id)).toEqual(
           expected,

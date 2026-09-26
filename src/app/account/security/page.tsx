@@ -27,6 +27,7 @@ async function AccountSecurityContent() {
         mode={isEmployeeRole(user.role) ? "employee" : "admin"}
         user={{
           id: user.id,
+          profileSlug: user.profileSlug,
           name: user.name,
           email: user.email,
           role: user.role,

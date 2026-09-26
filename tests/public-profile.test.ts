@@ -8,6 +8,7 @@ vi.mock("@/lib/db", () => ({
 import { getPublicProfile } from "@/modules/public-profile/service";
 
 const publicUser = {
+  profileSlug: "public_colleague",
   name: "Public colleague",
   image: "https://lh3.googleusercontent.com/profile-photo",
   designation: "Operations officer",
@@ -18,6 +19,7 @@ const publicUser = {
   dateOfBirth: new Date("1995-01-15T00:00:00.000Z"),
 };
 const publicProfile = {
+  slug: publicUser.profileSlug,
   name: publicUser.name,
   image: publicUser.image,
   designation: publicUser.designation,
@@ -39,8 +41,12 @@ describe("public profile privacy boundary", () => {
       publicProfile,
     );
     expect(mocks.findUser).toHaveBeenCalledExactlyOnceWith({
-      where: { id: "public-user_1", status: "ACTIVE" },
+      where: {
+        OR: [{ profileSlug: "public-user_1" }, { id: "public-user_1" }],
+        status: "ACTIVE",
+      },
       select: {
+        profileSlug: true,
         name: true,
         image: true,
         designation: true,
@@ -114,6 +120,7 @@ describe("public profile privacy boundary", () => {
       },
     });
     expect(await getPublicProfile("employee")).toEqual({
+      slug: publicUser.profileSlug,
       name: publicUser.name,
       image: publicUser.image,
       designation: null,
@@ -165,7 +172,9 @@ describe("public profile privacy boundary", () => {
     async (id) => {
       await getPublicProfile(id);
       expect(mocks.findUser).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id, status: "ACTIVE" } }),
+        expect.objectContaining({
+          where: { OR: [{ profileSlug: id }, { id }], status: "ACTIVE" },
+        }),
       );
     },
   );

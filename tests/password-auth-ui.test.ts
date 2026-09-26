@@ -277,6 +277,7 @@ describe("account password settings", () => {
               : "admin",
           user: {
             id: "public-person-id",
+            profileSlug: "person",
             email: "person@example.test",
             name: "Person",
             role,
@@ -287,9 +288,7 @@ describe("account password settings", () => {
       const link = container.querySelector('a[href="/account/security"]');
       expect(link?.textContent).toBe("Account security");
       expect(link?.getAttribute("aria-current")).toBe("page");
-      const profileLink = container.querySelector(
-        'a[href="/profile/public-person-id"]',
-      );
+      const profileLink = container.querySelector('a[href="/profile/person"]');
       expect(profileLink?.textContent).toBe("Public profile");
     },
   );

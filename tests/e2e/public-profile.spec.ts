@@ -128,9 +128,9 @@ test("an anonymous visitor sees the public employee details without private data
   context,
 }) => {
   const { user, privateValues } = await profileFixture();
-  const path = `/profile/${user.id}`;
+  const path = `/profile/${user.profileSlug}`;
   const response = await page.goto(path);
-  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await expect(page).toHaveURL(`${origin}/profile/${user.profileSlug}`);
   await expect(
     page.getByRole("heading", { level: 1, name: user.name!, exact: true }),
   ).toBeVisible();
@@ -186,6 +186,18 @@ test("an anonymous visitor sees the public employee details without private data
     path: "/tmp/public-profile-mobile.png",
     fullPage: true,
   });
+});
+
+test("a legacy ID link redirects to the name-based profile URL", async ({
+  page,
+}) => {
+  const { user } = await profileFixture({ name: "Rian Hasan Siam " });
+  expect(user.profileSlug).toBe("rian_hasan_siam");
+  await page.goto(`/profile/${user.id}`);
+  await expect(page).toHaveURL(`${origin}/profile/rian_hasan_siam`);
+  await expect(
+    page.getByRole("heading", { name: "Rian Hasan Siam", exact: true }),
+  ).toBeVisible();
 });
 
 test("an anonymous visitor can view an administrator without an employee record", async ({

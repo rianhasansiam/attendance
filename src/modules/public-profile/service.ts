@@ -19,11 +19,15 @@ function publicImage(image: string | null) {
 }
 
 /** Anonymous view: keep this allowlist separate from authenticated projections. */
-export async function getPublicProfile(userId: string) {
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(userId)) return null;
+export async function getPublicProfile(identifier: string) {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(identifier)) return null;
   const user = await db.user.findFirst({
-    where: { id: userId, status: "ACTIVE" },
+    where: {
+      OR: [{ profileSlug: identifier }, { id: identifier }],
+      status: "ACTIVE",
+    },
     select: {
+      profileSlug: true,
       name: true,
       image: true,
       designation: true,
@@ -37,6 +41,7 @@ export async function getPublicProfile(userId: string) {
   if (!user) return null;
   // Never fall back to email when a name or photo is missing.
   return {
+    slug: user.profileSlug,
     name: user.name?.trim() || "Team member",
     image: publicImage(user.image),
     designation: user.designation,

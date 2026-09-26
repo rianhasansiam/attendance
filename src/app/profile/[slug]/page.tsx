@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   BriefcaseBusiness,
   CalendarDays,
@@ -13,7 +13,7 @@ import { getPublicProfile } from "@/modules/public-profile/service";
 import { PublicProfileAvatar } from "@/components/public-profile-avatar";
 import styles from "../profile.module.css";
 
-type Props = { params: Promise<{ userId: string }> };
+type Props = { params: Promise<{ slug: string }> };
 
 export default function PublicProfilePage(props: Props) {
   return (
@@ -32,9 +32,11 @@ export default function PublicProfilePage(props: Props) {
 async function Profile({ params }: Props) {
   // Read on each visit so deactivation or deletion removes the public profile.
   await connection();
-  const { userId } = await params;
-  const profile = await getPublicProfile(userId);
+  const { slug } = await params;
+  const profile = await getPublicProfile(slug);
   if (!profile) notFound();
+  if (slug !== profile.slug)
+    redirect(`/profile/${encodeURIComponent(profile.slug)}`);
 
   return (
     <article className={styles.card} aria-labelledby="profile-name">

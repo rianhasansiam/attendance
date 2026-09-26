@@ -36,6 +36,7 @@ async function AuthorizedWorkspace() {
         mode="admin"
         user={{
           id: user.id,
+          profileSlug: user.profileSlug,
           name: user.name,
           email: user.email,
           role: user.role,

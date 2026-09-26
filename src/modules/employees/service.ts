@@ -19,6 +19,7 @@ import {
 
 export const publicUserSelect = {
   id: true,
+  profileSlug: true,
   name: true,
   email: true,
   image: true,

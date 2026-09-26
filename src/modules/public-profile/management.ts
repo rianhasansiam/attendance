@@ -8,6 +8,7 @@ import { publicProfileUpdateSchema } from "./validation";
 
 const editorSelect = {
   id: true,
+  profileSlug: true,
   name: true,
   designation: true,
   phone: true,
@@ -20,6 +21,7 @@ const editorSelect = {
 type ProfileRecord = Prisma.UserGetPayload<{ select: typeof editorSelect }>;
 export type ManagedPublicProfile = {
   id: string;
+  profileSlug: string;
   name: string;
   designation: string | null;
   phone: string | null;
@@ -32,6 +34,7 @@ export type ManagedPublicProfile = {
 function editorProfile(user: ProfileRecord): ManagedPublicProfile {
   return {
     id: user.id,
+    profileSlug: user.profileSlug,
     name: user.name ?? "",
     designation: user.designation,
     phone: user.phone,

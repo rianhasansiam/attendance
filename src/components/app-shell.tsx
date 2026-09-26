@@ -86,6 +86,7 @@ export function AppShell({
   children: ReactNode;
   user: {
     id: string;
+    profileSlug: string;
     name: string | null;
     email: string;
     role: string;
@@ -122,7 +123,7 @@ export function AppShell({
         ]),
     {
       label: "Public profile",
-      href: `/profile/${encodeURIComponent(user.id)}`,
+      href: `/profile/${encodeURIComponent(user.profileSlug)}`,
       icon: Globe,
     },
   ];

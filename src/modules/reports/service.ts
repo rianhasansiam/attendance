@@ -6,6 +6,7 @@ import { authorizeRole } from "@/modules/auth/authorization";
 import { attendanceOutcome } from "@/modules/attendance/outcome";
 import type { Actor } from "@/modules/management/permissions";
 import { DomainError } from "@/lib/errors";
+import { DELETED_INFO } from "@/lib/deleted-info";
 import { reportFilterSchema, utcDate } from "@/modules/management/validation";
 import {
   addCalendarDays,
@@ -98,6 +99,7 @@ type OfficeScope = { id: string; from: string; to: string };
 function sanitizedEmployee(
   employee: ReportRecord["employee"],
 ): ReportRecord["employee"] {
+  if (!employee) return null;
   return {
     id: employee.id,
     employeeCode: employee.employeeCode,
@@ -289,12 +291,16 @@ async function reportEntries(
   const key = (employeeId: string, day: string, officeId: string) =>
     `${scopes ? officeId + ":" : ""}${employeeId}:${day}`;
   const recorded = new Set(
-    records.map((record) =>
-      key(
-        record.employeeId,
-        record.attendanceDate.toISOString().slice(0, 10),
-        record.officeId,
-      ),
+    records.flatMap((record) =>
+      record.employeeId === null
+        ? []
+        : [
+            key(
+              record.employeeId,
+              record.attendanceDate.toISOString().slice(0, 10),
+              record.officeId,
+            ),
+          ],
     ),
   );
   const rows: Entry[] = records.map((record) => ({
@@ -405,8 +411,8 @@ async function reportEntries(
     .sort(
       (a, b) =>
         b.record.attendanceDate.valueOf() - a.record.attendanceDate.valueOf() ||
-        a.record.employee.employeeCode.localeCompare(
-          b.record.employee.employeeCode,
+        (a.record.employee?.employeeCode ?? DELETED_INFO).localeCompare(
+          b.record.employee?.employeeCode ?? DELETED_INFO,
         ) ||
         a.record.id.localeCompare(b.record.id),
     );

@@ -24,6 +24,7 @@ import {
   Table,
   type DataRow,
 } from "./ui";
+import { confirmAction } from "@/lib/client/alerts";
 import { useDebouncedValue } from "@/lib/client/use-debounced-value";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
@@ -287,12 +288,20 @@ export function DriveCostWorkspace({
     if (submitting.current || needsReconcile) return;
     const from = String(row.destinationFrom ?? "this destination");
     const to = String(row.destinationTo ?? "this destination");
-    if (!window.confirm(`Delete the drive cost from ${from} to ${to}?`)) return;
     submitting.current = true;
     setBusy(true);
-    setActionError("");
-    setMessage("");
     try {
+      if (
+        !(await confirmAction({
+          title: "Delete this drive cost?",
+          text: `Permanently delete the drive cost from ${from} to ${to}? This cannot be undone.`,
+          confirmText: "Delete drive cost",
+          danger: true,
+        }))
+      )
+        return;
+      setActionError("");
+      setMessage("");
       await deleteDriveCost(String(row.id)).unwrap();
       setMessage("Drive cost deleted successfully.");
       if ((data?.items.length || 0) === 1 && page > 1) setPage(page - 1);
@@ -390,7 +399,7 @@ export function DriveCostWorkspace({
         </Notice>
       )}
       {message && (
-        <Notice>
+        <Notice notify>
           <Check size={16} />
           {message}
         </Notice>

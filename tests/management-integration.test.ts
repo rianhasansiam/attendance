@@ -76,10 +76,12 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
 
   async function employee(name = "Test Employee") {
     const unique = randomUUID().slice(0, 8);
-    const value = await createEmployee(admin, {
+    const value = await createEmployee(superAdmin, {
       name,
       email: `employee-${unique}@example.test`,
       employeeCode: `M-${unique}`,
+      password: "employee initial passphrase",
+      confirmPassword: "employee initial passphrase",
       officeId,
       status: "ACTIVE",
     });
@@ -92,10 +94,12 @@ describe.skipIf(!databaseUrl)("management PostgreSQL transactions", () => {
 
   it("creates drive cost managers with employee profiles and revokes sessions when their role changes", async () => {
     const unique = randomUUID().slice(0, 8);
-    const manager = await createEmployee(admin, {
+    const manager = await createEmployee(superAdmin, {
       name: "Driver manager",
       email: `driver-manager-${unique}@example.test`,
       employeeCode: `M-${unique}`,
+      password: "employee initial passphrase",
+      confirmPassword: "employee initial passphrase",
       officeId,
       role: "MANAGE_DRIVER",
       status: "ACTIVE",

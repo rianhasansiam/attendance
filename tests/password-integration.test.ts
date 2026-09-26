@@ -1,24 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { saveOwnPassword } from "@/modules/auth/password-management";
-import {
-  requestPasswordReset,
-  resetPassword,
-} from "@/modules/auth/password-reset";
 import { verifyPassword } from "@/modules/auth/password";
 import { limitPasswordAction } from "@/modules/auth/auth-rate-limit";
-
-const mail = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/email", () => ({ sendPasswordResetEmail: mail }));
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const password = "a lengthy application passphrase";
@@ -52,7 +37,6 @@ describe.skipIf(!databaseUrl)(
         TRUSTED_PROXY_SECRET: proxySecret,
       });
     });
-    beforeEach(() => mail.mockReset().mockResolvedValue(undefined));
     afterAll(async () => db.$disconnect());
 
     async function fixture() {
@@ -84,14 +68,6 @@ describe.skipIf(!databaseUrl)(
         },
       });
       return { id, sessionId: row.id };
-    }
-    async function issue(email: string) {
-      await requestPasswordReset({ email });
-      const delivery = [...mail.mock.calls]
-        .reverse()
-        .find(([recipient]) => recipient === email.trim().toLowerCase());
-      expect(delivery).toBeDefined();
-      return delivery![1] as string;
     }
     async function state(id: string) {
       return db.user.findUniqueOrThrow({
@@ -125,7 +101,14 @@ describe.skipIf(!databaseUrl)(
       const { user, actor } = await fixture();
       await saveOwnPassword(actor, input());
       const nextActor = await session(user.id);
-      const token = await issue(user.email);
+      await db.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          email: user.email,
+          tokenHash: digest(randomUUID()),
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+        },
+      });
       for (const currentPassword of [undefined, "wrong current password"])
         await expect(
           saveOwnPassword(nextActor, {
@@ -143,9 +126,6 @@ describe.skipIf(!databaseUrl)(
       expect(await verifyPassword(saved.passwordHash, password)).toBe(false);
       expect(saved.sessions).toHaveLength(0);
       expect(saved.passwordResetTokens.every((row) => row.usedAt)).toBe(true);
-      await expect(resetPassword({ ...input(), token })).rejects.toMatchObject({
-        code: "INVALID_RESET_TOKEN",
-      });
     });
 
     it("rejects arbitrary account IDs and revoked sessions before changing a password", async () => {
@@ -162,109 +142,11 @@ describe.skipIf(!databaseUrl)(
       expect((await state(other.user.id)).passwordHash).toBeNull();
     });
 
-    it("stores only a random token digest, binds the email, and expires it in 30 minutes", async () => {
-      const { user } = await fixture();
-      const before = Date.now();
-      const token = await issue(`  ${user.email.toUpperCase()} `);
-      const row = await db.passwordResetToken.findUniqueOrThrow({
-        where: { tokenHash: digest(token) },
-      });
-      expect(token).toMatch(/^[a-f0-9]{64}$/);
-      expect(row.email).toBe(user.email);
-      expect(row.tokenHash).not.toBe(token);
-      expect(JSON.stringify(row)).not.toContain(token);
-      expect(row.expiresAt.getTime()).toBeGreaterThanOrEqual(
-        before + 30 * 60 * 1000,
-      );
-      expect(row.expiresAt.getTime()).toBeLessThanOrEqual(
-        Date.now() + 30 * 60 * 1000,
-      );
-    });
-
-    it("does not send for unknown, inactive, suspended, or profile-less employee accounts", async () => {
-      await expect(
-        requestPasswordReset({ email: `unknown-${randomUUID()}@example.test` }),
-      ).resolves.toBeUndefined();
-      const { user } = await fixture();
-      for (const status of ["INACTIVE", "SUSPENDED"] as const) {
-        await db.user.update({ where: { id: user.id }, data: { status } });
-        await expect(
-          requestPasswordReset({ email: user.email }),
-        ).resolves.toBeUndefined();
-      }
-      await db.user.update({
-        where: { id: user.id },
-        data: { status: "ACTIVE", role: "EMPLOYEE" },
-      });
-      await requestPasswordReset({ email: user.email });
-      expect(mail).not.toHaveBeenCalled();
-      expect((await state(user.id)).passwordResetTokens).toHaveLength(0);
-    });
-
-    it("replaces previous tokens, verifies mailbox ownership and preserves Google linking", async () => {
-      const { user } = await fixture();
-      const oldToken = await issue(user.email);
-      const token = await issue(user.email);
-      expect(token).not.toBe(oldToken);
-      await expect(
-        resetPassword({ ...input(), token: oldToken }),
-      ).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
-      const result = await resetPassword({ ...input(), token });
-      expect(result.signInRequired).toBe(true);
-      const saved = await state(user.id);
-      expect(await verifyPassword(saved.passwordHash, password)).toBe(true);
-      expect(saved.emailVerified).toBeInstanceOf(Date);
-      expect(saved.googleAccountId).toBe(user.googleAccountId);
-      expect(saved.accounts).toHaveLength(1);
-      expect(saved.sessions).toHaveLength(0);
-      expect(saved.passwordResetTokens.every((row) => row.usedAt)).toBe(true);
-      await expect(
-        resetPassword({ ...input(replacement), token }),
-      ).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
-    });
-
-    it("rejects expired, invalid, disabled-account and changed-email reset attempts", async () => {
-      await expect(
-        resetPassword({ ...input(), token: "a".repeat(64) }),
-      ).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
-      const { user } = await fixture();
-      const expired = await issue(user.email);
-      await db.passwordResetToken.update({
-        where: { tokenHash: digest(expired) },
-        data: { expiresAt: new Date(Date.now() - 1000) },
-      });
-      await expect(
-        resetPassword({ ...input(), token: expired }),
-      ).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
-      const disabled = await issue(user.email);
-      await db.user.update({
-        where: { id: user.id },
-        data: { status: "SUSPENDED" },
-      });
-      await expect(
-        resetPassword({ ...input(), token: disabled }),
-      ).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
-      await db.user.update({
-        where: { id: user.id },
-        data: { status: "ACTIVE" },
-      });
-      const changedEmail = await issue(user.email);
-      await db.user.update({
-        where: { id: user.id },
-        data: { email: `changed-${randomUUID()}@example.test` },
-      });
-      await expect(
-        resetPassword({ ...input(), token: changedEmail }),
-      ).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
-      expect((await state(user.id)).passwordHash).toBeNull();
-    });
-
-    it("allows exactly one concurrent reset to consume the same token", async () => {
-      const { user } = await fixture();
-      const token = await issue(user.email);
+    it("allows only one of two concurrent authenticated password saves", async () => {
+      const { user, actor } = await fixture();
       const results = await Promise.allSettled([
-        resetPassword({ ...input(), token }),
-        resetPassword({ ...input(replacement), token }),
+        saveOwnPassword(actor, input()),
+        saveOwnPassword(actor, input(replacement)),
       ]);
       expect(
         results.filter((result) => result.status === "fulfilled"),
@@ -272,82 +154,36 @@ describe.skipIf(!databaseUrl)(
       expect(
         results.filter((result) => result.status === "rejected"),
       ).toHaveLength(1);
+      const saved = await state(user.id);
+      expect(saved.sessions).toHaveLength(0);
       expect(
         await db.auditLog.count({
-          where: { action: "PASSWORD_RESET", resourceId: user.id },
+          where: { action: "PASSWORD_SET", resourceId: user.id },
         }),
       ).toBe(1);
-      expect((await state(user.id)).sessions).toHaveLength(0);
-    });
-
-    it("serializes a reset racing an authenticated password set", async () => {
-      const { user, actor } = await fixture();
-      const token = await issue(user.email);
-      const results = await Promise.allSettled([
-        saveOwnPassword(actor, input()),
-        resetPassword({ ...input(replacement), token }),
+      const validPasswords = await Promise.all([
+        verifyPassword(saved.passwordHash, password),
+        verifyPassword(saved.passwordHash, replacement),
       ]);
-      expect(
-        results.filter((result) => result.status === "fulfilled"),
-      ).toHaveLength(1);
-      expect((await state(user.id)).sessions).toHaveLength(0);
-      expect(
-        await db.auditLog.count({
-          where: {
-            action: { in: ["PASSWORD_SET", "PASSWORD_RESET"] },
-            resourceId: user.id,
-          },
-        }),
-      ).toBe(1);
+      expect(validPasswords.filter(Boolean)).toHaveLength(1);
     });
 
-    it("keeps at most one live token during concurrent forgot requests", async () => {
-      const { user } = await fixture();
-      await Promise.all([
-        requestPasswordReset({ email: user.email }),
-        requestPasswordReset({ email: user.email }),
-      ]);
-      expect(
-        await db.passwordResetToken.count({
-          where: { userId: user.id, usedAt: null },
-        }),
-      ).toBe(1);
-    });
-
-    it("invalidates undeliverable tokens and never logs SMTP payloads", async () => {
-      const { user } = await fixture();
-      mail.mockRejectedValueOnce(
-        new Error(`SMTP secret for ${user.email}: private-token`),
-      );
-      const log = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        await requestPasswordReset({ email: user.email });
-        expect(
-          (await state(user.id)).passwordResetTokens.every((row) => row.usedAt),
-        ).toBe(true);
-        expect(JSON.stringify(log.mock.calls)).not.toContain(user.email);
-        expect(JSON.stringify(log.mock.calls)).not.toContain("private-token");
-        expect(log).toHaveBeenCalledWith(
-          "Password reset email delivery failed",
-        );
-      } finally {
-        log.mockRestore();
-      }
-    });
-
-    it("enforces the reset identifier throttle through persisted database counters", async () => {
+    it("enforces the password-management identifier throttle through persisted database counters", async () => {
       const address = `2001:db8:${randomUUID().replaceAll("-", "").slice(0, 24).match(/.{4}/g)!.join(":")}`;
-      const request = new Request("http://localhost:3000/api/password/reset", {
-        headers: {
-          "x-real-ip": address,
-          "x-attendance-proxy-secret": proxySecret,
+      const request = new Request(
+        "http://localhost:3000/api/account/password",
+        {
+          headers: {
+            "x-real-ip": address,
+            "x-attendance-proxy-secret": proxySecret,
+          },
         },
-      });
+      );
       const identifier = randomUUID();
       for (let i = 0; i < 5; i++)
-        await limitPasswordAction(request, "reset", identifier);
+        await limitPasswordAction(request, "manage", identifier);
       await expect(
-        limitPasswordAction(request, "reset", identifier),
+        limitPasswordAction(request, "manage", identifier),
       ).rejects.toMatchObject({ code: "RATE_LIMITED", status: 429 });
     });
   },

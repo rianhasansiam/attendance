@@ -27,13 +27,13 @@ it("uses trusted ingress IP and separate normalized hashed-account windows", asy
   await limitPasswordAction(request, "login", "user@example.test");
   expect(mocks.rateLimit.mock.calls[3][0]).toBe(key);
 });
-it("ignores spoofed IP headers and uses a shared fallback plus reset token throttling", async () => {
+it("ignores spoofed IP headers and uses a shared fallback plus authenticated account throttling", async () => {
   const request = new Request("https://app.test", {
     headers: { "x-real-ip": "1.2.3.4", "x-forwarded-for": "1.2.3.4" },
   });
-  await limitPasswordAction(request, "reset", "a".repeat(64));
+  await limitPasswordAction(request, "manage", "account-id");
   expect(mocks.rateLimit.mock.calls[0]).toEqual([
-    "password:reset:ip:unavailable",
+    "password:manage:ip:unavailable",
     30,
     900,
   ]);

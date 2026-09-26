@@ -19,12 +19,16 @@ export function PasswordField({
   autoComplete,
   disabled = false,
   hint,
+  minLength,
+  maxLength,
 }: {
   name: string;
   label: string;
   autoComplete: "current-password" | "new-password";
   disabled?: boolean;
   hint?: string;
+  minLength?: number;
+  maxLength?: number;
 }) {
   const id = useId();
   const [visible, setVisible] = useState(false);
@@ -40,6 +44,8 @@ export function PasswordField({
           autoCapitalize="none"
           spellCheck={false}
           required
+          minLength={minLength}
+          maxLength={maxLength}
           disabled={disabled}
           aria-describedby={hint ? `${id}-hint` : undefined}
         />

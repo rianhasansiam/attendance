@@ -1593,3 +1593,99 @@ tbody tr.date-group-1:hover {
 .account-security-card > .auth-help {
   margin-bottom: 24px;
 }
+
+/* Shared SweetAlert dialogs and notifications use the workspace design tokens. */
+.swal2-container.app-alert-container {
+  z-index: 1200;
+  padding: 20px;
+}
+.swal2-popup.app-alert {
+  width: min(100%, 480px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  box-shadow: 0 20px 70px #202d2826;
+}
+.app-alert .app-alert-title {
+  padding: 0;
+  margin-top: 8px;
+  font-size: 22px;
+  line-height: 1.3;
+  letter-spacing: -0.5px;
+}
+.app-alert .app-alert-text {
+  margin: 16px 0 0;
+  padding: 0;
+  color: #526158;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  max-height: 45dvh;
+  overflow-y: auto;
+}
+.app-alert .app-alert-actions {
+  gap: 10px;
+  margin-top: 24px;
+}
+.app-alert .app-alert-input {
+  width: 100%;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 12px;
+  font-size: 14px;
+  resize: vertical;
+  box-shadow: none;
+}
+.app-alert .swal2-input-label {
+  margin: 18px 0 0;
+  font-weight: 600;
+  font-size: 13px;
+}
+.app-alert .swal2-validation-message {
+  border-radius: 8px;
+  font-size: 13px;
+}
+.app-alert .swal2-close {
+  color: var(--muted);
+}
+.swal2-popup.app-alert-toast {
+  width: min(380px, calc(100vw - 40px));
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px #202d281f;
+}
+.app-alert-toast .app-alert-title {
+  margin: 0 12px;
+  font-size: 14px;
+  letter-spacing: normal;
+}
+.app-alert-toast .app-alert-text {
+  margin: 6px 12px 0;
+  font-size: 13px;
+  max-height: 25dvh;
+}
+.app-alert .swal2-timer-progress-bar {
+  background: var(--green);
+}
+.alert-unavailable {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1300;
+  width: min(560px, calc(100vw - 32px));
+  box-shadow: 0 8px 32px #202d281f;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-alert, .app-alert-container, .app-alert * {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}

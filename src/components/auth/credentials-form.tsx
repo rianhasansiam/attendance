@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { ErrorNotice } from "@/components/ui";
@@ -75,14 +74,11 @@ export function CredentialsForm() {
         label="Application password"
         autoComplete="current-password"
         disabled={pending}
-        hint="Use the password you set for XHYD, never your Google password."
+        hint="Use your XHYD application password, never your Google password."
       />
       <button className="button full-width" type="submit" disabled={pending}>
         {pending ? "Signing in…" : "Sign in"}
       </button>
-      <Link className="auth-link" href="/forgot-password">
-        Forgot password?
-      </Link>
     </form>
   );
 }

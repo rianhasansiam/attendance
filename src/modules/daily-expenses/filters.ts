@@ -9,7 +9,6 @@ export function dailyExpenseWhere(
 ): Prisma.DailyExpenseTransactionWhereInput {
   return {
     ledgerId,
-    deletedAt: null,
     ...(filters.type ? { type: filters.type } : {}),
     ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
     ...(filters.search

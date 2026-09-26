@@ -28,7 +28,7 @@ export type DailyExpenseTransactionDTO = {
   date: string;
   note: string | null;
   category: DailyExpenseCategoryDTO | null;
-  createdBy: { id: string; name: string | null; email: string };
+  createdBy: { id: string; name: string | null; email: string } | null;
   createdAt: string;
 };
 export type DailyExpenseHistoryDTO = {

@@ -246,12 +246,20 @@ test("driver managers can create, calculate, report, edit and delete drive costs
     ).totalCost.toFixed(2),
   ).toBe("60.00");
 
-  page.once("dialog", (dialog) => dialog.accept());
   await list
     .getByRole("button", {
       name: `Delete drive cost from ${destinationFrom} to Client office`,
       exact: true,
     })
+    .click();
+  const deletion = page.getByRole("dialog", {
+    name: "Delete this drive cost?",
+  });
+  await expect(deletion).toContainText(
+    `from ${destinationFrom} to Client office`,
+  );
+  await deletion
+    .getByRole("button", { name: "Delete drive cost", exact: true })
     .click();
   await expect(
     list.getByText("Nothing here yet", { exact: true }),

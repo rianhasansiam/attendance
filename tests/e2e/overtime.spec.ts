@@ -194,7 +194,9 @@ for (const expectedMinutes of [40, 90]) {
     await page.goto("/employee/dashboard");
     await page.getByRole("button", { name: "Check out", exact: true }).click();
     await expect(
-      page.getByRole("status").filter({ hasText: "You’re checked out" }),
+      page
+        .locator('.notice[role="status"]')
+        .filter({ hasText: "You’re checked out" }),
     ).toBeVisible();
     const checkedOut = await db.attendance.findUniqueOrThrow({
       where: { id: attendance.id },

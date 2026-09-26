@@ -120,7 +120,9 @@ test("employee can check in and out, request leave, and cannot access admin", as
   ).toBeVisible();
   await page.getByRole("button", { name: "Check in", exact: true }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "You’re checked in" }),
+    page
+      .locator('.notice[role="status"]')
+      .filter({ hasText: "You’re checked in" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Check out", exact: true }),
@@ -134,7 +136,9 @@ test("employee can check in and out, request leave, and cannot access admin", as
   });
   await page.getByRole("button", { name: "Check out", exact: true }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "You’re checked out" }),
+    page
+      .locator('.notice[role="status"]')
+      .filter({ hasText: "You’re checked out" }),
   ).toBeVisible();
   const record = await db.attendance.findFirstOrThrow({
     where: { employeeId: fixture.user.employee!.id },
@@ -157,7 +161,9 @@ test("employee can check in and out, request leave, and cannot access admin", as
   await page.getByLabel("Reason").fill("Planned family time");
   await page.getByRole("button", { name: "Submit request" }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "Leave request submitted" }),
+    page
+      .locator('.notice[role="status"]')
+      .filter({ hasText: "Leave request submitted" }),
   ).toBeVisible();
   await expect(
     page.getByRole("cell", { name: "Planned family time" }),
@@ -235,7 +241,7 @@ test("late check-in asks for a reason and preserves the draft when saving fails"
   await dialog.getByRole("button", { name: "Submit reason" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(
-    page.getByRole("status").filter({
+    page.locator('.notice[role="status"]').filter({
       hasText: "Your late attendance reason has been saved.",
     }),
   ).toBeVisible();
@@ -291,7 +297,9 @@ test("an unfinished late reason can be reopened and survives reload after checki
   await dialog.getByRole("button", { name: "Later", exact: true }).click();
   await page.getByRole("button", { name: "Check out", exact: true }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "You’re checked out" }),
+    page
+      .locator('.notice[role="status"]')
+      .filter({ hasText: "You’re checked out" }),
   ).toBeVisible();
   const checkedOut = await db.attendance.findFirstOrThrow({
     where: { employeeId: fixture.user.employee!.id },
@@ -384,7 +392,7 @@ test("super administrator manages departments and downloads a PDF report", async
   await page.getByRole("dialog").getByRole("button", { name: /save/i }).click();
   await expect(
     page
-      .getByRole("status")
+      .locator('.notice[role="status"]')
       .filter({ hasText: "Your changes have been saved." }),
   ).toBeVisible();
   await page.getByLabel("Search departments").fill(name);
@@ -531,7 +539,7 @@ test.describe("attendance correction permissions", () => {
       .click();
     await expect(dialog).toHaveCount(0);
     await expect(
-      page.getByRole("status").filter({
+      page.locator('.notice[role="status"]').filter({
         hasText:
           "Attendance updated. The correction has been added to the audit log.",
       }),

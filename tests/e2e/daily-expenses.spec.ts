@@ -370,7 +370,7 @@ test("admins can view and filter the ledger but have no write or export actions"
     await db.dailyExpenseTransaction.findUniqueOrThrow({
       where: { id: record.id },
     }),
-  ).toMatchObject({ version: record.version, deletedAt: null });
+  ).toMatchObject({ version: record.version });
 });
 
 test("super admins download all filtered PDF records across history pages with accurate totals", async ({
@@ -639,6 +639,7 @@ test("only super admins can confirm deletion, removing rows and reversing each r
       name: isExpense ? "Delete Expense" : "Delete Balance",
       exact: true,
     });
+    await expect(dialog).toHaveClass(/swal2-popup/);
     await expect(dialog).toContainText(
       isExpense
         ? "increase Current Balance"
@@ -702,19 +703,17 @@ test("only super admins can confirm deletion, removing rows and reversing each r
       note: record.note,
       createdBy: { id: creator.id },
     });
-    expect(audits[0].newState).toMatchObject({
-      amount: record.amount,
-      note: record.note,
-      createdBy: { id: creator.id },
-      version: record.version + 1,
-      deletedAt: expect.any(String),
-    });
-    const retained = await db.dailyExpenseTransaction.findUniqueOrThrow({
-      where: { id: record.id },
-    });
-    expect(retained.createdById).toBe(creator.id);
-    expect(retained.version).toBe(record.version + 1);
-    expect(retained.deletedAt).toBeInstanceOf(Date);
+    expect(audits[0].newState).toEqual({ id: record.id, deleted: true });
+    expect(
+      await db.dailyExpenseTransaction.findUnique({
+        where: { id: record.id },
+      }),
+    ).toBeNull();
+    expect(
+      await db.dailyExpenseTransactionDeletion.findUnique({
+        where: { transactionId: record.id },
+      }),
+    ).toMatchObject({ createdById: creator.id });
   }
   await expect(
     page.getByText("No matching transactions", { exact: true }),
@@ -755,13 +754,17 @@ test("a lost deletion response safely retries one confirmed removal without chan
   );
   const row = page.getByRole("row").filter({ hasText: note });
   await row.getByRole("button", { name: "Delete", exact: true }).click();
-  const dialog = page.getByRole("dialog", {
+  const confirmation = page.getByRole("dialog", {
     name: "Delete Balance",
     exact: true,
   });
-  await dialog
+  await confirmation
     .getByRole("button", { name: "Delete record", exact: true })
     .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Deletion recovery",
+    exact: true,
+  });
   await expect(
     dialog.getByRole("button", { name: "Safe retry", exact: true }),
   ).toBeVisible();
@@ -799,7 +802,7 @@ test("stale deletion preserves a newer edit until the latest record is reviewed"
   await openWorkspace(page);
   const row = page.getByRole("row").filter({ hasText: note });
   await row.getByRole("button", { name: "Delete", exact: true }).click();
-  const dialog = page.getByRole("dialog", {
+  const confirmation = page.getByRole("dialog", {
     name: "Delete Balance",
     exact: true,
   });
@@ -816,9 +819,13 @@ test("stale deletion preserves a newer edit until the latest record is reviewed"
     },
   );
   expect(winner.status()).toBe(200);
-  await dialog
+  await confirmation
     .getByRole("button", { name: "Delete record", exact: true })
     .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Deletion recovery",
+    exact: true,
+  });
   await expect(
     dialog.getByRole("button", { name: "Close and refresh", exact: true }),
   ).toBeVisible();
@@ -841,11 +848,11 @@ test("stale deletion preserves a newer edit until the latest record is reviewed"
     row.getByRole("cell", { name: "+BDT 25.00", exact: true }),
   ).toBeVisible();
   await row.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(dialog).toContainText("BDT 25.00");
-  await dialog
+  await expect(confirmation).toContainText("BDT 25.00");
+  await confirmation
     .getByRole("button", { name: "Delete record", exact: true })
     .click();
-  await expect(dialog).toBeHidden();
+  await expect(confirmation).toBeHidden();
   await expect(row).toHaveCount(0);
   expect(await summary(context)).toEqual(initial);
   expect(
@@ -1197,7 +1204,9 @@ test("ledger UI saves without reload, preserves filters, manages archived catego
     await saveBalance(page, "10.00", "Hidden by current search"),
   ).toBeHidden();
   await expect(
-    page.getByRole("status").filter({ hasText: "Balance addition saved" }),
+    page
+      .locator(".notice.success")
+      .filter({ hasText: "Balance addition saved" }),
   ).toBeVisible();
   await expect(
     page.getByText("No matching transactions", { exact: true }),
@@ -1351,7 +1360,7 @@ test("a lost mutation response safely retries the same key and frozen values exa
   await expect(dialog).toBeHidden();
   await expect(
     page
-      .getByRole("status")
+      .locator(".notice.success")
       .filter({ hasText: "earlier submission was already recorded" }),
   ).toBeVisible();
   expect(submissions).toHaveLength(2);
@@ -1612,7 +1621,7 @@ test("an uncommitted archived-category retry permits correction while a rate-lim
     await expect(dialog).toBeHidden();
     await expect(
       page
-        .getByRole("status")
+        .locator(".notice.success")
         .filter({ hasText: "earlier submission was already recorded" }),
     ).toBeVisible();
     expect(submissions).toHaveLength(5);

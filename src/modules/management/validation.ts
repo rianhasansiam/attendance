@@ -1,5 +1,10 @@
 import { z } from "zod";
 import ipaddr from "ipaddr.js";
+import {
+  newPasswordSchema,
+  normalizedEmailSchema,
+  PASSWORD_MAX_LENGTH,
+} from "@/modules/auth/password-validation";
 
 export const idSchema = z.string().trim().min(1).max(100);
 const label = z.string().trim().min(1).max(160);
@@ -34,10 +39,10 @@ export const attendanceStatusSchema = z.enum([
   "WEEKEND",
 ]);
 
-export const employeeSchema = z
+const employeeProfileSchema = z
   .object({
     name: label,
-    email: z.email().trim().toLowerCase().max(254),
+    email: normalizedEmailSchema,
     employeeCode: z
       .string()
       .trim()
@@ -50,7 +55,16 @@ export const employeeSchema = z
     status: statusSchema.default("ACTIVE"),
   })
   .strict();
-export const employeeUpdateSchema = employeeSchema
+export const employeeSchema = employeeProfileSchema
+  .extend({
+    password: newPasswordSchema,
+    confirmPassword: z.string().max(PASSWORD_MAX_LENGTH),
+  })
+  .refine((input) => input.password === input.confirmPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmPassword"],
+  });
+export const employeeUpdateSchema = employeeProfileSchema
   .partial()
   .extend({ status: statusSchema.optional() })
   .strict();

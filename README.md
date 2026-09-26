@@ -20,6 +20,16 @@ Choose **Round trip (×2)** for office → destination → office and enter the 
 
 Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).
 
+Super administrators can use **Employees → Delete employee** to permanently remove an employee or driver manager and their sign-in account, including sessions, OAuth links, password-reset tokens, and passkeys. Both active and inactive employees are eligible. The button and `DELETE /api/admin/employees/:id` are restricted to `SUPER_ADMIN`; administrator accounts are managed through **All Users**. Linked attendance, leave, assignments, financial records, and audit history remain with detached identity references displayed as **deleted info**. Structured identity snapshots in audits and events are redacted in the same transaction. Only super administrators can create employee accounts; regular administrators retain existing employee editing and status controls.
+
+UI **Delete** actions remove the corresponding database rows: employees, departments, offices, networks, shifts, assignments, holidays, drive costs, and Daily Expenses transactions. Referenced records are protected rather than cascading historical data. Audit logs remain; financial deletion also keeps a minimal retry receipt to prevent duplicate requests from restoring a deleted transaction. **Archive**, **Cancel**, and **Revoke** retain their distinct meanings. Deploy the permanent-deletion migration described in [Daily Expenses](docs/daily-expenses.md) before running the updated application.
+
+**All Users** at `/admin/users` replaces **Administrators** and lists every role, including inactive accounts. Only super administrators can open this page or its APIs, edit account roles/status, or permanently delete users from it. Employee roles require an existing employee profile. Role/status updates revoke sessions, and all changes are audited. You cannot delete your own account or remove your own access; the last active super administrator is protected. Deletion removes the user, optional employee profile, and sign-in data together while retaining history with **deleted info** in place of the deleted identity. Attendance facts, financial amounts, approvals, and submission keys remain unchanged. Deleted employees' attendance, leave requests, and shift assignments are retained for historical reference and cannot be reassigned or reviewed.
+
+Apply `20260929500000_deleted_user_references` before using account deletion, then regenerate Prisma and restart the application. This migration changes identity references to nullable fields and adds a narrowly authorized identity-redaction exception to immutable history; ordinary history updates and deletes remain protected. It supports both legacy and upgraded Daily Expenses databases and does not purge financial records. Where `20260930000000_hard_delete_daily_expenses` is intentionally pending, apply only the identity migration with `pnpm exec prisma db execute --file prisma/migrations/20260929500000_deleted_user_references/migration.sql`, then record it with `pnpm exec prisma migrate resolve --applied 20260929500000_deleted_user_references`. Review pending migrations before using `pnpm db:migrate`.
+
+UI confirmations, optional review-note prompts, and action notifications use [SweetAlert2](https://sweetalert2.github.io/) through `src/lib/client/alerts.ts`. Confirmation defaults to Cancel; callbacks await an explicit decision, prevent duplicate clicks, and cancel on navigation/session loss. Success/error toasts share the application theme and never replace a pending confirmation. Inline feedback, complex forms, and uncertain-operation recovery remain available. Use `confirmAction`/`promptAction` for dialogs, `<Notice notify>` for successful action feedback, and `ErrorNotice` for errors. No database migration is needed for this UI change.
+
 ## Local setup
 
 Requirements: Node.js 22.12+ (24 LTS recommended), pnpm 12.3.4, and PostgreSQL 16+. Install dependencies and configure environment:
@@ -41,7 +51,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-The seed only provisions the requested super administrator; it creates no demo users, offices, IPs, coordinates or schedules and does not elevate an existing employee. Sign in through Google, then create an office, department and shift, authorized employee profiles, date-bounded assignments, and office networks. Employees register passkeys after signing in; administrators approve them. Accounts must be ACTIVE before login.
+The seed only provisions the requested super administrator; it creates no demo users, offices, IPs, coordinates or schedules and does not elevate an existing employee. Sign in through Google, then create an office, department and shift, date-bounded assignments, and office networks. As a super administrator, create employee accounts from **Admin → Employees → Add employee** with an email and initial application password. Employees register passkeys after signing in; administrators approve them. Accounts must be ACTIVE before login.
 
 All office attendance checks default to required. `TRUSTED_PROXY_MODE=none` returns no trusted client IP, so strict office-network attendance fails closed in direct development. Use a local Nginx ingress to test network enforcement, or have a super administrator explicitly disable only the office's network policy while developing. Disabling a policy is a deliberate configuration change and is audited. Never trust forwarded headers from a public direct Next.js listener.
 
@@ -61,7 +71,7 @@ All office attendance checks default to required. `TRUSTED_PROXY_MODE=none` retu
 
 References: [Google OAuth web server applications](https://developers.google.com/identity/protocols/oauth2/web-server), [Auth.js Google provider](https://authjs.dev/getting-started/providers/google), [Auth.js Next.js integration](https://authjs.dev/reference/nextjs).
 
-Users can sign in with Google or an application password on the same administrator-provisioned account. There is no public registration. Account security supports setting/changing a password, and email-verified recovery uses configurable SMTP. See [application password setup and security behavior](docs/application-passwords.md) for the migration, SMTP variables, rate limits and session rollout. Existing sessions require a fresh sign-in once after deployment; password saves revoke all sessions. Email changes invalidate passwords, recovery tokens, sessions, OAuth links and registered credentials.
+Users can sign in with Google or an application password on the same account. Only super administrators can create employee accounts, using **Admin → Employees → Add employee** (`/admin/employees`) with an email, initial password (12–128 characters) and password confirmation. There is no public registration or forgot-password system. Account security retains authenticated password setting/changing; password saves revoke all sessions. Administrative email changes clear the application password and revoke sessions, OAuth links and registered credentials; use verified Google sign-in for the updated identity before setting a new password. See [application password setup and security behavior](docs/application-passwords.md) for provisioning, password policy and rate limits. SMTP is no longer required, and this workflow change needs no new database migration.
 
 ## Commands and verification
 
@@ -118,9 +128,6 @@ If **Continue with Google** returns HTTP 502 and Nginx logs `upstream sent too b
 Before enabling attendance for staff, verify Google callbacks and unauthorized-account denial, admin/employee isolation, device registration/approval/revocation, inside/outside/low-accuracy GPS outcomes, approved/wrong office networks, concurrent check-ins, check-out, overnight shifts, leave/holiday reports, and both exports. Confirm secure cookies and HTTPS WebAuthn on the actual hostname. Passkeys are origin-bound: changing the hostname/RP ID requires registering compatible credentials again.
 
 The PWA is installable and attendance remains online-only. The service worker does not cache protected API responses or queue attendance submissions. GPS can be spoofed, and synchronized passkeys are not unique hardware identifiers; read the architecture document's security boundaries before setting workplace policy.
-
-
-
 
 After changing prisma/schema.prisma, run against a development database:
 pnpm db:dev --name describe_your_change

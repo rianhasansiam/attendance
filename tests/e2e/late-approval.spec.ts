@@ -132,7 +132,7 @@ async function review(
   await dialog.getByRole("button", { name: decision, exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(
-    page.getByRole("status").filter({
+    page.locator('.notice[role="status"]').filter({
       hasText: `Late approval request ${decision === "Approve" ? "approved" : "rejected"}.`,
     }),
   ).toBeVisible();

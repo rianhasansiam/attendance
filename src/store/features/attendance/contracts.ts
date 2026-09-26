@@ -95,7 +95,7 @@ export type LateApprovalRequest = {
       id: string;
       employeeCode: string;
       user: { name: string | null; email: string };
-    };
+    } | null;
     shift: { timezone: string };
   };
 };

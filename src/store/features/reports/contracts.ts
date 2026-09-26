@@ -14,11 +14,13 @@ export type ReportFilters = {
 export type ReportQuery = ReportFilters & { page: number; pageSize: number };
 export type AttendanceReportRow = JsonRecord & {
   id: string;
-  employee: JsonRecord & {
-    id: string;
-    employeeCode: string;
-    user: JsonRecord & { name: string | null };
-  };
+  employee:
+    | (JsonRecord & {
+        id: string;
+        employeeCode: string;
+        user: JsonRecord & { name: string | null };
+      })
+    | null;
   office: JsonRecord & { id: string; name: string; timezone: string };
   shift: JsonRecord & { id: string; name: string };
   attendanceDate: string;

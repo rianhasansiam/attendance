@@ -44,6 +44,7 @@ import {
   time,
   type DataRow,
 } from "./ui";
+import { confirmAction } from "@/lib/client/alerts";
 import { baseApi } from "@/store/api/base-api";
 import { errorMessage } from "@/store/api/errors";
 import { useAppDispatch, useAppStore } from "@/store/hooks";
@@ -373,7 +374,7 @@ export function EmployeeDashboard() {
         </Notice>
       )}
       {success && (
-        <Notice>
+        <Notice notify>
           <Check size={17} />
           {success}
         </Notice>
@@ -723,17 +724,22 @@ export function EmployeeDevices() {
   }
   async function revoke(id: string) {
     if (submitting.current || needsReconcile) return;
-    if (
-      !window.confirm(
-        "Revoke this device? It will no longer be able to verify attendance.",
-      )
-    )
-      return;
     submitting.current = true;
     setBusy(true);
-    setActionError("");
     try {
+      if (
+        !(await confirmAction({
+          title: "Revoke this device?",
+          text: "It will no longer be able to verify attendance.",
+          confirmText: "Revoke device",
+          danger: true,
+        }))
+      )
+        return;
+      setActionError("");
+      setSuccess("");
       await revokeDevice(id).unwrap();
+      setSuccess("Device revoked successfully.");
     } catch (error) {
       setActionError(friendlyError(error));
       if (isAmbiguousWrite(error)) {
@@ -763,7 +769,7 @@ export function EmployeeDevices() {
       {needsReconcile && (
         <Notice>Refresh devices successfully before trying again.</Notice>
       )}
-      {success && <Notice>{success}</Notice>}
+      {success && <Notice notify>{success}</Notice>}
       <div className="content-grid">
         <section className="card">
           <div className="card-header">
@@ -810,9 +816,9 @@ export function EmployeeDevices() {
             <ShieldCheck size={28} color="#7d9877" />
             <h2 style={{ marginTop: 15 }}>Designed for your privacy</h2>
             <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-              Your sign-in verifies your identity. Your approved passkey confirms
-              attendance. Keep your registered devices up to date and revoke any
-              you no longer use.
+              Your sign-in verifies your identity. Your approved passkey
+              confirms attendance. Keep your registered devices up to date and
+              revoke any you no longer use.
             </p>
           </div>
         </section>
@@ -930,12 +936,21 @@ export function EmployeeLeaves() {
   }
   async function cancel(id: string) {
     if (submitting.current || needsReconcile) return;
-    if (!window.confirm("Cancel this leave request?")) return;
     submitting.current = true;
     setBusy(true);
-    setActionError("");
-    setSuccess("");
     try {
+      if (
+        !(await confirmAction({
+          title: "Cancel this leave request?",
+          text: "The request will be marked as cancelled.",
+          confirmText: "Cancel request",
+          cancelText: "Keep request",
+          danger: true,
+        }))
+      )
+        return;
+      setActionError("");
+      setSuccess("");
       await cancelLeave(id).unwrap();
       setSuccess("Your leave request has been cancelled.");
     } catch (error) {
@@ -976,7 +991,7 @@ export function EmployeeLeaves() {
           Refresh leave requests successfully before trying again.
         </Notice>
       )}
-      {success && <Notice>{success}</Notice>}
+      {success && <Notice notify>{success}</Notice>}
       {show && (
         <section className="card" style={{ marginBottom: 24 }}>
           <div className="card-header">

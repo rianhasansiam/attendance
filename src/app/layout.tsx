@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
+import { AlertLifecycle } from "@/components/alert-notification";
 import { PwaStatus } from "@/components/pwa";
+import "sweetalert2/dist/sweetalert2.min.css";
 import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "XHYD Attendance System", template: "%s · Attend" },
@@ -19,6 +22,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
+        <Suspense fallback={null}>
+          <AlertLifecycle />
+        </Suspense>
         {children}
         <PwaStatus />
       </body>

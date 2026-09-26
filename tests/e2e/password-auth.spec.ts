@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { hash } from "argon2";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { PrismaClient, type Role } from "@prisma/client";
@@ -209,46 +209,7 @@ test("Google-only user sets a password on the same account, then changes it", as
   });
 });
 
-test("reset fragment is erased, usable once, revokes sessions, and enables password-only account", async ({
-  page,
-  context,
-}) => {
-  const record = await user("ADMIN", false, false);
-  const token = randomBytes(32).toString("hex");
-  await db.passwordResetToken.create({
-    data: {
-      userId: record.id,
-      email: record.email,
-      tokenHash: createHash("sha256").update(token).digest("hex"),
-      expiresAt: new Date(Date.now() + 1800000),
-    },
-  });
-  await page.goto(`/reset-password#token=${token}`);
-  await expect(page).toHaveURL(`${origin}/reset-password`);
-  await page
-    .getByLabel("New application password", { exact: true })
-    .fill(password);
-  await page.getByLabel("Confirm new password", { exact: true }).fill(password);
-  await page
-    .getByRole("button", { name: "Update password", exact: true })
-    .click();
-  await expect(page.getByRole("status")).toContainText(
-    "password has been updated",
-  );
-  const replay = await context.request.post("/api/password/reset", {
-    headers: { origin },
-    data: { token, newPassword: password, confirmPassword: password },
-  });
-  expect(replay.status()).toBe(400);
-  await login(page, record.email);
-  await expect(page).toHaveURL(/\/admin\/dashboard$/);
-  expect(
-    (await context.request.get("/api/auth/session").then((r) => r.json())).user
-      .id,
-  ).toBe(record.id);
-});
-
-test("unknown credentials fail generically and forgot password uses a generic response", async ({
+test("unknown credentials fail generically and password recovery is unavailable", async ({
   page,
   context,
 }) => {
@@ -261,17 +222,25 @@ test("unknown credentials fail generically and forgot password uses a generic re
     path: "test-results/password-login-mobile.png",
     fullPage: true,
   });
-  await page
-    .getByRole("link", { name: "Forgot password?", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/forgot-password$/);
-  await page
-    .getByRole("textbox", { name: "Email", exact: true })
-    .fill(`unknown-${randomUUID()}@example.test`);
-  await page.getByRole("button", { name: "Send reset instructions" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "If an account exists for this email",
-  );
+  await expect(
+    page.getByRole("link", { name: /forgot password/i }),
+  ).toHaveCount(0);
+  for (const route of ["/forgot-password", "/reset-password"])
+    expect((await context.request.get(route)).status()).toBe(404);
+  for (const route of ["/api/password/forgot", "/api/password/reset"])
+    expect(
+      (
+        await context.request.post(route, {
+          headers: { origin },
+          data: {
+            email: "unknown@example.test",
+            token: "a".repeat(64),
+            newPassword: password,
+            confirmPassword: password,
+          },
+        })
+      ).status(),
+    ).toBe(404);
   expect(
     (
       await context.request.post("/api/account/password", {
@@ -282,10 +251,9 @@ test("unknown credentials fail generically and forgot password uses a generic re
   ).toBe(401);
   expect(
     (
-      await context.request.post("/api/password/reset", {
+      await context.request.post("/api/account/password", {
         headers: { origin: "https://attacker.test" },
         data: {
-          token: "a".repeat(64),
           newPassword: password,
           confirmPassword: password,
         },

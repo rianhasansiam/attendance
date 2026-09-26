@@ -16,6 +16,11 @@ import { attendanceApi } from "@/store/features/attendance/api";
 import type { AttendanceRecord } from "@/store/features/attendance/contracts";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
 
+vi.mock("@/lib/client/alerts", () => ({
+  confirmAction: vi.fn(),
+  enqueueNotification: vi.fn(() => () => {}),
+  resetAlerts: vi.fn(),
+}));
 vi.mock("@simplewebauthn/browser", () => ({
   WebAuthnAbortService: { cancelCeremony: vi.fn() },
   startAuthentication: vi.fn(async () => ({

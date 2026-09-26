@@ -41,6 +41,8 @@ describe("management authorization and validation", () => {
   it("accepts drive cost managers as employee roles but rejects administrator assignment through employee forms", () => {
     const employee = {
       name: "Driver manager",
+      password: "employee initial passphrase",
+      confirmPassword: "employee initial passphrase",
       email: "manager@example.com",
       employeeCode: "E1",
       officeId: "office",
@@ -86,6 +88,40 @@ describe("management authorization and validation", () => {
         { status: "INACTIVE" },
       ),
     ).toThrow();
+  });
+  it("requires a matching 12–128 character password when creating an employee and rejects password fields during profile edits", () => {
+    const input = {
+      name: "New employee",
+      email: "  EMPLOYEE@EXAMPLE.TEST  ",
+      employeeCode: "E-credentials",
+      officeId: "office",
+      password: "employee initial passphrase",
+      confirmPassword: "employee initial passphrase",
+    };
+    expect(employeeSchema.parse(input).email).toBe("employee@example.test");
+    for (const password of [undefined, "", "too short", "p".repeat(129)]) {
+      expect(
+        employeeSchema.safeParse({
+          ...input,
+          password,
+          confirmPassword: password,
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      employeeSchema.safeParse({ ...input, confirmPassword: "different value" })
+        .success,
+    ).toBe(false);
+    expect(
+      employeeUpdateSchema.safeParse({ name: "Renamed employee" }).success,
+    ).toBe(true);
+    expect(
+      employeeUpdateSchema.safeParse({ password: input.password }).success,
+    ).toBe(false);
+    expect(
+      employeeUpdateSchema.safeParse({ confirmPassword: input.password })
+        .success,
+    ).toBe(false);
   });
   it("rejects impossible dates, reverse assignments, and unknown employee flags", () => {
     expect(dateSchema.safeParse("2025-02-30").success).toBe(false);

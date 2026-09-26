@@ -3,7 +3,6 @@ import { hashPassword, verifyPassword } from "@/modules/auth/password";
 import {
   credentialsSchema,
   passwordChangeSchema,
-  resetPasswordSchema,
 } from "@/modules/auth/password-validation";
 import { auditSnapshot } from "@/modules/audit/service";
 import { auditDisplaySnapshot } from "@/modules/audit/display";
@@ -33,7 +32,7 @@ describe("application password hashing and validation", () => {
       credentialsSchema.parse({ email: " User@Example.com ", password: value }),
     ).toEqual({ email: "user@example.com", password: value });
   });
-  it("validates confirmation, reset token and unknown management fields", () => {
+  it("validates confirmation and rejects unknown management fields", () => {
     expect(
       passwordChangeSchema.safeParse({
         newPassword: "twelvecharacters",
@@ -43,13 +42,6 @@ describe("application password hashing and validation", () => {
     expect(
       passwordChangeSchema.safeParse({
         userId: "another-user",
-        newPassword: "twelvecharacters",
-        confirmPassword: "twelvecharacters",
-      }).success,
-    ).toBe(false);
-    expect(
-      resetPasswordSchema.safeParse({
-        token: "bad",
         newPassword: "twelvecharacters",
         confirmPassword: "twelvecharacters",
       }).success,

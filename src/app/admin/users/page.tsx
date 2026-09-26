@@ -14,6 +14,6 @@ export default function Page() {
 
 async function SuperAdminUsers() {
   await connection();
-  await requirePageUser("SUPER_ADMIN");
-  return <AdminResource resource="users" />;
+  const user = await requirePageUser("SUPER_ADMIN");
+  return <AdminResource resource="users" currentUserId={user.id} />;
 }

@@ -23,6 +23,8 @@ import {
   Pagination,
 } from "./ui";
 import { pageFromSearch, useUrlFilters } from "@/lib/client/use-url-filters";
+import { confirmAction } from "@/lib/client/alerts";
+import { DELETED_INFO } from "@/lib/deleted-info";
 import { useFreshness } from "@/store/freshness";
 import { useQueryView } from "@/store/use-query-view";
 import { errorMessage, isApiError } from "@/store/api/errors";
@@ -172,6 +174,8 @@ export function DailyExpensesWorkspace({
   const [uncertain, setUncertain] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const confirmingDeletion = useRef(false);
   const submitting = useRef(false);
   const deletionPageRecovery = useRef<{ requestId?: string } | null>(null);
   const [formError, setFormError] = useState("");
@@ -197,7 +201,7 @@ export function DailyExpensesWorkspace({
   const hasFilters = Object.values(filters).some(Boolean);
   const fetching =
     summary.isFetching || history.isFetching || categories.isFetching;
-  const locked = busy || uncertain;
+  const locked = busy || uncertain || confirming;
   const today = summary.data
     ? todayInTimezone(summary.data.ledger.timezone)
     : undefined;
@@ -293,16 +297,8 @@ export function DailyExpensesWorkspace({
     setDialogOpen(true);
   }
 
-  function openSavedTransaction(
-    transaction: DailyExpenseTransactionDTO,
-    deleting = false,
-  ) {
-    if (
-      !(deleting ? canDeleteTransactions : canEditTransactions) ||
-      locked ||
-      !summary.data
-    )
-      return;
+  function openSavedTransaction(transaction: DailyExpenseTransactionDTO) {
+    if (!canEditTransactions || locked || !summary.data) return;
     setDraft({
       type: transaction.type,
       amount: transaction.amount,
@@ -310,7 +306,6 @@ export function DailyExpensesWorkspace({
       note: transaction.note ?? "",
       categoryId: transaction.category?.id ?? "",
       transaction,
-      deleting,
     });
     setSubmission(null);
     setUncertain(false);
@@ -319,6 +314,73 @@ export function DailyExpensesWorkspace({
     setFormError("");
     setMessage("");
     setDialogOpen(true);
+  }
+
+  async function confirmDeletion(transaction: DailyExpenseTransactionDTO) {
+    if (
+      !canWrite ||
+      !canDeleteTransactions ||
+      locked ||
+      submitting.current ||
+      confirmingDeletion.current ||
+      !summary.data
+    )
+      return;
+    // Capture exactly what is reviewed; a background refresh must not change
+    // the version or values that this confirmation authorizes.
+    const reviewed: Draft = {
+      type: transaction.type,
+      amount: transaction.amount,
+      date: transaction.date,
+      note: transaction.note ?? "",
+      categoryId: transaction.category?.id ?? "",
+      transaction,
+      deleting: true,
+    };
+    const amount = formatMoney(
+      transaction.amount,
+      summary.data.ledger.currency,
+    );
+    const isExpense = transaction.type === "EXPENSE";
+    confirmingDeletion.current = true;
+    setConfirming(true);
+    try {
+      const confirmed = await confirmAction({
+        title: isExpense ? "Delete Expense" : "Delete Balance",
+        text: [
+          `Amount: ${amount}`,
+          `Transaction date: ${dateLabel(transaction.date)}`,
+          ...(transaction.category
+            ? [`Category: ${transaction.category.name}`]
+            : []),
+          `Description / note: ${transaction.note || "—"}`,
+          "",
+          isExpense
+            ? `Deleting this expense will increase Current Balance by ${amount}.`
+            : `Deleting this balance addition will reduce Current Balance and Total Balance Added by ${amount}. Current Balance may become negative.`,
+          "The record will be permanently removed from the database and transaction history. This action cannot be undone; its audit history will be kept.",
+        ].join("\n"),
+        confirmText: "Delete record",
+        danger: true,
+      });
+      if (!confirmed) return;
+      setDraft(reviewed);
+      setDialogOpen(false);
+      setUncertain(false);
+      setConflict(false);
+      setMessage("");
+      await persistSubmission(
+        {
+          type: "DELETE",
+          id: transaction.id,
+          input: { expectedVersion: transaction.version },
+        },
+        reviewed,
+      );
+    } finally {
+      confirmingDeletion.current = false;
+      setConfirming(false);
+    }
   }
 
   function closeTransaction() {
@@ -402,7 +464,13 @@ export function DailyExpensesWorkspace({
           : { type: "BALANCE_ADDED", input: parsed.data as BalanceInput };
       setSubmission(attempt);
     }
+    await persistSubmission(attempt, draft);
+  }
+
+  async function persistSubmission(attempt: Submission, reviewed: Draft) {
+    if (submitting.current) return;
     submitting.current = true;
+    setSubmission(attempt);
     setBusy(true);
     setErrors({});
     setFormError("");
@@ -414,7 +482,7 @@ export function DailyExpensesWorkspace({
         }).unwrap();
         deletionPageRecovery.current = { requestId: historyQuery.requestId };
         setMessage(
-          `${draft.type === "EXPENSE" ? "Expense" : "Balance addition"} deleted${result.replayed ? " (the record was already deleted)" : ""}. Balances and history are being refreshed.`,
+          `${reviewed.type === "EXPENSE" ? "Expense" : "Balance addition"} deleted${result.replayed ? " (the record was already deleted)" : ""}. Balances and history are being refreshed.`,
         );
       } else {
         const result =
@@ -438,6 +506,9 @@ export function DailyExpensesWorkspace({
       // Successful RTK invalidation refreshes the reads. A later read failure
       // cannot turn this confirmed write into a failed submission.
     } catch (error) {
+      // The initial review uses SweetAlert. Recovery keeps the reviewed values
+      // visible and allows retrying the original operation without reconfirming.
+      if (attempt.type === "DELETE") setDialogOpen(true);
       if (isApiError(error) && error.code === "TRANSACTION_DELETED") {
         setSubmission(null);
         setUncertain(false);
@@ -569,7 +640,7 @@ export function DailyExpensesWorkspace({
         }
       />
       {message && (
-        <Notice>
+        <Notice notify>
           <Check size={16} />
           {message}
         </Notice>
@@ -858,8 +929,9 @@ export function DailyExpensesWorkspace({
                         : transaction.amount}
                     </td>
                     <td data-label="Recorded by">
-                      {transaction.createdBy.name ||
-                        transaction.createdBy.email}
+                      {transaction.createdBy?.name ||
+                        transaction.createdBy?.email ||
+                        DELETED_INFO}
                     </td>
                     {(canEditTransactions || canDeleteTransactions) && (
                       <td data-label="Actions">
@@ -883,9 +955,7 @@ export function DailyExpensesWorkspace({
                               disabled={
                                 !summary.data || locked || history.isFetching
                               }
-                              onClick={() =>
-                                openSavedTransaction(transaction, true)
-                              }
+                              onClick={() => void confirmDeletion(transaction)}
                             >
                               <Trash2 size={14} /> Delete
                             </button>
@@ -931,17 +1001,11 @@ export function DailyExpensesWorkspace({
         canDeleteTransactions &&
         draft?.deleting &&
         draft.transaction && (
-          <Modal
-            title={
-              draft.type === "EXPENSE" ? "Delete Expense" : "Delete Balance"
-            }
-            close={closeTransaction}
-          >
+          <Modal title="Deletion recovery" close={closeTransaction}>
             <form onSubmit={submit}>
               <p className={`muted ${styles.formIntro}`}>
-                Review this record before deleting it. The record will be
-                removed from transaction history and this action cannot be
-                undone.
+                This is the record you confirmed for permanent deletion. Review
+                the result below before retrying the same operation.
               </p>
               <dl className={styles.deleteDetails}>
                 <dt>Type</dt>
@@ -1002,7 +1066,7 @@ export function DailyExpensesWorkspace({
                       ? "Confirming…"
                       : uncertain
                         ? "Safe retry"
-                        : "Delete record"}
+                        : "Retry deletion"}
                   </button>
                 )}
               </div>
@@ -1317,7 +1381,7 @@ function CategoryDialog({
         Archived categories remain in history and filters. Only active
         categories can be used for new expenses.
       </p>
-      {message && <Notice>{message}</Notice>}
+      {message && <Notice notify>{message}</Notice>}
       {message && refreshError && (
         <ErrorNotice message="Your category change was saved. Refresh the list to load the latest categories." />
       )}

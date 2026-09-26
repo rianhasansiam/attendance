@@ -8,6 +8,7 @@ import { driveCostWhere } from "@/modules/drive-costs/filters";
 import { auditDisplaySnapshot } from "@/modules/audit/display";
 import {
   createEmployee,
+  deleteEmployee,
   employeeInclude,
   publicUserSelect,
   updateEmployee,
@@ -25,7 +26,9 @@ import {
 import { assertSuperAdmin, type Actor } from "./permissions";
 import {
   createAdministrator,
+  deleteUser,
   deviceSelect,
+  managedUserSelect,
   reviewLeave,
   saveSetting,
   updateDevice,
@@ -61,7 +64,11 @@ type Resource = z.infer<typeof resourceSchema>;
 function authorizeResource(actor: Actor, resource: Resource) {
   authorizeRole(
     actor.role,
-    resource === "drive-costs" ? "MANAGE_DRIVER" : "ADMIN",
+    resource === "users"
+      ? "SUPER_ADMIN"
+      : resource === "drive-costs"
+        ? "MANAGE_DRIVER"
+        : "ADMIN",
   );
 }
 
@@ -252,7 +259,7 @@ export async function listRecords(
       result = await Promise.all([
         db.user.findMany({
           where,
-          select: publicUserSelect,
+          select: managedUserSelect,
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           ...window,
         }),
@@ -378,7 +385,7 @@ export async function getRecord(actor: Actor, resource: Resource, id: string) {
     case "users":
       record = await db.user.findUnique({
         where: { id },
-        select: publicUserSelect,
+        select: managedUserSelect,
       });
       break;
     case "settings":
@@ -406,6 +413,7 @@ export async function createRecord(
   authorizeResource(actor, resource);
   switch (resource) {
     case "employees":
+      assertSuperAdmin(actor);
       return createEmployee(actor, employeeSchema.parse(body));
     case "departments":
       return saveDepartment(actor, body);
@@ -484,10 +492,11 @@ export async function removeRecord(
   id: string,
 ) {
   authorizeResource(actor, resource);
-  if (resource === "employees")
-    return updateEmployee(actor, id, { status: "INACTIVE" });
+  if (resource === "employees") {
+    assertSuperAdmin(actor);
+    return deleteEmployee(actor, id);
+  }
   if (resource === "devices") return updateDevice(actor, id, { revoked: true });
-  if (resource === "users")
-    return updateUser(actor, id, { status: "INACTIVE" });
+  if (resource === "users") return deleteUser(actor, id);
   return removeCatalogRecord(actor, resource, id);
 }

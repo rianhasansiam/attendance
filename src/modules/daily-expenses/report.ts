@@ -1,5 +1,6 @@
 import "server-only";
 import { createReportPdf } from "@/modules/reports/pdf";
+import { DELETED_INFO } from "@/lib/deleted-info";
 import { formatMoney, type DailyExpenseReportData } from "./contracts";
 import type { DailyExpensesActor } from "./permissions";
 import { getDailyExpenseReportData } from "./service";
@@ -65,9 +66,11 @@ export function createDailyExpenseReportPdf(data: DailyExpenseReportData) {
       item.type === "EXPENSE" ? "Expense" : "Balance added",
       item.category?.name ?? "-",
       item.note || "-",
-      item.createdBy.name
-        ? `${item.createdBy.name}\n${item.createdBy.email}`
-        : item.createdBy.email,
+      item.createdBy
+        ? item.createdBy.name
+          ? `${item.createdBy.name}\n${item.createdBy.email}`
+          : item.createdBy.email
+        : DELETED_INFO,
       `${item.type === "EXPENSE" ? "-" : "+"}${money(item.amount)}`,
     ]),
     footerNote:

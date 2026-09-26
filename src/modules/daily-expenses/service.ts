@@ -164,7 +164,7 @@ async function dailyExpenseTotals(
       COALESCE(SUM(CASE WHEN "type" = 'BALANCE_ADDED' THEN "amount" ELSE -"amount" END), 0)::text AS "currentBalance",
       COALESCE(SUM("amount") FILTER (WHERE "type" = 'BALANCE_ADDED'), 0)::text AS "totalBalanceAdded",
       COALESCE(SUM("amount") FILTER (WHERE "type" = 'EXPENSE'), 0)::text AS "totalExpenses"
-    FROM "DailyExpenseTransaction" WHERE "ledgerId" = ${ledgerId} AND "deletedAt" IS NULL
+    FROM "DailyExpenseTransaction" WHERE "ledgerId" = ${ledgerId}
   `);
   // Decimal construction and fixed-point serialization do not use JS Number or
   // perform arithmetic; zero is normalized to the same two-decimal contract.
@@ -362,18 +362,38 @@ async function postTransaction(
         409,
       );
     }
-    if (existing.deletedAt) {
+    return { transaction: transactionDTO(existing), replayed: true };
+  }
+  async function preventDeletedReplay(tx: Prisma.TransactionClient) {
+    // Serialize the submission key with the database insert/delete guards, so
+    // a concurrent deletion cannot free the key for a retried creation.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT pg_advisory_xact_lock(hashtextextended(${ledger.id} || ':' || ${input.idempotencyKey}, 0))::text
+    `);
+    const deleted = await tx.dailyExpenseTransactionDeletion.findUnique({
+      where: uniqueKey,
+    });
+    if (!deleted) return;
+    if (
+      deleted.createdById !== actor.id ||
+      deleted.payloadHash !== payloadHash
+    ) {
       throw new DomainError(
-        "TRANSACTION_DELETED",
-        "This transaction was deleted. Its original submission cannot be restored or submitted again.",
+        "IDEMPOTENCY_CONFLICT",
+        "This submission key was already used for different transaction data. Start a new submission.",
         409,
       );
     }
-    return { transaction: transactionDTO(existing), replayed: true };
+    throw new DomainError(
+      "TRANSACTION_DELETED",
+      "This transaction was deleted. Its original submission cannot be restored or submitted again.",
+      409,
+    );
   }
   try {
     return await db.$transaction(async (tx) => {
       await authorizePersistedWriter(tx, actor);
+      await preventDeletedReplay(tx);
       // Authorize retries too, then check them before category state: archiving
       // after a save must never turn a retry into another financial operation.
       const existing = await tx.dailyExpenseTransaction.findUnique({
@@ -433,6 +453,7 @@ async function postTransaction(
     // duplicate request after the first request has already committed.
     return db.$transaction(async (tx) => {
       await authorizePersistedWriter(tx, actor);
+      await preventDeletedReplay(tx);
       const winner = await tx.dailyExpenseTransaction.findUnique({
         where: uniqueKey,
         include: transactionInclude,
@@ -499,6 +520,17 @@ export async function updateDailyExpenseTransaction(
       WHERE "id" = ${id} AND "ledgerId" = ${ledger.id} FOR UPDATE
     `);
     if (!rows.length) {
+      const deleted = await tx.dailyExpenseTransactionDeletion.findFirst({
+        where: { transactionId: id, ledgerId: ledger.id },
+        select: { transactionId: true },
+      });
+      if (deleted) {
+        throw new DomainError(
+          "TRANSACTION_DELETED",
+          "This record was deleted. Refresh the transaction history.",
+          409,
+        );
+      }
       throw new DomainError(
         "NOT_FOUND",
         "The requested transaction was not found.",
@@ -509,13 +541,6 @@ export async function updateDailyExpenseTransaction(
       where: { id },
       include: transactionInclude,
     });
-    if (previous.deletedAt) {
-      throw new DomainError(
-        "TRANSACTION_DELETED",
-        "This record was deleted. Refresh the transaction history.",
-        409,
-      );
-    }
     const categoryId = input.categoryId ?? null;
     if (
       (previous.type === "EXPENSE" && categoryId === null) ||
@@ -635,6 +660,11 @@ export async function deleteDailyExpenseTransaction(
       WHERE "id" = ${id} AND "ledgerId" = ${ledger.id} FOR UPDATE
     `);
     if (!rows.length) {
+      const deleted = await tx.dailyExpenseTransactionDeletion.findFirst({
+        where: { transactionId: id, ledgerId: ledger.id },
+        select: { transactionId: true },
+      });
+      if (deleted) return { id, replayed: true };
       throw new DomainError(
         "NOT_FOUND",
         "The requested transaction was not found.",
@@ -645,9 +675,6 @@ export async function deleteDailyExpenseTransaction(
       where: { id },
       include: transactionInclude,
     });
-    // Keeping the row and original submission key lets retries confirm deletion
-    // without issuing another audit or allowing the original POST to recreate it.
-    if (previous.deletedAt) return { id, replayed: true };
     if (previous.version !== input.expectedVersion) {
       throw new DomainError(
         "TRANSACTION_CONFLICT",
@@ -658,21 +685,15 @@ export async function deleteDailyExpenseTransaction(
     await tx.$queryRaw(Prisma.sql`
       SELECT set_config('app.daily_expenses_editor_id', ${actor.id}, true)
     `);
-    const deleted = await tx.dailyExpenseTransaction.update({
-      where: { id },
-      data: { deletedAt: new Date(), version: { increment: 1 } },
-      include: transactionInclude,
-    });
+    // The database removes the row and records only retry metadata atomically.
+    await tx.dailyExpenseTransaction.delete({ where: { id } });
     await writeAudit(
       actor.id,
       "DAILY_EXPENSE_TRANSACTION_DELETED",
       "DailyExpenseTransaction",
       id,
-      { ...transactionDTO(previous), deletedAt: null },
-      {
-        ...transactionDTO(deleted),
-        deletedAt: deleted.deletedAt!.toISOString(),
-      },
+      transactionDTO(previous),
+      { id, deleted: true },
       tx,
     );
     return { id, replayed: false };

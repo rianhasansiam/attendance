@@ -23,6 +23,13 @@ export function Modal({
       )
       ?.focus();
     const onKey = (event: KeyboardEvent) => {
+      // SweetAlert owns keyboard focus while a confirmation is above a form.
+      if (
+        document.querySelector(
+          ".swal2-container .swal2-popup:not(.swal2-toast)",
+        )
+      )
+        return;
       if (event.key === "Escape") onClose();
       if (event.key !== "Tab") return;
       const focusable = container?.querySelectorAll<HTMLElement>(

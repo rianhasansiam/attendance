@@ -338,7 +338,7 @@ export function AdminReports({
         checkInAt: toIso("checkInAt"),
         checkOutAt: toIso("checkOutAt"),
       };
-      if (!editing) return;
+      if (!editing || !editing.employee) return;
       await correctAttendance(
         editing.derived
           ? {
@@ -399,7 +399,7 @@ export function AdminReports({
           Refresh attendance successfully before another correction.
         </Notice>
       )}
-      {message && <Notice>{message}</Notice>}
+      {message && <Notice notify>{message}</Notice>}
       <section className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <div>
@@ -515,19 +515,20 @@ export function AdminReports({
             dateGroupKey={attendance ? "attendanceDate" : undefined}
             actions={
               attendance && canCorrectAttendance
-                ? (row) => (
-                    <button
-                      aria-label="Correct attendance"
-                      disabled={busy || needsReconcile || isFetching}
-                      className="icon-button"
-                      onClick={() => {
-                        setEditing(row);
-                        setActionError("");
-                      }}
-                    >
-                      <Pencil size={15} />
-                    </button>
-                  )
+                ? (row) =>
+                    row.employee ? (
+                      <button
+                        aria-label="Correct attendance"
+                        disabled={busy || needsReconcile || isFetching}
+                        className="icon-button"
+                        onClick={() => {
+                          setEditing(row);
+                          setActionError("");
+                        }}
+                      >
+                        <Pencil size={15} />
+                      </button>
+                    ) : null
                 : undefined
             }
           />
@@ -737,7 +738,7 @@ export function AdminSettings() {
         <Notice>Refresh settings successfully before another change.</Notice>
       )}
       {message && (
-        <Notice>
+        <Notice notify>
           <Check size={16} />
           {message}
         </Notice>

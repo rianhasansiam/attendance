@@ -4,12 +4,10 @@ import { getEnv } from "@/lib/env";
 import { rateLimit } from "@/lib/security";
 import { extractClientIp } from "@/modules/network/service";
 
-type Action = "login" | "forgot" | "reset" | "manage";
+type Action = "login" | "manage";
 const limits: Record<Action, { ip: number; account: number; seconds: number }> =
   {
     login: { ip: 50, account: 10, seconds: 900 },
-    forgot: { ip: 20, account: 3, seconds: 900 },
-    reset: { ip: 30, account: 5, seconds: 900 },
     manage: { ip: 30, account: 5, seconds: 900 },
   };
 export async function limitPasswordAction(

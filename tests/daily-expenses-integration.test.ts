@@ -139,7 +139,7 @@ integration(
       // The random schema exists only in the explicitly supplied test database.
       // TRUNCATE avoids weakening the production immutable-entry triggers.
       await control.query(
-        'TRUNCATE "DailyExpenseTransaction", "DailyExpenseCategory", "DailyExpenseLedger", "AuditLog"',
+        'TRUNCATE "DailyExpenseTransactionDeletion", "DailyExpenseTransaction", "DailyExpenseCategory", "DailyExpenseLedger", "AuditLog"',
       );
       const user = await db.user.create({
         data: {
@@ -768,7 +768,7 @@ integration(
         db.user.delete({ where: { id: creator.id } }),
       ).rejects.toBeDefined();
       await expectTotals("12.50", "12.50", "0.00");
-      expect((await history()).items[0].createdBy.id).toBe(creator.id);
+      expect((await history()).items[0].createdBy?.id).toBe(creator.id);
     });
 
     it("only permits active persisted super admins to edit records", async () => {
@@ -1102,7 +1102,7 @@ integration(
       ).rejects.toBeDefined();
       await expect(
         db.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${superAdmin.id}, true)`;
+          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${admin.id}, true)`;
           return tx.dailyExpenseTransaction.delete({
             where: { id: transaction.id },
           });
@@ -1146,13 +1146,12 @@ integration(
         total: 0,
         totalPages: 0,
       });
-      const retained = await db.dailyExpenseTransaction.findMany();
-      expect(retained).toHaveLength(2);
-      expect(
-        retained.every(
-          (record) => record.deletedAt instanceof Date && record.version === 2,
-        ),
-      ).toBe(true);
+      expect(await db.dailyExpenseTransaction.findMany()).toEqual([]);
+      const receipts = await db.dailyExpenseTransactionDeletion.findMany();
+      expect(receipts).toHaveLength(2);
+      expect(receipts.map(({ transactionId }) => transactionId).sort()).toEqual(
+        [expense.transaction.id, deposit.transaction.id].sort(),
+      );
       const audits = await db.auditLog.findMany({
         where: { action: "DAILY_EXPENSE_TRANSACTION_DELETED" },
       });
@@ -1164,13 +1163,8 @@ integration(
           previousState: expect.objectContaining({
             amount: "30.25",
             version: 1,
-            deletedAt: null,
           }),
-          newState: expect.objectContaining({
-            amount: "30.25",
-            version: 2,
-            deletedAt: expect.any(String),
-          }),
+          newState: { id: expense.transaction.id, deleted: true },
         }),
       );
     });
@@ -1248,7 +1242,8 @@ integration(
           correction(transaction),
         ),
       ).rejects.toMatchObject({ code: "TRANSACTION_DELETED", status: 409 });
-      expect(await db.dailyExpenseTransaction.count()).toBe(1);
+      expect(await db.dailyExpenseTransaction.count()).toBe(0);
+      expect(await db.dailyExpenseTransactionDeletion.count()).toBe(1);
       expect(
         await db.auditLog.count({
           where: { action: "DAILY_EXPENSE_TRANSACTION_DELETED" },
@@ -1294,13 +1289,13 @@ integration(
       expect(results.find(({ status }) => status === "rejected")).toMatchObject(
         { reason: { status: 409 } },
       );
-      const stored = await db.dailyExpenseTransaction.findUniqueOrThrow({
+      const stored = await db.dailyExpenseTransaction.findUnique({
         where: { id: transaction.id },
       });
-      expect(stored.version).toBe(2);
+      if (stored) expect(stored.version).toBe(2);
       await expectTotals(
-        stored.deletedAt ? "0.00" : "20.00",
-        stored.deletedAt ? "0.00" : "20.00",
+        stored ? "20.00" : "0.00",
+        stored ? "20.00" : "0.00",
         "0.00",
       );
     });
@@ -1344,12 +1339,11 @@ integration(
           version: 1,
         });
         expect(
-          (
-            await db.dailyExpenseTransaction.findUniqueOrThrow({
-              where: { id: transaction.id },
-            })
-          ).deletedAt,
-        ).toBeNull();
+          await db.dailyExpenseTransaction.findUnique({
+            where: { id: transaction.id },
+          }),
+        ).not.toBeNull();
+        expect(await db.dailyExpenseTransactionDeletion.count()).toBe(0);
         await expectTotals("10.00", "10.00", "0.00");
       } finally {
         await control.query('DROP TRIGGER fail_delete_audit ON "AuditLog"');
@@ -1357,35 +1351,81 @@ integration(
       }
     });
 
-    it("database guards prohibit unauthorized deletion, changing amounts while deleting, and restoring deleted records", async () => {
-      const { transaction } = await balance("10.00");
-      const direct = (actorId: string, data: Record<string, unknown>) =>
-        db.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${actorId}, true)`;
-          return tx.dailyExpenseTransaction.update({
-            where: { id: transaction.id },
-            data,
-          });
-        });
-      await expect(
-        direct(admin.id, { deletedAt: new Date(), version: { increment: 1 } }),
-      ).rejects.toBeDefined();
-      await expect(
-        direct(superAdmin.id, {
-          deletedAt: new Date(),
-          amount: "20.00",
-          version: { increment: 1 },
-        }),
-      ).rejects.toBeDefined();
-      await deleteDailyExpenseTransaction(superAdmin, transaction.id, {
-        expectedVersion: 1,
+    it("database guards authorize physical deletion and prevent reuse or removal of its receipt", async () => {
+      const creation = input("10.00");
+      const { transaction } = await addDailyExpenseBalance(creator, creation);
+      const stored = await db.dailyExpenseTransaction.findUniqueOrThrow({
+        where: { id: transaction.id },
       });
       await expect(
-        direct(superAdmin.id, { deletedAt: null, version: { increment: 1 } }),
+        db.dailyExpenseTransaction.delete({ where: { id: transaction.id } }),
       ).rejects.toBeDefined();
       await expect(
-        direct(superAdmin.id, { amount: "20.00", version: { increment: 1 } }),
+        db.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${admin.id}, true)`;
+          return tx.dailyExpenseTransaction.delete({
+            where: { id: transaction.id },
+          });
+        }),
       ).rejects.toBeDefined();
+      await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT set_config('app.daily_expenses_editor_id', ${superAdmin.id}, true)`;
+        await tx.dailyExpenseTransaction.delete({
+          where: { id: transaction.id },
+        });
+      });
+      expect(
+        await db.dailyExpenseTransaction.findUnique({
+          where: { id: transaction.id },
+        }),
+      ).toBeNull();
+      await expect(
+        db.dailyExpenseTransaction.create({ data: stored }),
+      ).rejects.toBeDefined();
+      await expect(
+        db.dailyExpenseTransaction.create({
+          data: { ...stored, id: randomUUID() },
+        }),
+      ).rejects.toBeDefined();
+      await expect(
+        db.dailyExpenseTransactionDeletion.delete({
+          where: { transactionId: transaction.id },
+        }),
+      ).rejects.toBeDefined();
+      await expect(
+        db.dailyExpenseTransactionDeletion.update({
+          where: { transactionId: transaction.id },
+          data: { idempotencyKey: randomUUID() },
+        }),
+      ).rejects.toBeDefined();
+      await expect(
+        addDailyExpenseBalance(creator, creation),
+      ).rejects.toMatchObject({ code: "TRANSACTION_DELETED" });
+      await expect(
+        addDailyExpenseBalance(creator, { ...creation, amount: "20.00" }),
+      ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+      await expectTotals("0.00", "0.00", "0.00");
+    });
+
+    it("serializes deletion against a retried creation without restoring the balance", async () => {
+      const creation = input("10.00");
+      const { transaction } = await addDailyExpenseBalance(creator, creation);
+      const results = await Promise.allSettled([
+        deleteDailyExpenseTransaction(superAdmin, transaction.id, {
+          expectedVersion: 1,
+        }),
+        addDailyExpenseBalance(creator, creation),
+      ]);
+      expect(results[0]).toMatchObject({ status: "fulfilled" });
+      if (results[1].status === "fulfilled") {
+        expect(results[1].value).toMatchObject({ replayed: true });
+      } else {
+        expect(results[1].reason).toMatchObject({
+          code: "TRANSACTION_DELETED",
+        });
+      }
+      expect(await db.dailyExpenseTransaction.count()).toBe(0);
+      expect(await db.dailyExpenseTransactionDeletion.count()).toBe(1);
       await expectTotals("0.00", "0.00", "0.00");
     });
 

@@ -190,12 +190,12 @@ model Shift {
 }
 model EmployeeShift {
   id String @id @default(cuid())
-  employeeId String
+  employeeId String?
   shiftId String
   startDate DateTime @db.Date
   endDate DateTime? @db.Date
   createdAt DateTime @default(now())
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   @@unique([employeeId, startDate])
   @@index([employeeId, endDate])
@@ -231,7 +231,7 @@ model WebAuthnChallenge {
 }
 model Attendance {
   id String @id @default(cuid())
-  employeeId String
+  employeeId String?
   officeId String
   shiftId String
   attendanceDate DateTime @db.Date
@@ -261,7 +261,7 @@ model Attendance {
   overtimeMinutes Int? @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   office Office @relation(fields: [officeId], references: [id], onDelete: Restrict)
   shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   events AttendanceEvent[]
@@ -286,7 +286,7 @@ model LateApprovalRequest {
   reviewedAt DateTime?
   reviewNote String? @db.VarChar(1000)
   attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
-  reviewedBy User? @relation(fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedBy User? @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
   @@index([status, requestedAt(sort: Desc), id(sort: Desc)])
   @@index([reviewedById])
 }
@@ -298,7 +298,7 @@ model AttendanceEvent {
   reason String?
   metadata Json?
   createdAt DateTime @default(now())
-  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
   @@index([employeeId, createdAt])
   @@index([type, createdAt])
@@ -325,16 +325,16 @@ model DriveCost {
   paymentStatus DriveCostPaymentStatus @default(UNPAID)
   ratePerKilometer Decimal @db.Decimal(10, 2)
   totalCost Decimal @db.Decimal(12, 2)
-  createdById String
+  createdById String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
   @@index([date(sort: Desc), id(sort: Desc)])
   @@index([createdById, date(sort: Desc)])
 }
 model Leave {
   id String @id @default(cuid())
-  employeeId String
+  employeeId String?
   startDate DateTime @db.Date
   endDate DateTime @db.Date
   reason String
@@ -344,7 +344,7 @@ model Leave {
   reviewedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   @@index([employeeId, startDate, endDate])
   @@index([status])
 }
@@ -357,7 +357,7 @@ model AuditLog {
   previousState Json?
   newState Json?
   createdAt DateTime @default(now())
-  actor User? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
   @@index([createdAt])
   @@index([resource, resourceId])
 }
@@ -381,6 +381,7 @@ model DailyExpenseLedger {
   createdAt DateTime @default(now())
   categories DailyExpenseCategory[]
   transactions DailyExpenseTransaction[]
+  deletions DailyExpenseTransactionDeletion[]
 }
 
 model DailyExpenseCategory {
@@ -402,23 +403,34 @@ model DailyExpenseCategory {
 model DailyExpenseTransaction {
   id String @id @default(cuid())
   version Int @default(1)
-  deletedAt DateTime?
   ledgerId String
   type DailyExpenseTransactionType
   amount Decimal @db.Decimal(18, 2)
   categoryId String?
   date DateTime @db.Date
   note String? @db.VarChar(1000)
-  createdById String
+  createdById String?
   createdAt DateTime @default(now())
   idempotencyKey String @db.VarChar(128)
   payloadHash String @db.VarChar(64)
   ledger DailyExpenseLedger @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
   category DailyExpenseCategory? @relation(fields: [ledgerId, categoryId], references: [ledgerId, id], onDelete: Restrict, onUpdate: Restrict)
-  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
   @@unique([ledgerId, idempotencyKey])
   @@index([ledgerId, date(sort: Desc), createdAt(sort: Desc), id(sort: Desc)])
   @@index([ledgerId, type, date(sort: Desc)])
   @@index([ledgerId, categoryId, date(sort: Desc)])
   @@index([createdById])
+}
+
+/// Minimal receipt for safe retries after the transaction itself is removed.
+model DailyExpenseTransactionDeletion {
+  transactionId String @id
+  ledgerId String
+  idempotencyKey String @db.VarChar(128)
+  createdById String?
+  payloadHash String @db.VarChar(64)
+  deletedAt DateTime @default(now())
+  ledger DailyExpenseLedger @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  @@unique([ledgerId, idempotencyKey])
 }

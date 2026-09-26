@@ -107,7 +107,7 @@ export function AppShell({
           ),
           ...(user.role === "SUPER_ADMIN"
             ? [
-                { label: "Administrators", href: "users", icon: ShieldCheck },
+                { label: "All Users", href: "users", icon: Users },
                 { label: "Settings", href: "settings", icon: Settings2 },
               ]
             : []),

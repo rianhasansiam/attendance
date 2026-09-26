@@ -68,6 +68,7 @@ describe("admin API authorization", () => {
   );
 
   it.each([
+    ["new employee", () => create(request("POST"), context)],
     ["new correction", () => createCorrection(request("POST"))],
     ["existing correction", () => correction(request("PATCH"), context)],
   ] as const)(
@@ -81,4 +82,17 @@ describe("admin API authorization", () => {
       expect(requireAdmin).not.toHaveBeenCalled();
     },
   );
+
+  it("rejects regular administrators creating employees at the HTTP boundary", async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({
+      id: "regular-admin",
+      role: "ADMIN",
+    } as Awaited<ReturnType<typeof requireAdmin>>);
+    vi.mocked(requireAdmin).mockClear();
+    vi.mocked(requireSuperAdmin).mockClear();
+    const response = await create(request("POST"), context);
+    expect(response.status).toBe(403);
+    expect(requireSuperAdmin).toHaveBeenCalledOnce();
+    expect(requireAdmin).not.toHaveBeenCalled();
+  });
 });

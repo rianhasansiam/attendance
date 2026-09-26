@@ -5,6 +5,7 @@ export type Field = {
   type?:
     | "text"
     | "email"
+    | "password"
     | "number"
     | "date"
     | "time"
@@ -15,11 +16,14 @@ export type Field = {
     | "datetime-local";
   required?: boolean;
   options?: string[];
+  disabledOptions?: string[];
   resource?: string;
   hint?: string;
   default?: string | number | boolean | number[];
   min?: number;
   max?: number;
+  minLength?: number;
+  maxLength?: number;
   source?: string;
   edit?: boolean;
   create?: boolean;
@@ -76,11 +80,30 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
       { ...name, source: "user.name" },
       {
         name: "email",
-        label: "Official Google email",
+        label: "Email",
         type: "email",
         required: true,
         source: "user.email",
-        hint: "Must match the employee’s verified Google account.",
+        hint: "Used to sign in with a password. For Google sign-in, use the employee’s verified Google email.",
+      },
+      {
+        name: "password",
+        label: "Application password",
+        type: "password",
+        required: true,
+        edit: false,
+        minLength: 12,
+        maxLength: 128,
+        hint: "Use 12–128 characters. Long passphrases are welcome.",
+      },
+      {
+        name: "confirmPassword",
+        label: "Confirm password",
+        type: "password",
+        required: true,
+        edit: false,
+        minLength: 12,
+        maxLength: 128,
       },
       { name: "employeeCode", label: "Employee ID", required: true },
       office,
@@ -104,7 +127,7 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
     columns: [
       { key: "user.name", label: "Employee" },
       { key: "employeeCode", label: "Employee ID" },
-      { key: "user.email", label: "Google email" },
+      { key: "user.email", label: "Email" },
       { key: "department.name", label: "Department" },
       { key: "office.name", label: "Office" },
       { key: "user.role", label: "Role", format: "badge" },
@@ -330,14 +353,15 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
     ],
   },
   users: {
-    title: "Administrators",
-    singular: "administrator",
-    description: "Manage access to your attendance workspace.",
+    title: "All Users",
+    singular: "user",
+    description:
+      "Manage every user’s role, account status, and access to your workspace.",
     fields: [
       name,
       {
         name: "email",
-        label: "Google email",
+        label: "Email",
         type: "email",
         required: true,
         edit: false,
@@ -346,7 +370,7 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
         name: "role",
         label: "Role",
         type: "select",
-        options: ["ADMIN", "SUPER_ADMIN"],
+        options: ["EMPLOYEE", "MANAGE_DRIVER", "ADMIN", "SUPER_ADMIN"],
         default: "ADMIN",
         required: true,
       },
@@ -354,11 +378,11 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
     ],
     columns: [
       { key: "name", label: "Name" },
-      { key: "email", label: "Google email" },
+      { key: "email", label: "Email" },
       { key: "role", label: "Role", format: "badge" },
       { key: "status", label: "Status", format: "badge" },
     ],
-    noDelete: true,
+    noCreate: true,
   },
   devices: {
     title: "Devices",

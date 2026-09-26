@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { api } from "@/lib/client/request";
 import { ErrorNotice } from "@/components/ui";
@@ -146,11 +145,6 @@ export function AccountPasswordForm() {
               ? "Change password"
               : "Set password"}
         </button>
-        {hasPassword && (
-          <Link className="auth-link" href="/forgot-password">
-            Forgot your current password?
-          </Link>
-        )}
       </form>
     </section>
   );

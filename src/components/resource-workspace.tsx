@@ -26,7 +26,11 @@ import {
 } from "./ui";
 import { useDebouncedValue } from "@/lib/client/use-debounced-value";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
-import { errorMessage } from "@/store/api/errors";
+import { confirmAction, promptAction } from "@/lib/client/alerts";
+import { api, ClientRequestError } from "@/lib/client/request";
+import { errorMessage, normalizeError } from "@/store/api/errors";
+import { baseApi } from "@/store/api/base-api";
+import { useAppDispatch } from "@/store/hooks";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
 import { useFreshness } from "@/store/freshness";
 import { useQueryView } from "@/store/use-query-view";
@@ -35,6 +39,7 @@ import {
   useGetReferenceQuery,
   useLazyGetOfficeDefaultsQuery,
   useWriteManagementMutation,
+  managementInvalidation,
 } from "@/store/features/management/api";
 import type {
   JsonRecord,
@@ -44,6 +49,7 @@ import type {
 import { Modal } from "./modal";
 export { Modal } from "./modal";
 import { fieldValue, resourceConfigs, type Field } from "./resource-config";
+import { PasswordField, validateNewPassword } from "./auth/password-fields";
 
 function ReferenceField({ field, value }: { field: Field; value: string }) {
   const [query, setQuery] = useState("");
@@ -124,8 +130,28 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
     </>
   );
 }
-export function FormField({ field, row }: { field: Field; row: DataRow }) {
+export function FormField({
+  field,
+  row,
+  disabled,
+}: {
+  field: Field;
+  row: DataRow;
+  disabled?: boolean;
+}) {
   const value = fieldValue(row, field);
+  if (field.type === "password")
+    return (
+      <PasswordField
+        name={field.name}
+        label={`${field.label}${field.required ? " *" : ""}`}
+        autoComplete="new-password"
+        hint={field.hint}
+        minLength={field.minLength}
+        maxLength={field.maxLength}
+        disabled={disabled}
+      />
+    );
   if (field.type === "checkbox")
     return (
       <label className="field-checkbox">
@@ -174,7 +200,11 @@ export function FormField({ field, row }: { field: Field; row: DataRow }) {
           required={field.required}
         >
           {field.options?.map((option) => (
-            <option key={option} value={option}>
+            <option
+              key={option}
+              value={option}
+              disabled={field.disabledOptions?.includes(option)}
+            >
               {option.replaceAll("_", " ")}
             </option>
           ))}
@@ -209,7 +239,17 @@ export function FormField({ field, row }: { field: Field; row: DataRow }) {
     </div>
   );
 }
-export function AdminResource({ resource }: { resource: ManagementResource }) {
+export function AdminResource({
+  resource,
+  canCreateEmployees = false,
+  canDeleteEmployees = false,
+  currentUserId,
+}: {
+  resource: ManagementResource;
+  canCreateEmployees?: boolean;
+  canDeleteEmployees?: boolean;
+  currentUserId?: string;
+}) {
   const config = resourceConfigs[resource];
   const { params, update } = useUrlFilters();
   const query = params.get("q") || "";
@@ -222,9 +262,14 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
   const [viewing, setViewing] = useState<DataRow | null>(null);
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
+  const dialogPending = useRef(false);
+  const [confirming, setConfirming] = useState(false);
   const [needsReconcile, setNeedsReconcile] = useState(false);
   const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
+  const [deletedRecords, setDeletedRecords] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const result = useGetManagementQuery(
     { resource, params: { page, pageSize: 25, q: search } },
     useFreshness(),
@@ -232,9 +277,20 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
   const view = useQueryView(result);
   const searching = query !== search;
   const data = searching ? undefined : view.data;
+  const loadedRows = items(data);
+  // A confirmed deletion stays removed even if the invalidated list fails to
+  // refresh and RTK Query retains its previous data.
+  const rows = loadedRows.filter(
+    (row) => !deletedRecords.has(`${resource}:${row.id}`),
+  );
+  const total = Math.max(
+    0,
+    (data?.total || 0) - (loadedRows.length - rows.length),
+  );
   const loading = searching || view.loading;
   const { error, refresh, isFetching } = view;
   const [writeManagement] = useWriteManagementMutation();
+  const dispatch = useAppDispatch();
   const [loadOfficeDefaults] = useLazyGetOfficeDefaultsQuery();
   async function refreshResource() {
     try {
@@ -245,6 +301,14 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
     }
   }
   if (!config) return null;
+  const canCreate =
+    !config.readOnly &&
+    !config.noCreate &&
+    (resource !== "employees" || canCreateEmployees);
+  const editingOwnAccount =
+    resource === "users" &&
+    Boolean(currentUserId) &&
+    editing?.id === currentUserId;
   const fields = config.fields
     .filter((field) =>
       editing?.id ? field.edit !== false : field.create !== false,
@@ -258,11 +322,18 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
           String(nested(editing, "user.role")),
         ),
     )
+    .filter(
+      (field) => !editingOwnAccount || !["role", "status"].includes(field.name),
+    )
     .map((field) =>
-      resource === "users" && editing?.id && field.name === "role"
+      resource === "users" &&
+      editing?.id &&
+      !editing.employee &&
+      field.name === "role"
         ? {
             ...field,
-            options: ["EMPLOYEE", "MANAGE_DRIVER", "ADMIN", "SUPER_ADMIN"],
+            disabledOptions: ["EMPLOYEE", "MANAGE_DRIVER"],
+            hint: "Employee and Manage Driver roles require an employee profile. This account does not have one.",
           }
         : field,
     );
@@ -271,20 +342,64 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
     payload: JsonRecord,
     method: "PATCH" | "POST" | "DELETE" = id ? "PATCH" : "POST",
   ) {
-    if (submitting.current || needsReconcile || isFetching) return;
+    if (
+      submitting.current ||
+      needsReconcile ||
+      isFetching ||
+      (method === "POST" && !canCreate) ||
+      (resource === "employees" &&
+        method === "DELETE" &&
+        !canDeleteEmployees) ||
+      (resource === "users" && method === "DELETE" && id === currentUserId)
+    )
+      return;
     submitting.current = true;
     setBusy(true);
     setActionError("");
     setMessage("");
     try {
-      await writeManagement({
-        resource,
-        id: id || undefined,
-        method,
-        body: payload,
-      }).unwrap();
+      if (resource === "employees" && method === "POST") {
+        // Credentials must not enter Redux mutation arguments or DevTools.
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () =>
+            controller.abort(
+              new ClientRequestError(normalizeError("TIMEOUT_ERROR")),
+            ),
+          30_000,
+        );
+        try {
+          await api("/api/admin/employees", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+        dispatch(
+          baseApi.util.invalidateTags(managementInvalidation({ resource })),
+        );
+      } else {
+        await writeManagement({
+          resource,
+          id: id || undefined,
+          method,
+          body: payload,
+        }).unwrap();
+      }
+      if (method === "DELETE" && id)
+        setDeletedRecords((previous) =>
+          new Set(previous).add(`${resource}:${id}`),
+        );
       setEditing(null);
-      setMessage("Your changes have been saved.");
+      setMessage(
+        resource === "employees" && method === "DELETE"
+          ? "Employee and sign-in account permanently deleted."
+          : resource === "users" && method === "DELETE"
+            ? "User account permanently deleted."
+            : "Your changes have been saved.",
+      );
     } catch (error) {
       setActionError(errorMessage(error));
       if (isAmbiguousWrite(error)) {
@@ -297,7 +412,14 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
     }
   }
   async function openNew() {
-    if (submitting.current || needsReconcile || isFetching) return;
+    if (
+      dialogPending.current ||
+      submitting.current ||
+      needsReconcile ||
+      isFetching ||
+      !canCreate
+    )
+      return;
     setActionError("");
     if (resource !== "offices") {
       setEditing({});
@@ -313,9 +435,42 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
       setBusy(false);
     }
   }
+  async function withActionDialog(action: () => Promise<void>) {
+    if (
+      dialogPending.current ||
+      submitting.current ||
+      needsReconcile ||
+      isFetching
+    )
+      return;
+    dialogPending.current = true;
+    setConfirming(true);
+    try {
+      await action();
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      dialogPending.current = false;
+      setConfirming(false);
+    }
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    if (submitting.current || needsReconcile || isFetching) return;
+    const element = event.currentTarget;
+    const form = new FormData(element);
+    const creatingEmployee = resource === "employees" && !editing?.id;
+    if (creatingEmployee) {
+      if (!canCreate) return;
+      const passwordError = validateNewPassword(
+        String(form.get("password") || ""),
+        String(form.get("confirmPassword") || ""),
+      );
+      if (passwordError) {
+        setActionError(passwordError);
+        return;
+      }
+    }
     const payload: JsonRecord = {};
     for (const field of fields) {
       const value = form.get(field.name);
@@ -337,6 +492,11 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                 : String(value ?? "");
     }
     await mutate(editing?.id ? String(editing.id) : null, payload);
+    if (creatingEmployee)
+      for (const name of ["password", "confirmPassword"]) {
+        const input = element.elements.namedItem(name);
+        if (input instanceof HTMLInputElement) input.value = "";
+      }
   }
   return (
     <>
@@ -345,9 +505,9 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
         title={config.title}
         description={config.description}
         action={
-          !config.readOnly && !config.noCreate ? (
+          canCreate ? (
             <button
-              disabled={busy || needsReconcile || isFetching}
+              disabled={busy || confirming || needsReconcile || isFetching}
               className="button"
               onClick={openNew}
             >
@@ -364,7 +524,7 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
         </Notice>
       )}
       {message && (
-        <Notice>
+        <Notice notify>
           <Check size={16} />
           {message}
         </Notice>
@@ -384,9 +544,7 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
           </div>
           <div className="buttons">
             <span className="muted" role="status" style={{ fontSize: 11 }}>
-              {isFetching && data
-                ? "Refreshing…"
-                : `${data?.total || 0} records`}
+              {isFetching && data ? "Refreshing…" : `${total} records`}
             </span>
             <Refresh onClick={() => void refreshResource()} />
           </div>
@@ -395,7 +553,7 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
           <Loading />
         ) : (
           <Table
-            rows={items(data)}
+            rows={rows}
             columns={config.columns}
             actions={(row) => (
               <div className="row-actions">
@@ -403,7 +561,9 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                   <>
                     {!row.revokedAt && !row.approved && (
                       <button
-                        disabled={busy || needsReconcile || isFetching}
+                        disabled={
+                          busy || confirming || needsReconcile || isFetching
+                        }
                         className="button small"
                         onClick={() =>
                           mutate(String(row.id), { approved: true })
@@ -414,16 +574,23 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                     )}
                     {!row.revokedAt && (
                       <button
-                        disabled={busy || needsReconcile || isFetching}
+                        disabled={
+                          busy || confirming || needsReconcile || isFetching
+                        }
                         className="button small secondary"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              "Revoke this device? It will no longer verify attendance.",
+                        onClick={() =>
+                          void withActionDialog(async () => {
+                            if (
+                              await confirmAction({
+                                title: "Revoke device?",
+                                text: "It will no longer verify attendance.",
+                                confirmText: "Revoke device",
+                                danger: true,
+                              })
                             )
-                          )
-                            void mutate(String(row.id), { revoked: true });
-                        }}
+                              await mutate(String(row.id), { revoked: true });
+                          })
+                        }
                       >
                         Revoke
                       </button>
@@ -431,39 +598,53 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                   </>
                 ) : resource === "leaves" ? (
                   <>
-                    {row.status === "PENDING" && (
+                    {row.status === "PENDING" && row.employee !== null && (
                       <>
                         <button
-                          disabled={busy || needsReconcile || isFetching}
+                          disabled={
+                            busy || confirming || needsReconcile || isFetching
+                          }
                           className="button small"
-                          onClick={() => {
-                            const reviewNote = window.prompt(
-                              "Review note (optional)",
-                              "",
-                            );
-                            if (reviewNote !== null)
-                              void mutate(String(row.id), {
-                                status: "APPROVED",
-                                reviewNote,
+                          onClick={() =>
+                            void withActionDialog(async () => {
+                              const reviewNote = await promptAction({
+                                title: "Approve leave?",
+                                inputLabel: "Review note (optional)",
+                                initialValue: "",
+                                confirmText: "Approve leave",
+                                maxLength: 1000,
                               });
-                          }}
+                              if (reviewNote !== null)
+                                await mutate(String(row.id), {
+                                  status: "APPROVED",
+                                  reviewNote,
+                                });
+                            })
+                          }
                         >
                           Approve
                         </button>
                         <button
-                          disabled={busy || needsReconcile || isFetching}
+                          disabled={
+                            busy || confirming || needsReconcile || isFetching
+                          }
                           className="button small secondary"
-                          onClick={() => {
-                            const reviewNote = window.prompt(
-                              "Review note (optional)",
-                              "",
-                            );
-                            if (reviewNote !== null)
-                              void mutate(String(row.id), {
-                                status: "REJECTED",
-                                reviewNote,
+                          onClick={() =>
+                            void withActionDialog(async () => {
+                              const reviewNote = await promptAction({
+                                title: "Decline leave?",
+                                inputLabel: "Review note (optional)",
+                                initialValue: "",
+                                confirmText: "Decline leave",
+                                maxLength: 1000,
                               });
-                          }}
+                              if (reviewNote !== null)
+                                await mutate(String(row.id), {
+                                  status: "REJECTED",
+                                  reviewNote,
+                                });
+                            })
+                          }
                         >
                           Decline
                         </button>
@@ -491,7 +672,13 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                     )}
                     <button
                       aria-label={`Edit ${config.singular}`}
-                      disabled={busy || needsReconcile || isFetching}
+                      disabled={
+                        busy ||
+                        confirming ||
+                        needsReconcile ||
+                        isFetching ||
+                        (resource === "assignments" && row.employee === null)
+                      }
                       className="icon-button"
                       onClick={() => {
                         setEditing(row);
@@ -500,19 +687,37 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                     >
                       <Pencil size={15} />
                     </button>
-                    {!config.noDelete && (
+                    {(resource === "employees"
+                      ? canDeleteEmployees &&
+                        ["EMPLOYEE", "MANAGE_DRIVER"].includes(
+                          String(nested(row, "user.role")),
+                        )
+                      : !config.noDelete &&
+                        (resource !== "users" || row.id !== currentUserId)) && (
                       <button
-                        disabled={busy || needsReconcile || isFetching}
+                        disabled={
+                          busy || confirming || needsReconcile || isFetching
+                        }
                         aria-label={`Delete ${config.singular}`}
                         className="icon-button"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Delete this ${config.singular}? Existing references may prevent deletion.`,
+                        onClick={() =>
+                          void withActionDialog(async () => {
+                            if (
+                              await confirmAction({
+                                title: `Delete ${config.singular}?`,
+                                text:
+                                  resource === "employees"
+                                    ? "Permanently delete this employee and their sign-in account? This cannot be undone. Related records will be kept with the employee’s details replaced by “deleted info”."
+                                    : resource === "users"
+                                      ? "Permanently delete this user account? This cannot be undone. Related records will be kept with the user’s details replaced by “deleted info”."
+                                      : `Delete this ${config.singular}? Existing references may prevent deletion.`,
+                                confirmText: `Delete ${config.singular}`,
+                                danger: true,
+                              })
                             )
-                          )
-                            void mutate(String(row.id), {}, "DELETE");
-                        }}
+                              await mutate(String(row.id), {}, "DELETE");
+                          })
+                        }
                       >
                         <Trash2 size={15} />
                       </button>
@@ -525,7 +730,7 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
         )}
         <div className="pagination">
           <span>
-            Page {page} · {data?.total || 0} total records
+            Page {page} · {total} total records
           </span>
           <div className="buttons">
             <button
@@ -538,7 +743,7 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
             </button>
             <button
               className="button small secondary"
-              disabled={page * 25 >= (data?.total || 0) || loading}
+              disabled={page * 25 >= total || loading}
               onClick={() => setPage(page + 1)}
             >
               Next
@@ -556,6 +761,15 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
         >
           <form onSubmit={submit}>
             <ErrorNotice message={actionError} />
+            {resource === "users" && (
+              <p className="muted">{String(editing.email || "")}</p>
+            )}
+            {editingOwnAccount && (
+              <Notice>
+                You can edit your name. Your own role and account status cannot
+                be changed here.
+              </Notice>
+            )}
             {needsReconcile && (
               <>
                 <Notice>
@@ -573,7 +787,12 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
             )}
             <div className="form-grid">
               {fields.map((field) => (
-                <FormField key={field.name} field={field} row={editing} />
+                <FormField
+                  key={field.name}
+                  field={field}
+                  row={editing}
+                  disabled={busy}
+                />
               ))}
             </div>
             <div className="form-actions">
@@ -586,7 +805,7 @@ export function AdminResource({ resource }: { resource: ManagementResource }) {
                 Cancel
               </button>
               <button
-                disabled={busy || needsReconcile || isFetching}
+                disabled={busy || confirming || needsReconcile || isFetching}
                 type="submit"
                 className="button"
               >

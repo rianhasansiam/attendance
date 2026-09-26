@@ -196,6 +196,12 @@ export async function saveAssignment(actor: Actor, raw: unknown, id?: string) {
         ? await tx.employeeShift.findUnique({ where: { id } })
         : null;
       if (id && !previous) throw missing();
+      if (previous && !previous.employeeId)
+        throw new DomainError(
+          "EMPLOYEE_DELETED",
+          "This employee was deleted. The shift assignment is retained as history.",
+          409,
+        );
       const employee = await tx.employee.findUnique({
         where: { id: input.employeeId },
         include: { user: true },
@@ -352,41 +358,57 @@ export async function removeCatalogRecord(
   );
   return db.$transaction(async (tx) => {
     let previous: unknown;
-    switch (resource) {
-      case "departments":
-        previous = await tx.department.findUniqueOrThrow({ where: { id } });
-        await tx.department.update({ where: { id }, data: { active: false } });
-        break;
-      case "offices":
-        previous = await tx.office.findUniqueOrThrow({ where: { id } });
-        await tx.office.update({ where: { id }, data: { active: false } });
-        break;
-      case "networks":
-        previous = await tx.officeNetwork.findUniqueOrThrow({ where: { id } });
-        await tx.officeNetwork.update({
-          where: { id },
-          data: { active: false },
-        });
-        break;
-      case "shifts":
-        previous = await tx.shift.findUniqueOrThrow({ where: { id } });
-        await tx.shift.update({ where: { id }, data: { active: false } });
-        break;
-      case "assignments":
-        previous = await tx.employeeShift.delete({ where: { id } });
-        break;
-      case "holidays":
-        previous = await tx.holiday.delete({ where: { id } });
-        break;
-      case "drive-costs":
-        previous = await tx.driveCost.delete({ where: { id } });
-        break;
-      default:
+    try {
+      switch (resource) {
+        case "departments":
+          previous = await tx.department.delete({ where: { id } });
+          break;
+        case "offices":
+          previous = await tx.office.delete({ where: { id } });
+          break;
+        case "networks":
+          previous = await tx.officeNetwork.delete({ where: { id } });
+          break;
+        case "shifts":
+          previous = await tx.shift.delete({ where: { id } });
+          break;
+        case "assignments":
+          previous = await tx.employeeShift.delete({ where: { id } });
+          break;
+        case "holidays":
+          previous = await tx.holiday.delete({ where: { id } });
+          break;
+        case "drive-costs":
+          previous = await tx.driveCost.delete({ where: { id } });
+          break;
+        default:
+          throw new DomainError(
+            "METHOD_NOT_ALLOWED",
+            "This record cannot be deleted.",
+            405,
+          );
+      }
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2003"
+      ) {
+        const messages: Record<string, string> = {
+          departments:
+            "This department cannot be deleted while employees belong to it. Reassign those employees first.",
+          offices:
+            "This office cannot be deleted while employees, attendance, or holidays reference it. Reassign employees and remove holiday links first; offices with attendance history must be kept.",
+          shifts:
+            "This shift cannot be deleted while employee assignments or attendance reference it. Remove assignments first; shifts with attendance history must be kept.",
+        };
         throw new DomainError(
-          "METHOD_NOT_ALLOWED",
-          "This record cannot be deleted.",
-          405,
+          "REFERENCE_CONFLICT",
+          messages[resource] ??
+            "This record cannot be deleted because other records reference it.",
+          409,
         );
+      }
+      throw error;
     }
     await writeAudit(
       actor.id,

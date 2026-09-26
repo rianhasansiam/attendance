@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import LoadingWorkspace from "@/app/loading";
 import { isEmployeeRole } from "@/modules/auth/authorization";
+import { ErrorNotice } from "@/components/ui";
 import { CredentialsForm } from "@/components/auth/credentials-form";
 
 type Props = { searchParams: Promise<{ error?: string }> };
@@ -70,11 +71,13 @@ async function LoginContent({
           </button>
         </form>
         {error && (
-          <p className="login-error" role="alert">
-            {error === "AccessDenied"
-              ? "Your account is not authorized. Contact your administrator."
-              : "Sign-in could not be completed. Please try again."}
-          </p>
+          <ErrorNotice
+            message={
+              error === "AccessDenied"
+                ? "Your account is not authorized. Contact your administrator."
+                : "Sign-in could not be completed. Please try again."
+            }
+          />
         )}
         <div className="auth-divider">
           <span>or</span>

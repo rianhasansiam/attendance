@@ -34,19 +34,3 @@ export const passwordChangeSchema = z
     (input) => input.newPassword === input.confirmPassword,
     matchingPasswords,
   );
-export const forgotPasswordSchema = z
-  .object({ email: normalizedEmailSchema })
-  .strict();
-export const resetPasswordSchema = z
-  .object({
-    token: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/, "This reset link is invalid or expired."),
-    newPassword: newPasswordSchema,
-    confirmPassword: passwordInput,
-  })
-  .strict()
-  .refine(
-    (input) => input.newPassword === input.confirmPassword,
-    matchingPasswords,
-  );

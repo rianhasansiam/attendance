@@ -21,6 +21,7 @@ type Domain =
   | "Devices"
   | "Reports"
   | "DriveCosts"
+  | "DailyExpensesTransactions"
   | "Profile"
   | "Audit";
 type Tag = { type: Domain; id?: string };
@@ -61,6 +62,8 @@ const dependencies: Partial<
       "Reports",
       "Devices",
       "Leave",
+      "DriveCosts",
+      "DailyExpensesTransactions",
     ],
   },
   users: {
@@ -74,6 +77,8 @@ const dependencies: Partial<
       "Reports",
       "Devices",
       "Leave",
+      "DriveCosts",
+      "DailyExpensesTransactions",
     ],
   },
   departments: {

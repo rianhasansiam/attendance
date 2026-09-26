@@ -108,6 +108,12 @@ export async function reviewLateApproval(
           "Late approval request not found.",
           404,
         );
+      if (!previous.attendance.employee)
+        throw new DomainError(
+          "EMPLOYEE_DELETED",
+          "This employee was deleted. Their late request is retained as history and cannot be reviewed.",
+          409,
+        );
       if (previous.attendance.employee.user.id === actor.id)
         throw new DomainError(
           "SELF_APPROVAL",

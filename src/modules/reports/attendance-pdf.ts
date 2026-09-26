@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { reportFilterSchema } from "@/modules/management/validation";
 import { addCalendarDays } from "@/modules/shifts/calculations";
 import type { ReportRecord } from "./service";
+import { DELETED_INFO } from "@/lib/deleted-info";
 import { createReportPdf } from "./pdf";
 
 function duration(minutes: number) {
@@ -19,7 +20,7 @@ export async function attendanceReportPdf(
   const subtitle = [`Date range: ${from} to ${to}`];
   if (filters.employeeId) {
     const employee = records.find(
-      (row) => row.employee.id === filters.employeeId,
+      (row) => row.employee?.id === filters.employeeId,
     )?.employee;
     subtitle.push(
       `Employee: ${employee ? `${employee.user.name || employee.employeeCode} (${employee.employeeCode})` : "Selected employee"}`,
@@ -27,7 +28,7 @@ export async function attendanceReportPdf(
   }
   if (filters.departmentId)
     subtitle.push(
-      `Department: ${records[0]?.employee.department?.name || "Selected department"}`,
+      `Department: ${records[0]?.employee?.department?.name || "Selected department"}`,
     );
   if (filters.officeId)
     subtitle.push(`Office: ${records[0]?.office.name || "Selected office"}`);
@@ -83,7 +84,9 @@ export async function attendanceReportPdf(
           : "-";
       return [
         row.attendanceDate.toISOString().slice(0, 10),
-        `${row.employee.user.name || row.employee.employeeCode}\n${row.employee.employeeCode}`,
+        row.employee
+          ? `${row.employee.user.name || row.employee.employeeCode}\n${row.employee.employeeCode}`
+          : DELETED_INFO,
         `${row.office.name}\n${row.shift.name}\n${zone}`,
         punch(row.checkInAt),
         punch(row.checkOutAt),

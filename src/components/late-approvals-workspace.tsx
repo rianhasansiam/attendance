@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { errorMessage } from "@/store/api/errors";
+import { DELETED_INFO } from "@/lib/deleted-info";
 import { useFreshness } from "@/store/freshness";
 import { useAppDispatch } from "@/store/hooks";
 import { useQueryView } from "@/store/use-query-view";
@@ -126,7 +127,7 @@ export function LateApprovalsWorkspace() {
           Refresh these requests successfully before another decision.
         </Notice>
       )}
-      {message && <Notice>{message}</Notice>}
+      {message && <Notice notify>{message}</Notice>}
       <section className="card">
         <div className="toolbar">
           <div className="field" style={{ marginBottom: 0 }}>
@@ -159,9 +160,13 @@ export function LateApprovalsWorkspace() {
               <Table
                 rows={data.items.map((request) => ({
                   ...request,
+                  canReview:
+                    request.status === "PENDING" &&
+                    !!request.attendance.employee,
                   employeeName:
-                    request.attendance.employee.user.name ||
-                    request.attendance.employee.user.email,
+                    request.attendance.employee?.user.name ||
+                    request.attendance.employee?.user.email ||
+                    DELETED_INFO,
                   scheduledStart: request.scheduledStartAt
                     ? time(
                         request.scheduledStartAt,
@@ -211,7 +216,7 @@ export function LateApprovalsWorkspace() {
                       setActionError("");
                     }}
                   >
-                    {row.status === "PENDING" ? "Review" : "View"}
+                    {row.canReview ? "Review" : "View"}
                   </button>
                 )}
               />
@@ -237,8 +242,9 @@ export function LateApprovalsWorkspace() {
           <div className="stack">
             <p>
               <strong>
-                {reviewing.attendance.employee.user.name ||
-                  reviewing.attendance.employee.user.email}
+                {reviewing.attendance.employee?.user.name ||
+                  reviewing.attendance.employee?.user.email ||
+                  DELETED_INFO}
               </strong>{" "}
               · {date(reviewing.attendance.attendanceDate)}
             </p>
@@ -266,7 +272,13 @@ export function LateApprovalsWorkspace() {
                 request cannot be approved.
               </p>
             )}
-            {reviewing.status === "PENDING" ? (
+            {reviewing.status === "PENDING" &&
+            !reviewing.attendance.employee ? (
+              <p className="notice">
+                This employee was deleted. This request is retained as history
+                and cannot be reviewed.
+              </p>
+            ) : reviewing.status === "PENDING" ? (
               <>
                 <div className="field">
                   <label htmlFor="late-approval-review-note">
@@ -316,7 +328,7 @@ export function LateApprovalsWorkspace() {
                   Reviewed by{" "}
                   {reviewing.reviewedBy?.name ||
                     reviewing.reviewedBy?.email ||
-                    "—"}{" "}
+                    DELETED_INFO}{" "}
                   · {timestamp(reviewing.reviewedAt, timezone)}
                 </p>
                 {reviewing.reviewNote && (

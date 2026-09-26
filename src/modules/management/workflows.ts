@@ -7,6 +7,7 @@ import { writeAudit } from "@/modules/audit/service";
 import { authorizeRole, isEmployeeRole } from "@/modules/auth/authorization";
 import { publicUserSelect } from "@/modules/employees/service";
 import { calculateCorrection } from "./corrections";
+import { deleteIdentity } from "./delete-identity";
 import {
   assertMayManageUser,
   assertSuperAdmin,
@@ -42,6 +43,11 @@ export const deviceSelect = {
     },
   },
 } satisfies Prisma.WebAuthnCredentialSelect;
+
+export const managedUserSelect = {
+  ...publicUserSelect,
+  employee: { select: { id: true, employeeCode: true } },
+} satisfies Prisma.UserSelect;
 
 export async function updateDevice(
   actor: Actor,
@@ -163,6 +169,12 @@ export async function reviewLeave(
       });
       if (!previous)
         throw new DomainError("NOT_FOUND", "Leave request not found.", 404);
+      if (!previous.employee)
+        throw new DomainError(
+          "EMPLOYEE_DELETED",
+          "This employee was deleted. The leave request is retained as history.",
+          409,
+        );
       if (previous.employee.userId === actor.id)
         throw new DomainError(
           "SELF_APPROVAL",
@@ -242,10 +254,11 @@ export async function createAdministrator(
   input: z.infer<typeof userSchema>,
 ) {
   assertSuperAdmin(actor);
-  return db.$transaction(async (tx) => {
+  return userTransaction(async (tx) => {
+    await lockUserManagement(actor, tx);
     const result = await tx.user.create({
       data: input,
-      select: publicUserSelect,
+      select: managedUserSelect,
     });
     await writeAudit(
       actor.id,
@@ -260,61 +273,176 @@ export async function createAdministrator(
   });
 }
 
+async function userTransaction<T>(
+  action: (tx: Prisma.TransactionClient) => Promise<T>,
+) {
+  try {
+    return await db.$transaction(action, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 30_000,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      const adapterError = error.meta?.driverAdapterError as
+        { cause?: { kind?: string } } | undefined;
+      // Raw row locks expose the pg adapter's conflict as P2010 rather than
+      // Prisma's usual P2034. Both must remain safe, retryable API conflicts.
+      if (
+        error.code === "P2034" ||
+        (error.code === "P2010" &&
+          (adapterError?.cause?.kind === "TransactionWriteConflict" ||
+            error.meta?.code === "40001" ||
+            error.meta?.code === "40P01"))
+      )
+        throw new DomainError(
+          "CONFLICT",
+          "Another request updated user access. Please try again.",
+          409,
+        );
+    }
+    throw error;
+  }
+}
+
+async function lockUserManagement(
+  actor: Actor,
+  tx: Prisma.TransactionClient,
+  targetId = actor.id,
+) {
+  // Employee operations take their profile lock first. Keep the same order,
+  // then lock both identities in a stable order for concurrent role changes.
+  await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "userId" = ${targetId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" IN (${actor.id}, ${targetId}) ORDER BY "id" FOR UPDATE`;
+  const currentActor = await tx.user.findUnique({
+    where: { id: actor.id },
+    select: { id: true, role: true, status: true },
+  });
+  if (!currentActor || currentActor.status !== "ACTIVE")
+    throw new DomainError(
+      "FORBIDDEN",
+      "An active super administrator account is required to manage users.",
+      403,
+    );
+  assertSuperAdmin(currentActor);
+  return currentActor;
+}
+
+async function assertAnotherActiveSuperAdmin(
+  tx: Prisma.TransactionClient,
+  target: { id: string; role: string; status: string },
+) {
+  if (target.role !== "SUPER_ADMIN" || target.status !== "ACTIVE") return;
+  const remaining = await tx.user.count({
+    where: {
+      role: "SUPER_ADMIN",
+      status: "ACTIVE",
+      id: { not: target.id },
+    },
+  });
+  if (remaining === 0)
+    throw new DomainError(
+      "LAST_SUPER_ADMIN",
+      "At least one active super administrator is required.",
+      409,
+    );
+}
+
 export async function updateUser(
   actor: Actor,
   id: string,
   input: z.infer<typeof userUpdateSchema>,
 ) {
   assertSuperAdmin(actor);
-  return db.$transaction(
-    async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${id} FOR UPDATE`;
+  return userTransaction(async (tx) => {
+    const currentActor = await lockUserManagement(actor, tx, id);
+    const previous = await tx.user.findUnique({
+      where: { id },
+      select: managedUserSelect,
+    });
+    if (!previous) throw new DomainError("NOT_FOUND", "User not found.", 404);
+    assertMayManageUser(currentActor, previous, input);
+    if (input.role && isEmployeeRole(input.role) && !previous.employee)
+      throw new DomainError(
+        "EMPLOYEE_REQUIRED",
+        "This user needs an employee profile before receiving an employee role.",
+      );
+    if (
+      (input.role && input.role !== "SUPER_ADMIN") ||
+      (input.status && input.status !== "ACTIVE")
+    )
+      await assertAnotherActiveSuperAdmin(tx, previous);
+    const result = await tx.user.update({
+      where: { id },
+      data: input,
+      select: managedUserSelect,
+    });
+    if (input.role || input.status)
+      await tx.session.deleteMany({ where: { userId: id } });
+    await writeAudit(
+      actor.id,
+      input.role ? "ROLE_CHANGED" : "USER_UPDATED",
+      "User",
+      id,
+      previous,
+      result,
+      tx,
+    );
+    return result;
+  });
+}
+
+function userReferenceConflict() {
+  return new DomainError(
+    "REFERENCE_CONFLICT",
+    "Related records changed during deletion. Refresh the user list and try again.",
+    409,
+  );
+}
+
+/** Delete account access data atomically while preserving referenced history. */
+export async function deleteUser(actor: Actor, id: string) {
+  assertSuperAdmin(actor);
+  try {
+    return await userTransaction(async (tx) => {
+      await lockUserManagement(actor, tx, id);
+      if (actor.id === id)
+        throw new DomainError(
+          "SELF_DELETE",
+          "You cannot delete your own account.",
+        );
       const previous = await tx.user.findUnique({
         where: { id },
-        select: { ...publicUserSelect, employee: { select: { id: true } } },
+        select: managedUserSelect,
       });
       if (!previous) throw new DomainError("NOT_FOUND", "User not found.", 404);
-      assertMayManageUser(actor, previous, input);
-      if (input.role && isEmployeeRole(input.role) && !previous.employee)
-        throw new DomainError(
-          "EMPLOYEE_REQUIRED",
-          "This user needs an employee profile before receiving an employee role.",
-        );
-      if (
-        previous.role === "SUPER_ADMIN" &&
-        ((input.role && input.role !== "SUPER_ADMIN") ||
-          (input.status && input.status !== "ACTIVE"))
-      ) {
-        const remaining = await tx.user.count({
-          where: { role: "SUPER_ADMIN", status: "ACTIVE", id: { not: id } },
-        });
-        if (remaining === 0)
-          throw new DomainError(
-            "LAST_SUPER_ADMIN",
-            "At least one active super administrator is required.",
-            409,
-          );
-      }
-      const result = await tx.user.update({
-        where: { id },
-        data: input,
-        select: publicUserSelect,
-      });
-      if (input.role || input.status)
-        await tx.session.deleteMany({ where: { userId: id } });
+      await assertAnotherActiveSuperAdmin(tx, previous);
+
+      const deletedSnapshot = await deleteIdentity(
+        tx,
+        actor,
+        id,
+        previous.employee?.id,
+        previous,
+      );
       await writeAudit(
         actor.id,
-        input.role ? "ROLE_CHANGED" : "USER_UPDATED",
+        "USER_DELETED",
         "User",
         id,
-        previous,
-        result,
+        deletedSnapshot,
+        undefined,
         tx,
       );
-      return result;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-  );
+      return { id };
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003"
+    )
+      throw userReferenceConflict();
+    throw error;
+  }
 }
 
 const settingSchema = z.discriminatedUnion("key", [
@@ -391,6 +519,12 @@ export async function correctAttendance(
       });
       if (!previous)
         throw new DomainError("NOT_FOUND", "Attendance record not found.", 404);
+      if (!previous.employeeId)
+        throw new DomainError(
+          "EMPLOYEE_DELETED",
+          "This employee was deleted. The attendance record is retained as history.",
+          409,
+        );
       const result = await tx.attendance.update({
         where: { id },
         data: calculateCorrection(previous, input),

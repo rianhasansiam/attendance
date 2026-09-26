@@ -24,9 +24,9 @@ The ranked plan was: batch dashboard inputs; reduce report projections/derivatio
 
 | Data / original query location | Decision and reason | Lifetime / tag | Invalidation |
 | --- | --- | --- | --- |
-| Department dropdowns / `management/service.ts` | Cache only ID/name and list count; harmless display metadata | `referenceDisplay` / `departments:display` | Successful department create/update/deactivate |
-| Office dropdowns / `management/service.ts` | Cache only ID/name/count; exclude coordinates, policies, status and networks | `referenceDisplay` / `offices:display` | Successful office create/update/deactivate |
-| Shift dropdowns / `management/service.ts` | Cache only ID/name/count; actual schedules/validation stay authoritative | `referenceDisplay` / `shifts:display` | Successful shift create/update/deactivate |
+| Department dropdowns / `management/service.ts` | Cache only ID/name and list count; harmless display metadata | `referenceDisplay` / `departments:display` | Successful department create/update/delete |
+| Office dropdowns / `management/service.ts` | Cache only ID/name/count; exclude coordinates, policies, status and networks | `referenceDisplay` / `offices:display` | Successful office create/update/delete |
+| Shift dropdowns / `management/service.ts` | Cache only ID/name/count; actual schedules/validation stay authoritative | `referenceDisplay` / `shifts:display` | Successful shift create/update/delete |
 | Full office/shift editing data / management service | Dynamic, so editors see current definitions | None | None needed |
 | Holidays / catalog and reports | Dynamic; used by derived reporting, little isolated display benefit | None | None needed |
 | Policy defaults / `catalog.ts`, application settings | Dynamic; defaults also participate in office creation | None | None needed |

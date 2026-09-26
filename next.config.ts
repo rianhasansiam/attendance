@@ -9,7 +9,6 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: [
     "argon2",
-    "nodemailer",
     "@prisma/client",
     "@prisma/adapter-pg",
     "pg",

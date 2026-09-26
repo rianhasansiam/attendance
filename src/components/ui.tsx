@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
+import { AlertNotification } from "@/components/alert-notification";
+import { DELETED_INFO } from "@/lib/deleted-info";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -29,18 +31,49 @@ export function PageHeader({
     </div>
   );
 }
-export function ErrorNotice({ message }: { message?: string }) {
+export function ErrorNotice({
+  message,
+  notify = true,
+}: {
+  message?: string;
+  notify?: boolean;
+}) {
   return message ? (
     <div className="notice error" role="alert">
       <AlertCircle size={18} />
       <span>{message}</span>
+      {notify && <AlertNotification message={message} kind="error" />}
     </div>
   ) : null;
 }
-export function Notice({ children }: { children: ReactNode }) {
+function notificationText(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number")
+        return String(child);
+      if (isValidElement<{ children?: ReactNode }>(child))
+        return notificationText(child.props.children);
+      return "";
+    })
+    .join("");
+}
+
+export function Notice({
+  children,
+  notify = false,
+}: {
+  children: ReactNode;
+  notify?: boolean;
+}) {
   return (
     <div className="notice success" role="status">
       {children}
+      {notify && (
+        <AlertNotification
+          message={notificationText(children)}
+          kind="success"
+        />
+      )}
     </div>
   );
 }
@@ -215,7 +248,19 @@ export function Table({
           {rows.map((row, index) => (
             <tr key={String(row.id || index)} className={rowClasses[index]}>
               {columns.map((column) => {
-                const value = nested(row, column.key);
+                const missingIdentity = [
+                  "employee",
+                  "attendance.employee",
+                  "actor",
+                  "createdBy",
+                ].some(
+                  (path) =>
+                    column.key.startsWith(`${path}.`) &&
+                    nested(row, path) === null,
+                );
+                const value = missingIdentity
+                  ? DELETED_INFO
+                  : nested(row, column.key);
                 return (
                   <td key={column.key}>
                     {column.format === "attendance-status" ? (

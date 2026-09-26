@@ -58,6 +58,12 @@ model User {
   email String @unique
   emailVerified DateTime?
   image String?
+  designation String?
+  phone String?
+  bloodGroup String?
+  publicDepartment String?
+  homeAddress String?
+  dateOfBirth DateTime? @db.Date
   googleAccountId String? @unique
   passwordHash String?
   role Role @default(EMPLOYEE)

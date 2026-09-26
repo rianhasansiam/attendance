@@ -6,11 +6,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ExternalLink,
   Eye,
   Pencil,
   Plus,
   Search,
   Trash2,
+  UserRoundPen,
 } from "lucide-react";
 import {
   ErrorNotice,
@@ -50,6 +52,56 @@ import { Modal } from "./modal";
 export { Modal } from "./modal";
 import { fieldValue, resourceConfigs, type Field } from "./resource-config";
 import { PasswordField, validateNewPassword } from "./auth/password-fields";
+
+function PublicProfileLink({
+  resource,
+  row,
+}: {
+  resource: string;
+  row: DataRow;
+}) {
+  if (resource !== "employees" && resource !== "users") return null;
+  const id = resource === "employees" ? nested(row, "user.id") : row.id;
+  const status =
+    resource === "employees" ? nested(row, "user.status") : row.status;
+  if (status !== "ACTIVE" || typeof id !== "string" || !id) return null;
+  return (
+    <Link
+      href={`/profile/${encodeURIComponent(id)}`}
+      prefetch={false}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View public profile (opens in new tab)"
+      aria-label="View public profile (opens in new tab)"
+      className="icon-button"
+    >
+      <ExternalLink size={16} />
+    </Link>
+  );
+}
+
+function EditPublicProfileLink({
+  resource,
+  row,
+}: {
+  resource: string;
+  row: DataRow;
+}) {
+  if (resource !== "employees" && resource !== "users") return null;
+  const id = resource === "employees" ? nested(row, "user.id") : row.id;
+  if (typeof id !== "string" || !id) return null;
+  return (
+    <Link
+      href={`/admin/users/${encodeURIComponent(id)}/profile`}
+      prefetch={false}
+      title="Edit public profile"
+      aria-label="Edit public profile"
+      className="icon-button"
+    >
+      <UserRoundPen size={16} />
+    </Link>
+  );
+}
 
 function ReferenceField({ field, value }: { field: Field; value: string }) {
   const [query, setQuery] = useState("");
@@ -243,11 +295,13 @@ export function AdminResource({
   resource,
   canCreateEmployees = false,
   canDeleteEmployees = false,
+  canEditPublicProfiles = false,
   currentUserId,
 }: {
   resource: ManagementResource;
   canCreateEmployees?: boolean;
   canDeleteEmployees?: boolean;
+  canEditPublicProfiles?: boolean;
   currentUserId?: string;
 }) {
   const config = resourceConfigs[resource];
@@ -321,6 +375,13 @@ export function AdminResource({
         ["EMPLOYEE", "MANAGE_DRIVER"].includes(
           String(nested(editing, "user.role")),
         ),
+    )
+    .filter(
+      (field) =>
+        resource !== "employees" ||
+        !editing?.id ||
+        canEditPublicProfiles ||
+        field.name !== "name",
     )
     .filter(
       (field) => !editingOwnAccount || !["role", "status"].includes(field.name),
@@ -661,6 +722,10 @@ export function AdminResource({
                   </button>
                 ) : (
                   <>
+                    <PublicProfileLink resource={resource} row={row} />
+                    {canEditPublicProfiles && (
+                      <EditPublicProfileLink resource={resource} row={row} />
+                    )}
                     {resource === "employees" && (
                       <Link
                         title="View employee attendance"
@@ -770,6 +835,14 @@ export function AdminResource({
                 be changed here.
               </Notice>
             )}
+            {resource === "employees" &&
+              Boolean(editing.id) &&
+              !canEditPublicProfiles && (
+                <p className="muted">
+                  {String(nested(editing, "user.name") || "Employee")} · Only
+                  Super Admin can change the name and public profile details.
+                </p>
+              )}
             {needsReconcile && (
               <>
                 <Notice>

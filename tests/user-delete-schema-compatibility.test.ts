@@ -55,7 +55,9 @@ integration.each(["legacy", "upgraded"] as const)(
       for (const migration of (await readdir(directory)).sort()) {
         if (
           migration === "migration_lock.toml" ||
-          (version === "legacy" && migration >= upgrade)
+          // Only retain the legacy expense schema; unrelated later migrations
+          // must still match the current Prisma client (for example profiles).
+          (version === "legacy" && migration === upgrade)
         )
           continue;
         const sql = await readFile(

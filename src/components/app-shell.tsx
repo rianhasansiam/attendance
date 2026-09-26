@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Clock3,
   Fingerprint,
+  Globe,
   House,
   Layers3,
   LogOut,
@@ -84,6 +85,7 @@ export function AppShell({
 }: {
   children: ReactNode;
   user: {
+    id: string;
     name: string | null;
     email: string;
     role: string;
@@ -99,8 +101,8 @@ export function AppShell({
     await signOut({ redirectTo: "/login" });
   }
   const [open, setOpen] = useState(false);
-  const navigation =
-    mode === "admin"
+  const navigation = [
+    ...(mode === "admin"
       ? [
           ...adminNavigation.filter(
             (item) => !item.canAccess || item.canAccess(user.role),
@@ -117,7 +119,13 @@ export function AppShell({
           ...(user.role === "MANAGE_DRIVER"
             ? [{ label: "Drive Cost", href: "drive-cost", icon: CarFront }]
             : []),
-        ];
+        ]),
+    {
+      label: "Public profile",
+      href: `/profile/${encodeURIComponent(user.id)}`,
+      icon: Globe,
+    },
+  ];
   const navigationHref = (href: string) =>
     href.startsWith("/") ? href : `/${mode}/${href}`;
   const current = navigation.find(
@@ -148,6 +156,7 @@ export function AppShell({
               onClick={() => setOpen(false)}
               key={href}
               href={navigationHref(href)}
+              prefetch={href.startsWith("/profile/") ? false : undefined}
               className={`nav-item ${pathname === navigationHref(href) ? "active" : ""}`}
               aria-current={
                 pathname === navigationHref(href) ? "page" : undefined

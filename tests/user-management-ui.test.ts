@@ -111,7 +111,7 @@ async function eventually(assertion: () => void) {
     await vi.waitFor(assertion);
   });
 }
-async function render() {
+async function render(canEditPublicProfiles = false) {
   await act(async () =>
     root.render(
       h(Provider, {
@@ -119,6 +119,7 @@ async function render() {
         children: h(AdminResource, {
           resource: "users",
           currentUserId: "current-super-admin",
+          canEditPublicProfiles,
         }),
       }),
     ),
@@ -127,6 +128,27 @@ async function render() {
     expect(buttons("Edit user")).toHaveLength(users.length),
   );
 }
+
+it("lets Super Admin open public-profile editing for every account, including their own", async () => {
+  users = [
+    user("employee"),
+    user("admin", "ADMIN", false),
+    user("current-super-admin", "SUPER_ADMIN", false),
+    { ...user("inactive"), status: "INACTIVE" },
+  ];
+  await render();
+  expect(
+    container.querySelector('[aria-label="Edit public profile"]'),
+  ).toBeNull();
+  await render(true);
+  expect(
+    [
+      ...container.querySelectorAll<HTMLAnchorElement>(
+        '[aria-label="Edit public profile"]',
+      ),
+    ].map((link) => link.getAttribute("href")),
+  ).toEqual(users.map((user) => `/admin/users/${user.id}/profile`));
+});
 async function edit(index = 0) {
   await act(async () => buttons("Edit user")[index].click());
 }
@@ -158,6 +180,31 @@ it("shows all four roles in All Users and does not offer administrator creation"
       button.textContent?.includes("Add user"),
     ),
   ).toBe(false);
+});
+
+it("links active accounts to their public profile regardless of role or employee profile", async () => {
+  users = [
+    user("employee"),
+    user("driver-manager", "MANAGE_DRIVER"),
+    user("admin", "ADMIN", false),
+    user("super-admin", "SUPER_ADMIN", false),
+    { ...user("inactive"), status: "INACTIVE" },
+    { ...user("suspended"), status: "SUSPENDED" },
+  ];
+  await render();
+
+  const links = [
+    ...container.querySelectorAll<HTMLAnchorElement>(
+      'a[aria-label="View public profile (opens in new tab)"]',
+    ),
+  ];
+  expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    "/profile/employee",
+    "/profile/driver-manager",
+    "/profile/admin",
+    "/profile/super-admin",
+  ]);
+  expect(writes).toHaveLength(0);
 });
 
 it("changes an employee's role and displays the authoritative refreshed role", async () => {
@@ -274,7 +321,8 @@ it("sends one permanent deletion while pending and removes the user after refres
 });
 
 it("keeps a user and the server explanation visible when a concurrent change prevents deletion", async () => {
-  const message = "This user changed while deletion was in progress. Please refresh and try again.";
+  const message =
+    "This user changed while deletion was in progress. Please refresh and try again.";
   mutation = async () =>
     Response.json(
       { success: false, error: { code: "CONFLICT", message } },

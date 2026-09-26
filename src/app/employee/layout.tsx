@@ -35,6 +35,7 @@ async function AuthenticatedEmployeeLayout({
       <AppShell
         mode="employee"
         user={{
+          id: user.id,
           name: user.name,
           email: user.email,
           role: user.role,

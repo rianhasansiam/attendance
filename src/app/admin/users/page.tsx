@@ -15,5 +15,11 @@ export default function Page() {
 async function SuperAdminUsers() {
   await connection();
   const user = await requirePageUser("SUPER_ADMIN");
-  return <AdminResource resource="users" currentUserId={user.id} />;
+  return (
+    <AdminResource
+      resource="users"
+      currentUserId={user.id}
+      canEditPublicProfiles
+    />
+  );
 }

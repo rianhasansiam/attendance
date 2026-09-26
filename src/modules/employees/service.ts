@@ -72,17 +72,18 @@ async function validateAssignments(
   ) {
     throw new DomainError("OFFICE_UNAVAILABLE", "Choose an active office.");
   }
-  if (
-    departmentId &&
-    !(await tx.department.findFirst({
-      where: { id: departmentId, active: true },
-    }))
-  ) {
+  const department = departmentId
+    ? await tx.department.findFirst({
+        where: { id: departmentId, active: true },
+      })
+    : null;
+  if (departmentId && !department) {
     throw new DomainError(
       "DEPARTMENT_UNAVAILABLE",
       "Choose an active department.",
     );
   }
+  return department;
 }
 
 export async function createEmployee(
@@ -105,7 +106,11 @@ export async function createEmployee(
         403,
       );
     assertSuperAdmin(currentActor);
-    await validateAssignments(tx, data.officeId, data.departmentId);
+    const department = await validateAssignments(
+      tx,
+      data.officeId,
+      data.departmentId,
+    );
     const {
       name,
       email,
@@ -116,7 +121,14 @@ export async function createEmployee(
       departmentId,
     } = data;
     const user = await tx.user.create({
-      data: { name, email, status, role, passwordHash },
+      data: {
+        name,
+        email,
+        status,
+        role,
+        passwordHash,
+        publicDepartment: department?.name ?? null,
+      },
       select: { id: true },
     });
     const created = await tx.employee.create({
@@ -214,19 +226,33 @@ export async function updateEmployee(
   input: z.infer<typeof employeeUpdateSchema>,
 ) {
   authorizeRole(actor.role, "ADMIN");
+  input = employeeUpdateSchema.parse(input);
   return db.$transaction(async (tx) => {
     const identities = await tx.$queryRaw<
       { userId: string }[]
     >`SELECT "userId" FROM "Employee" WHERE "id" = ${id} FOR UPDATE`;
     if (!identities[0])
       throw new DomainError("NOT_FOUND", "Employee not found.", 404);
-    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${identities[0].userId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" IN (${actor.id}, ${identities[0].userId}) ORDER BY "id" FOR UPDATE`;
     const previous = await tx.employee.findUnique({
       where: { id },
       include: employeeInclude,
     });
     if (!previous)
       throw new DomainError("NOT_FOUND", "Employee not found.", 404);
+    if (input.name !== undefined && input.name !== previous.user.name) {
+      assertSuperAdmin(actor);
+      const [currentActor] = await tx.$queryRaw<
+        Array<Actor & { status: string }>
+      >`SELECT "id", "role", "status" FROM "User" WHERE "id" = ${actor.id} FOR SHARE`;
+      if (!currentActor || currentActor.status !== "ACTIVE")
+        throw new DomainError(
+          "FORBIDDEN",
+          "An active super administrator account is required to edit public profiles.",
+          403,
+        );
+      assertSuperAdmin(currentActor);
+    }
     assertMayManageUser(actor, previous.user, {
       role: input.role,
       status: input.status,

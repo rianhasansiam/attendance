@@ -275,13 +275,22 @@ describe("account password settings", () => {
             role === "EMPLOYEE" || role === "MANAGE_DRIVER"
               ? "employee"
               : "admin",
-          user: { email: "person@example.test", name: "Person", role },
+          user: {
+            id: "public-person-id",
+            email: "person@example.test",
+            name: "Person",
+            role,
+          },
           children: "Settings",
         }),
       );
       const link = container.querySelector('a[href="/account/security"]');
       expect(link?.textContent).toBe("Account security");
       expect(link?.getAttribute("aria-current")).toBe("page");
+      const profileLink = container.querySelector(
+        'a[href="/profile/public-person-id"]',
+      );
+      expect(profileLink?.textContent).toBe("Public profile");
     },
   );
 });

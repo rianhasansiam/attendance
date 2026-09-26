@@ -156,7 +156,7 @@ test("Super Admin creates an employee with a matching password that signs in to 
   }
 });
 
-test("Admin can edit existing employee profiles but cannot create employee accounts", async ({
+test("Admin can edit employment records but cannot edit public names or create employee accounts", async ({
   page,
   context,
 }) => {
@@ -182,16 +182,28 @@ test("Admin can edit existing employee profiles but cannot create employee accou
     exact: true,
   });
   await expect(dialog.locator('input[type="password"]')).toHaveCount(0);
+  await expect(dialog.getByLabel("Name *", { exact: true })).toHaveCount(0);
+  await expect(dialog).toContainText(
+    "Only Super Admin can change the name and public profile details.",
+  );
+  const updatedEmployeeCode = `updated-${id.slice(0, 20)}`;
   await dialog
-    .getByLabel("Name *", { exact: true })
-    .fill("Employee renamed by Admin");
+    .getByLabel("Employee ID *", { exact: true })
+    .fill(updatedEmployeeCode);
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
   await expect(dialog).toBeHidden();
   expect(
+    (
+      await db.employee.findUniqueOrThrow({
+        where: { id: target.employee!.id },
+      })
+    ).employeeCode,
+  ).toBe(updatedEmployeeCode);
+  expect(
     (await db.user.findUniqueOrThrow({ where: { id: target.id } })).name,
-  ).toBe("Employee renamed by Admin");
+  ).toBe(target.name);
 
   const blockedEmail = `blocked-${id}@example.test`;
   const response = await context.request.post("/api/admin/employees", {

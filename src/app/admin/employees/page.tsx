@@ -20,6 +20,7 @@ async function EmployeesPage() {
       resource="employees"
       canCreateEmployees={user.role === "SUPER_ADMIN"}
       canDeleteEmployees={user.role === "SUPER_ADMIN"}
+      canEditPublicProfiles={user.role === "SUPER_ADMIN"}
     />
   );
 }

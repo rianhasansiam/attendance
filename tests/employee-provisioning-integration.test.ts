@@ -205,15 +205,20 @@ describe.skipIf(!databaseUrl)(
       ).toBe(1);
     });
 
-    it("keeps ordinary administrator profile editing without changing the password", async () => {
+    it("keeps ordinary administrator employment editing with an unchanged public name and password", async () => {
       const created = await createEmployee(superAdmin, input());
       const admin = await actor("ADMIN");
       const previous = await db.user.findUniqueOrThrow({
         where: { id: created.userId },
       });
       await expect(
-        updateEmployee(admin, created.id, { name: "Renamed employee" }),
-      ).resolves.toMatchObject({ user: { name: "Renamed employee" } });
+        updateEmployee(admin, created.id, {
+          name: previous.name!,
+          role: "MANAGE_DRIVER",
+        }),
+      ).resolves.toMatchObject({
+        user: { name: previous.name, role: "MANAGE_DRIVER" },
+      });
       const current = await db.user.findUniqueOrThrow({
         where: { id: created.userId },
       });

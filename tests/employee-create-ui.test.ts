@@ -110,7 +110,10 @@ async function eventually(assertion: () => void) {
     await vi.waitFor(assertion);
   });
 }
-async function render(canCreateEmployees?: boolean) {
+async function render(
+  canCreateEmployees?: boolean,
+  canEditPublicProfiles?: boolean,
+) {
   await act(async () => {
     root.render(
       h(Provider, {
@@ -118,6 +121,7 @@ async function render(canCreateEmployees?: boolean) {
         children: h(AdminResource, {
           resource: "employees",
           canCreateEmployees,
+          canEditPublicProfiles,
         }),
       }),
     );
@@ -311,4 +315,36 @@ it("keeps normal employee edits available without asking for or submitting crede
   const payload = await writes[0].clone().json();
   expect(payload).not.toHaveProperty("password");
   expect(payload).not.toHaveProperty("confirmPassword");
+  expect(payload).not.toHaveProperty("name");
+  expect(input("name")).toBeNull();
+});
+
+it("only links to the public-profile editor when explicitly permitted", async () => {
+  await render(true);
+  expect(
+    container.querySelector('[aria-label="Edit public profile"]'),
+  ).toBeNull();
+  await render(true, true);
+  expect(
+    container
+      .querySelector('[aria-label="Edit public profile"]')
+      ?.getAttribute("href"),
+  ).toBe("/admin/users/user/profile");
+  await render(true, false);
+  expect(
+    container.querySelector('[aria-label="Edit public profile"]'),
+  ).toBeNull();
+});
+
+it("keeps the employee name editable for Super Admin", async () => {
+  await render(true, true);
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Edit employee"]')!
+      .click(),
+  );
+  expect(input("name").value).toBe(employee.user.name);
+  input("name").value = "Updated name";
+  await submit();
+  expect(await writes[0].clone().json()).toHaveProperty("name", "Updated name");
 });

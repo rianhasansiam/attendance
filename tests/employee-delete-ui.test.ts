@@ -167,6 +167,35 @@ it("shows deletion for active, inactive and suspended employee and driver-manage
   ]);
 });
 
+it("links active employees to their user public profile and hides unavailable profiles", async () => {
+  employees = [
+    employee("employee"),
+    employee("administrator", "ADMIN"),
+    employee("inactive", "EMPLOYEE", "INACTIVE"),
+    employee("suspended", "EMPLOYEE", "SUSPENDED"),
+    employee("missing-user"),
+    employee("missing-user-id"),
+  ];
+  Reflect.deleteProperty(employees[4], "user");
+  Reflect.deleteProperty(employees[5].user, "id");
+  await render();
+
+  const links = [
+    ...container.querySelectorAll<HTMLAnchorElement>(
+      'a[aria-label="View public profile (opens in new tab)"]',
+    ),
+  ];
+  expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    "/profile/user-employee",
+    "/profile/user-administrator",
+  ]);
+  for (const link of links) {
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noopener noreferrer");
+  }
+  expect(writes).toHaveLength(0);
+});
+
 it("explains permanent account deletion and preserves the employee when confirmation is cancelled", async () => {
   vi.mocked(confirmAction).mockResolvedValue(false);
   await render(true);
@@ -309,7 +338,8 @@ it("keeps a confirmed deletion out of a stale list and corrects its count when r
 });
 
 it("keeps the employee visible and shows the server explanation when a concurrent change prevents deletion", async () => {
-  const message = "This employee changed while deletion was in progress. Please refresh and try again.";
+  const message =
+    "This employee changed while deletion was in progress. Please refresh and try again.";
   deletion = async () =>
     Response.json(
       { success: false, error: { code: "CONFLICT", message } },

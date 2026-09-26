@@ -30,6 +30,8 @@ Apply `20260929500000_deleted_user_references` before using account deletion, th
 
 UI confirmations, optional review-note prompts, and action notifications use [SweetAlert2](https://sweetalert2.github.io/) through `src/lib/client/alerts.ts`. Confirmation defaults to Cancel; callbacks await an explicit decision, prevent duplicate clicks, and cancel on navigation/session loss. Success/error toasts share the application theme and never replace a pending confirmation. Inline feedback, complex forms, and uncertain-operation recovery remain available. Use `confirmAction`/`promptAction` for dialogs, `<Notice notify>` for successful action feedback, and `ErrorNotice` for errors. No database migration is needed for this UI change.
 
+Public profiles are available without sign-in at `/profile/<user-id>`. Open **Public profile** in the signed-in navigation, or use the public-profile action in **Employees** or **All Users**, then share that URL. Profiles show name, photo, designation, phone, blood group, department, home address and date of birth. Only Super Admin can edit these profile details, using **Edit public profile** in **Employees** or **All Users**. Email, employee ID, attendance, financial records and account/security data stay private. Inactive, suspended, deleted and unknown accounts show **Profile unavailable**. See [public profile setup](docs/public-profiles.md) for the required migration and permissions.
+
 ## Local setup
 
 Requirements: Node.js 22.12+ (24 LTS recommended), pnpm 12.3.4, and PostgreSQL 16+. Install dependencies and configure environment:

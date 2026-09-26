@@ -258,7 +258,7 @@ test("All Users deletion keeps linked leave history with deleted info", async ({
       employeeId: target.employee!.id,
       startDate: new Date("2026-10-01"),
       endDate: new Date("2026-10-01"),
-      reason: "User deletion must preserve history",
+      reason: `User deletion must preserve history ${randomUUID()}`,
     },
   });
   await signIn(context, actor.id);

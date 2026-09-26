@@ -11,6 +11,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Auth.js targets Next's bundler and uses extensionless next/* imports.
+    // Bundle it in handler tests rather than asking native ESM to resolve them.
+    server: { deps: { inline: ["next-auth"] } },
     // Suites share one disposable database. SERIALIZABLE predicate locks can
     // conflict across unrelated fixtures; concurrency tests still race their
     // operations explicitly within each suite.

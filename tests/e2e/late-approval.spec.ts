@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { PrismaClient, type Role } from "@prisma/client";
@@ -42,6 +43,9 @@ async function user(role: Role, officeId?: string, shiftId?: string) {
 }
 
 async function signIn(context: BrowserContext, userId: string) {
+  // Stop the previous account's mounted session refreshes before replacing its
+  // cookie; an in-flight Auth.js response can otherwise restore the old account.
+  await Promise.all(context.pages().map((page) => page.goto("about:blank")));
   const token = randomUUID();
   await db.session.create({
     data: {
@@ -53,7 +57,7 @@ async function signIn(context: BrowserContext, userId: string) {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: origin,
       httpOnly: true,
       sameSite: "Lax",
@@ -61,7 +65,10 @@ async function signIn(context: BrowserContext, userId: string) {
   ]);
 }
 
-async function fixture(context: BrowserContext) {
+async function fixture(
+  context: BrowserContext,
+  role: "EMPLOYEE" | "MANAGE_DRIVER" = "EMPLOYEE",
+) {
   const suffix = randomUUID();
   const day = new Date().toISOString().slice(0, 10);
   const office = await db.office.create({
@@ -87,7 +94,7 @@ async function fixture(context: BrowserContext) {
       graceMinutes: 15,
     },
   });
-  const employee = await user("EMPLOYEE", office.id, shift.id);
+  const employee = await user(role, office.id, shift.id);
   const attendance = await db.attendance.create({
     data: {
       employeeId: employee.employee!.id,
@@ -136,12 +143,16 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-for (const role of ["ADMIN", "SUPER_ADMIN"] as const) {
-  test(`${role} reviews an employee's late reason and excuses history and exports without granting overtime`, async ({
+for (const { requesterRole, role } of (
+  ["EMPLOYEE", "MANAGE_DRIVER"] as const
+).flatMap((requesterRole) =>
+  (["ADMIN", "SUPER_ADMIN"] as const).map((role) => ({ requesterRole, role })),
+)) {
+  test(`${role} reviews a ${requesterRole} late reason and excuses history and exports without granting overtime`, async ({
     page,
     context,
   }) => {
-    const value = await fixture(context);
+    const value = await fixture(context, requesterRole);
     const reason = `Train delay approved ${randomUUID()}`;
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/employee/dashboard");

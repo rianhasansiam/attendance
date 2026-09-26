@@ -5,7 +5,12 @@ const mocks = vi.hoisted(() => {
   const db = {
     user: { findUnique: vi.fn(), updateMany: vi.fn() },
     account: { create: vi.fn() },
-    session: { create: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
+    session: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     auditLog: { create: vi.fn() },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -14,6 +19,7 @@ const mocks = vi.hoisted(() => {
     db,
     factory: undefined as (() => NextAuthConfig) | undefined,
     auth: vi.fn(),
+    authorizeCredentials: vi.fn(),
     env: {
       NODE_ENV: "production",
       AUTH_SECRET: "test-secret",
@@ -38,6 +44,9 @@ vi.mock("next-auth", () => ({
 vi.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({}) }));
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/env", () => ({ getEnv: () => mocks.env }));
+vi.mock("@/modules/auth/credentials", () => ({
+  authorizeCredentials: mocks.authorizeCredentials,
+}));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 import "../src/auth";
 import {
@@ -53,6 +62,9 @@ type SignInInput = Parameters<
 type SessionInput = Parameters<
   NonNullable<NonNullable<NextAuthConfig["callbacks"]>["session"]>
 >[0];
+type JwtInput = Parameters<
+  NonNullable<NonNullable<NextAuthConfig["callbacks"]>["jwt"]>
+>[0];
 const user = {
   id: "employee-user",
   email: "staff@example.com",
@@ -62,6 +74,7 @@ const user = {
   status: "ACTIVE",
   role: "EMPLOYEE",
   googleAccountId: "google-subject",
+  passwordHash: null as string | null,
   employee: { id: "employee-id" },
 };
 const signInInput = {
@@ -93,11 +106,13 @@ beforeEach(() => {
   mocks.db.user.findUnique.mockResolvedValue(user);
   mocks.db.user.updateMany.mockResolvedValue({ count: 1 });
   mocks.db.session.findUnique.mockResolvedValue({ id: "session-id" });
+  mocks.db.session.create.mockResolvedValue({ id: "session-id" });
   mocks.db.session.findFirst.mockResolvedValue({
     id: "session-id",
     expires: new Date("2030-01-01T00:00:00Z"),
   });
   mocks.db.auditLog.create.mockResolvedValue({});
+  mocks.authorizeCredentials.mockResolvedValue(null);
   mocks.db.$transaction.mockImplementation(
     async (callback: (tx: typeof mocks.db) => Promise<unknown>) =>
       callback(mocks.db),
@@ -109,13 +124,12 @@ beforeEach(() => {
 });
 
 describe("actual Auth.js configuration callbacks and adapter", () => {
-  it("configures Google only with seven-day database sessions and secure cookies", () => {
+  it("configures Google and credentials with one supported Auth.js JWT strategy and secure cookies", () => {
     const config = mocks.factory!();
-    expect(config.providers).toHaveLength(1);
+    expect(config.providers).toHaveLength(2);
     expect(config.session).toMatchObject({
-      strategy: "database",
+      strategy: "jwt",
       maxAge: 604800,
-      updateAge: 3600,
     });
     expect(config.useSecureCookies).toBe(true);
   });
@@ -211,36 +225,46 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
       },
     });
   });
-  it("does not create sessions unless the same request authorized the same identity", async () => {
+  it("creates a registry session only after this request authorized the identity and rechecks under lock", async () => {
     const config = mocks.factory!();
-    const session = {
-      userId: user.id,
-      sessionToken: "token",
-      expires: new Date(Date.now() + 60_000),
-    };
-    await expect(config.adapter!.createSession!(session)).rejects.toThrow(
-      "Unauthorized",
-    );
+    const input = {
+      token: {},
+      user,
+      account: signInInput.account,
+      trigger: "signIn",
+    } as JwtInput;
+    expect(await config.callbacks!.jwt!(input)).toBeNull();
     await config.callbacks!.signIn!(signInInput);
     mocks.db.user.findUnique.mockResolvedValue({ ...user, status: "INACTIVE" });
-    await expect(config.adapter!.createSession!(session)).rejects.toThrow(
-      "Unauthorized",
-    );
+    expect(await config.callbacks!.jwt!(input)).toBeNull();
     expect(mocks.db.session.create).not.toHaveBeenCalled();
     mocks.db.user.findUnique.mockResolvedValue(user);
-    await config.adapter!.createSession!(session);
+    await config.callbacks!.signIn!(signInInput);
+    expect(await config.callbacks!.jwt!(input)).toEqual({
+      sub: user.id,
+      sessionId: "session-id",
+    });
     expect(mocks.db.$queryRaw).toHaveBeenCalled();
     expect(mocks.db.session.create).toHaveBeenCalledExactlyOnceWith({
-      data: session,
+      data: {
+        userId: user.id,
+        sessionToken: expect.any(String),
+        expires: expect.any(Date),
+      },
+      select: { id: true },
     });
   });
   it("returns only safe public session fields; never returns a bearer token", async () => {
     const session = await mocks.factory!().callbacks!.session!({
       session: rawSession,
-      user,
+      token: {
+        sub: user.id,
+        sessionId: "session-id",
+        passwordHash: "must-not-leak",
+      },
     } as unknown as SessionInput);
     expect(session).toEqual({
-      expires: rawSession.expires.toISOString(),
+      expires: "2030-01-01T00:00:00.000Z",
       sessionId: "session-id",
       user: {
         id: user.id,
@@ -251,7 +275,7 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
       },
     });
     expect(JSON.stringify(session)).not.toMatch(
-      /private-session-token|must-not-leak|google-subject/,
+      /private-session-token|must-not-leak|google-subject|passwordHash/,
     );
   });
   it("invalidates public session output after account deactivation, identity reset or session deletion", async () => {
@@ -263,7 +287,7 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
       mocks.db.user.findUnique.mockResolvedValue(changed);
       const result = await callback({
         session: rawSession,
-        user,
+        token: { sub: user.id, sessionId: "session-id" },
       } as unknown as SessionInput);
       expect(result.user?.id).toBe("");
       expect(
@@ -271,11 +295,130 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
       ).toBeUndefined();
     }
     mocks.db.user.findUnique.mockResolvedValue(user);
-    mocks.db.session.findUnique.mockResolvedValue(null);
+    mocks.db.session.findFirst.mockResolvedValue(null);
     expect(
-      (await callback({ session: rawSession, user } as unknown as SessionInput))
-        .user?.id,
+      (
+        await callback({
+          session: rawSession,
+          token: { sub: user.id, sessionId: "session-id" },
+        } as unknown as SessionInput)
+      ).user?.id,
     ).toBe("");
+  });
+  it("returns a safe existing user from credentials and creates the same user ID session", async () => {
+    const config = mocks.factory!();
+    const provider = config.providers[1] as unknown as {
+      options: {
+        authorize: (credentials: unknown, request: Request) => Promise<unknown>;
+      };
+    };
+    const safeUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      image: user.image,
+    };
+    mocks.authorizeCredentials.mockResolvedValue({
+      user: safeUser,
+      proof: { email: user.email, passwordHash: "stored-hash" },
+    });
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      googleAccountId: null,
+      passwordHash: "stored-hash",
+    });
+    expect(
+      await provider.options.authorize(
+        { email: user.email, password: "passphrase" },
+        new Request("https://attendance.example.com"),
+      ),
+    ).toEqual(safeUser);
+    const account = {
+      provider: "credentials",
+      providerAccountId: user.id,
+      type: "credentials",
+    } as const;
+    expect(await config.callbacks!.signIn!({ user: safeUser, account })).toBe(
+      true,
+    );
+    const token = await config.callbacks!.jwt!({
+      token: {},
+      user: safeUser,
+      account,
+      trigger: "signIn",
+    } as JwtInput);
+    expect(token).toEqual({ sub: user.id, sessionId: "session-id" });
+    expect(JSON.stringify(token)).not.toMatch(/hash|passphrase|role|google/);
+    expect(mocks.db.account.create).not.toHaveBeenCalled();
+  });
+  it("rejects a password reset that races credential verification before session creation", async () => {
+    const config = mocks.factory!();
+    const provider = config.providers[1] as unknown as {
+      options: {
+        authorize: (credentials: unknown, request: Request) => Promise<unknown>;
+      };
+    };
+    mocks.authorizeCredentials.mockResolvedValue({
+      user,
+      proof: { email: user.email, passwordHash: "old-hash" },
+    });
+    await provider.options.authorize(
+      {},
+      new Request("https://attendance.example.com"),
+    );
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      passwordHash: "new-hash",
+    });
+    expect(
+      await config.callbacks!.jwt!({
+        token: {},
+        user,
+        account: {
+          provider: "credentials",
+          providerAccountId: user.id,
+          type: "credentials",
+        },
+      } as JwtInput),
+    ).toBeNull();
+    expect(mocks.db.session.create).not.toHaveBeenCalled();
+  });
+  it("fails closed after registry revocation and ignores client identity and role changes", async () => {
+    const config = mocks.factory!();
+    const input = {
+      token: { sub: user.id, sessionId: "session-id", role: "SUPER_ADMIN" },
+      trigger: "update",
+      session: { sub: "attacker", role: "SUPER_ADMIN", sessionId: "attacker" },
+    } as unknown as JwtInput;
+    expect(await config.callbacks!.jwt!(input)).toEqual({
+      sub: user.id,
+      sessionId: "session-id",
+    });
+    mocks.db.session.findFirst.mockResolvedValue(null);
+    expect(await config.callbacks!.jwt!(input)).toBeNull();
+    expect(mocks.db.session.create).not.toHaveBeenCalled();
+  });
+  it("deletes only the current registry entry on Auth.js sign-out", async () => {
+    await mocks.factory!().events!.signOut!({
+      token: { sub: user.id, sessionId: "session-id" },
+    });
+    expect(mocks.db.session.deleteMany).toHaveBeenCalledExactlyOnceWith({
+      where: { id: "session-id", userId: user.id },
+    });
+  });
+  it("does not accept legacy opaque sessions through the adapter", async () => {
+    await expect(
+      mocks.factory!().adapter!.createSession!({
+        userId: user.id,
+        sessionToken: "opaque",
+        expires: new Date(),
+      }),
+    ).rejects.toThrow("disabled");
+    expect(
+      await mocks.factory!().callbacks!.jwt!({
+        token: { sub: user.id },
+      } as JwtInput),
+    ).toBeNull();
   });
   it("redirects only to the canonical origin", async () => {
     const redirect = mocks.factory!().callbacks!.redirect!;
@@ -377,7 +520,17 @@ describe("backend session and role guards", () => {
       code: "UNAUTHENTICATED",
     });
   });
-  it("rejects missing OAuth binding and inactive accounts", async () => {
+  it("accepts verified password identities without Google and never returns the stored hash", async () => {
+    mocks.db.user.findUnique.mockResolvedValue({
+      ...user,
+      googleAccountId: null,
+      passwordHash: "stored-hash",
+    });
+    const result = await requireUser();
+    expect(result).toMatchObject({ id: user.id, hasPassword: true });
+    expect(result).not.toHaveProperty("passwordHash");
+  });
+  it("rejects accounts with neither login identity and inactive accounts", async () => {
     mocks.db.user.findUnique.mockResolvedValue({
       ...user,
       googleAccountId: null,

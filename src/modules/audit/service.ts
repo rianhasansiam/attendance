@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 
 type AuditClient = Pick<Prisma.TransactionClient, "auditLog">;
 const sensitive =
-  /^(access_token|refresh_token|id_token|sessionToken|publicKey|counter|credentialId|challenge|secret|password|cookie)$/i;
+  /^(access_token|refresh_token|id_token|sessionToken|publicKey|counter|credentialId|challenge|secret|password|passwordHash|tokenHash|resetToken|token|newPassword|currentPassword|confirmPassword|cookie)$/i;
 
 /** Persist only administrative snapshots; cryptographic material is redacted defensively. */
 export function auditSnapshot(value: unknown): Prisma.InputJsonValue {

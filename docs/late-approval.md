@@ -9,6 +9,16 @@ The existing late-reason dialog retains its required reason and adds an optional
 happen in the same transaction. A unique attendance reference prevents duplicate
 requests; identical retries return the existing result without repeating events.
 
+Both `EMPLOYEE` and `MANAGE_DRIVER` users with an employee profile can submit
+requests for their own attendance through **My day**. Manage Driver keeps the
+same employee attendance permissions; it cannot review, approve, or reject
+requests. Review remains available to Admin and Super Admin.
+
+Manage Driver follow-up verification passed 51 targeted unit/integration tests,
+all 5 late-approval browser workflows (both requester roles and both reviewer
+roles), targeted ESLint, and TypeScript. No production permission or schema
+change was necessary.
+
 Admin and Super Admin can review requests at `/admin/late-approvals`, filter by
 status, and approve or reject with an optional review note. A request transitions
 once from `PENDING` to `APPROVED` or `REJECTED`. Review records the reviewer and time

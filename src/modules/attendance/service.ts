@@ -1,3 +1,4 @@
+import { hasLoginIdentity } from "@/modules/auth/account-policy";
 import { attendanceDisplaySelect } from "./queries";
 import { attendanceOutcome, type AttendanceOutcomeInput } from "./outcome";
 import { Prisma, type Shift, type EmployeeShift } from "@prisma/client";
@@ -59,7 +60,14 @@ export async function saveLateReason(
         where: { id: actor.employee.id },
         select: {
           id: true,
-          user: { select: { id: true, status: true, googleAccountId: true } },
+          user: {
+            select: {
+              id: true,
+              status: true,
+              googleAccountId: true,
+              passwordHash: true,
+            },
+          },
         },
       });
       if (employee?.user.status !== "ACTIVE")
@@ -79,7 +87,7 @@ export async function saveLateReason(
       if (
         !session ||
         employee.user.id !== actor.id ||
-        !employee.user.googleAccountId ||
+        !hasLoginIdentity(employee.user) ||
         employee.user.googleAccountId !== actor.googleAccountId
       )
         throw new DomainError(
@@ -278,7 +286,7 @@ export async function recordAttendance(
               );
               if (
                 !session ||
-                !employee.user.googleAccountId ||
+                !hasLoginIdentity(employee.user) ||
                 employee.user.googleAccountId !== actor.googleAccountId
               ) {
                 throw new DomainError(

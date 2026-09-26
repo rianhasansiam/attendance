@@ -2,7 +2,7 @@
 
 State management: [architecture, cache matrix and test instructions](docs/state-management.md) · [verified findings and baseline](docs/state-audit.md).
 
-A modular Next.js application for Google-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, PDF reports, and append-only audit history.
+A modular Next.js application for administrator-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, PDF reports, and append-only audit history.
 
 See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results. The [check-in/out performance notes](docs/attendance-performance.md) describe immediate confirmed display, concurrent verification, opt-in timing, and device measurement steps.
 
@@ -41,7 +41,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-The seed only provisions the requested super administrator; it creates no demo users, offices, IPs, coordinates or schedules and does not elevate an existing employee. Sign in through Google, then create an office, department and shift, authorized employee profiles, date-bounded assignments, and office networks. Employees register passkeys after Google sign-in; administrators approve them. Accounts must be ACTIVE before login.
+The seed only provisions the requested super administrator; it creates no demo users, offices, IPs, coordinates or schedules and does not elevate an existing employee. Sign in through Google, then create an office, department and shift, authorized employee profiles, date-bounded assignments, and office networks. Employees register passkeys after signing in; administrators approve them. Accounts must be ACTIVE before login.
 
 All office attendance checks default to required. `TRUSTED_PROXY_MODE=none` returns no trusted client IP, so strict office-network attendance fails closed in direct development. Use a local Nginx ingress to test network enforcement, or have a super administrator explicitly disable only the office's network policy while developing. Disabling a policy is a deliberate configuration change and is audited. Never trust forwarded headers from a public direct Next.js listener.
 
@@ -61,7 +61,7 @@ All office attendance checks default to required. `TRUSTED_PROXY_MODE=none` retu
 
 References: [Google OAuth web server applications](https://developers.google.com/identity/protocols/oauth2/web-server), [Auth.js Google provider](https://authjs.dev/getting-started/providers/google), [Auth.js Next.js integration](https://authjs.dev/reference/nextjs).
 
-There is no public registration, password, OTP, magic-link or passkey account login. An administrator provisions the Google email before the employee signs in. Email changes invalidate sessions, OAuth account links and registered credentials so the new identity must authenticate and register again.
+Users can sign in with Google or an application password on the same administrator-provisioned account. There is no public registration. Account security supports setting/changing a password, and email-verified recovery uses configurable SMTP. See [application password setup and security behavior](docs/application-passwords.md) for the migration, SMTP variables, rate limits and session rollout. Existing sessions require a fresh sign-in once after deployment; password saves revoke all sessions. Email changes invalidate passwords, recovery tokens, sessions, OAuth links and registered credentials.
 
 ## Commands and verification
 

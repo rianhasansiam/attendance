@@ -810,7 +810,7 @@ export function EmployeeDevices() {
             <ShieldCheck size={28} color="#7d9877" />
             <h2 style={{ marginTop: 15 }}>Designed for your privacy</h2>
             <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-              Google verifies your identity. Your approved passkey confirms
+              Your sign-in verifies your identity. Your approved passkey confirms
               attendance. Keep your registered devices up to date and revoke any
               you no longer use.
             </p>

@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
@@ -23,6 +24,25 @@ async function signIn(context: BrowserContext, role: Role = "SUPER_ADMIN") {
       email: `daily-${marker}@example.test`,
       role,
       googleAccountId: marker,
+      // Employee roles need a profile to authenticate before RBAC can reject
+      // their access. Administrator fixtures intentionally have no profile.
+      ...(role === "EMPLOYEE" || role === "MANAGE_DRIVER"
+        ? {
+            employee: {
+              create: {
+                employeeCode: marker,
+                office: {
+                  create: {
+                    name: `Daily expenses access test ${marker}`,
+                    address: "Test office",
+                    latitude: 23.8,
+                    longitude: 90.4,
+                  },
+                },
+              },
+            },
+          }
+        : {}),
     },
   });
   const token = randomUUID();
@@ -36,7 +56,7 @@ async function signIn(context: BrowserContext, role: Role = "SUPER_ADMIN") {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: origin,
       httpOnly: true,
       sameSite: "Lax",

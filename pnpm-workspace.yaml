@@ -4,6 +4,7 @@ allowBuilds:
   esbuild: true
   sharp: true
   unrs-resolver: false
+  argon2: true
 # Security fixes for transitive dependencies; exercised by Prisma and export tests.
 overrides:
   lodash: 4.18.1

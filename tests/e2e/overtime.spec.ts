@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { PrismaClient, type Role } from "@prisma/client";
@@ -25,7 +26,7 @@ async function signIn(context: BrowserContext, userId: string) {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: "http://localhost:3100",
       httpOnly: true,
       sameSite: "Lax",
@@ -231,7 +232,14 @@ for (const expectedMinutes of [40, 90]) {
     });
 
     await page.goto("/admin/reports");
-    await page.getByLabel("Employee", { exact: true }).selectOption(employeeId);
+    // Reference options are paginated. Search by this fixture's unique code so
+    // repeated runs remain independent of how many employees the test DB holds.
+    await page
+      .getByRole("searchbox", { name: "Find employee", exact: true })
+      .fill(employee.employee!.employeeCode);
+    await page
+      .getByRole("combobox", { name: "Employee", exact: true })
+      .selectOption(employeeId);
     await page.getByRole("button", { name: "Apply filters" }).click();
     await expectOvertimeTable(page, displayedOvertime);
     await expect(
@@ -330,11 +338,17 @@ test("filtered overtime includes every page and resets consistently in attendanc
         : "/admin/reports",
     );
     const summary = page.getByRole("region", { name: "Overtime summary" });
-    const employeeFilter = page.getByLabel("Employee", { exact: true });
+    const employeeFilter = page.getByRole("combobox", {
+      name: "Employee",
+      exact: true,
+    });
     if (route === "attendance") {
       await expect(employeeFilter).toHaveValue(employeeId);
       await expect(summary).toContainText("1h 28m");
     } else {
+      await page
+        .getByRole("searchbox", { name: "Find employee", exact: true })
+        .fill(employee.employee!.employeeCode);
       await employeeFilter.selectOption(employeeId);
     }
     await page.getByLabel("From date").fill(dateBefore(29));

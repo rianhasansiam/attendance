@@ -4,15 +4,12 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { authorizeRole, type Role } from "@/modules/auth/authorization";
+import { hasLoginIdentity } from "@/modules/auth/account-policy";
 
 export async function requireUser() {
   const session = await auth();
   if (!session?.user?.id || !session.sessionId)
-    throw new DomainError(
-      "UNAUTHENTICATED",
-      "Please sign in with Google.",
-      401,
-    );
+    throw new DomainError("UNAUTHENTICATED", "Please sign in.", 401);
   const persistedSession = await db.session.findFirst({
     where: {
       id: session.sessionId,
@@ -39,14 +36,16 @@ export async function requireUser() {
     );
   if (user.status !== "ACTIVE")
     throw new DomainError("USER_INACTIVE", "Your account is not active.", 403);
-  if (!user.googleAccountId)
+  if (!hasLoginIdentity(user))
     throw new DomainError(
       "USER_NOT_AUTHORIZED",
-      "Google authentication is required.",
+      "Please verify your account and sign in again.",
       403,
     );
+  const { passwordHash, ...safeUser } = user;
   return {
-    ...user,
+    ...safeUser,
+    hasPassword: !!passwordHash,
     sessionId: session.sessionId,
     sessionExpires: persistedSession.expires.toISOString(),
   };

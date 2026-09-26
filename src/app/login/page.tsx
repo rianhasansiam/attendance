@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import LoadingWorkspace from "@/app/loading";
 import { isEmployeeRole } from "@/modules/auth/authorization";
+import { CredentialsForm } from "@/components/auth/credentials-form";
 
 type Props = { searchParams: Promise<{ error?: string }> };
 export default function Login(props: Props) {
@@ -75,6 +76,10 @@ async function LoginContent({
               : "Sign-in could not be completed. Please try again."}
           </p>
         )}
+        <div className="auth-divider">
+          <span>or</span>
+        </div>
+        <CredentialsForm />
       </div>
     </main>
   );

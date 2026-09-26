@@ -56,6 +56,7 @@ const adminNavigation = [
   { label: "Holidays", href: "holidays", icon: CalendarDays },
   { label: "Audit log", href: "audit", icon: ShieldCheck },
   { label: "Security events", href: "events", icon: ShieldCheck },
+  { label: "Account security", href: "/account/security", icon: ShieldCheck },
 ];
 const employeeNavigation = [
   { label: "My day", href: "dashboard", icon: House },
@@ -63,6 +64,7 @@ const employeeNavigation = [
   { label: "Leave requests", href: "leaves", icon: CalendarDays },
   { label: "My devices", href: "devices", icon: Fingerprint },
   { label: "My profile", href: "profile", icon: UserRound },
+  { label: "Account security", href: "/account/security", icon: ShieldCheck },
 ];
 export function Brand() {
   return (

@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { PrismaClient, type Role } from "@prisma/client";
@@ -78,7 +79,7 @@ async function session(
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: "http://localhost:3100",
       httpOnly: true,
       sameSite: "Lax",
@@ -90,7 +91,7 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-test("Google-only login and unauthenticated API denial", async ({
+test("Google and application password login with unauthenticated API denial", async ({
   page,
   request,
 }) => {
@@ -100,7 +101,7 @@ test("Google-only login and unauthenticated API denial", async ({
   ).toBeVisible();
   await expect(
     page.locator('input[type="password"], input[type="email"]'),
-  ).toHaveCount(0);
+  ).toHaveCount(2);
   const response = await request.get("/api/admin/dashboard");
   expect(response.status()).toBe(401);
   expect((await response.json()).error.code).toBe("UNAUTHENTICATED");

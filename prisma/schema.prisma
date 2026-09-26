@@ -59,6 +59,7 @@ model User {
   emailVerified DateTime?
   image String?
   googleAccountId String? @unique
+  passwordHash String?
   role Role @default(EMPLOYEE)
   status UserStatus @default(ACTIVE)
   lastLoginAt DateTime?
@@ -66,6 +67,7 @@ model User {
   updatedAt DateTime @updatedAt
   accounts Account[]
   sessions Session[]
+  passwordResetTokens PasswordResetToken[]
   employee Employee?
   auditLogs AuditLog[]
   driveCosts DriveCost[]
@@ -97,6 +99,18 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
   @@index([expires])
+}
+model PasswordResetToken {
+  id String @id @default(cuid())
+  userId String
+  email String
+  tokenHash String @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  usedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
 }
 model Employee {
   id String @id @default(cuid())

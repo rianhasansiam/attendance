@@ -13,6 +13,15 @@ const envSchema = z
     AUTH_URL: z.string().url(),
     GOOGLE_CLIENT_ID: z.string().min(1),
     GOOGLE_CLIENT_SECRET: z.string().min(1),
+    SMTP_HOST: z.string().trim().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+    SMTP_SECURE: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    SMTP_USER: z.string().min(1).optional(),
+    SMTP_PASSWORD: z.string().min(1).optional(),
+    EMAIL_FROM: z.email().optional(),
     ALLOWED_GOOGLE_DOMAIN: z.string().trim().toLowerCase().optional(),
     WEBAUTHN_RP_ID: z.string().min(1),
     WEBAUTHN_RP_NAME: z.string().min(1).default("XHYD Attendance"),
@@ -21,6 +30,12 @@ const envSchema = z
     TRUSTED_PROXY_SECRET: z.string().optional(),
   })
   .superRefine((env, ctx) => {
+    if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD))
+      ctx.addIssue({
+        code: "custom",
+        path: ["SMTP_USER"],
+        message: "SMTP_USER and SMTP_PASSWORD must be configured together",
+      });
     const origin = new URL(env.WEBAUTHN_ORIGIN);
     if (
       origin.origin !== env.WEBAUTHN_ORIGIN ||

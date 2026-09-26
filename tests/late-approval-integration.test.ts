@@ -158,31 +158,34 @@ describe.skipIf(!databaseUrl)("late approval PostgreSQL workflow", () => {
     return result;
   }
 
-  it("stores one pending request with server-owned snapshots and allows identical retries", async () => {
-    const value = await fixture();
-    const request = await submit(value);
-    await saveLateReason(value.actor, value.input);
-    expect(request).toMatchObject({
-      attendanceId: value.attendance.id,
-      status: "PENDING",
-      reason: "Train service was delayed.",
-      checkInAt: value.attendance.checkInAt,
-      scheduledStartAt: value.attendance.scheduledStartAt,
-      lateMinutes: 30,
-      reviewedAt: null,
-    });
-    expect(request.requestedAt).toBeInstanceOf(Date);
-    expect(
-      await db.lateApprovalRequest.count({
-        where: { attendanceId: value.attendance.id },
-      }),
-    ).toBe(1);
-    expect(
-      await db.attendance.count({
-        where: { employeeId: value.actor.employee.id },
-      }),
-    ).toBe(1);
-  });
+  it.each(["EMPLOYEE", "MANAGE_DRIVER"] as const)(
+    "%s stores one pending request with server-owned snapshots and allows identical retries",
+    async (role) => {
+      const value = await fixture(role);
+      const request = await submit(value);
+      await saveLateReason(value.actor, value.input);
+      expect(request).toMatchObject({
+        attendanceId: value.attendance.id,
+        status: "PENDING",
+        reason: "Train service was delayed.",
+        checkInAt: value.attendance.checkInAt,
+        scheduledStartAt: value.attendance.scheduledStartAt,
+        lateMinutes: 30,
+        reviewedAt: null,
+      });
+      expect(request.requestedAt).toBeInstanceOf(Date);
+      expect(
+        await db.lateApprovalRequest.count({
+          where: { attendanceId: value.attendance.id },
+        }),
+      ).toBe(1);
+      expect(
+        await db.attendance.count({
+          where: { employeeId: value.actor.employee.id },
+        }),
+      ).toBe(1);
+    },
+  );
 
   it("supports opting into approval after the same reason was already saved", async () => {
     const value = await fixture();
@@ -359,26 +362,29 @@ describe.skipIf(!databaseUrl)("late approval PostgreSQL workflow", () => {
     },
   );
 
-  it("allows employees to submit only for their own attendance and rejects status injection", async () => {
-    const owner = await fixture();
-    const other = await fixture();
-    await expect(
-      saveLateReason(other.actor, owner.input),
-    ).rejects.toMatchObject({
-      code: "ATTENDANCE_NOT_FOUND",
-    });
-    await expect(
-      saveLateReason(owner.actor, {
-        ...owner.input,
-        status: "APPROVED",
-      } as typeof owner.input),
-    ).rejects.toMatchObject({ name: "ZodError" });
-    expect(
-      await db.lateApprovalRequest.count({
-        where: { attendanceId: owner.attendance.id },
-      }),
-    ).toBe(0);
-  });
+  it.each(["EMPLOYEE", "MANAGE_DRIVER"] as const)(
+    "allows %s to submit only for their own attendance and rejects status injection",
+    async (role) => {
+      const owner = await fixture(role);
+      const other = await fixture(role);
+      await expect(
+        saveLateReason(other.actor, owner.input),
+      ).rejects.toMatchObject({
+        code: "ATTENDANCE_NOT_FOUND",
+      });
+      await expect(
+        saveLateReason(owner.actor, {
+          ...owner.input,
+          status: "APPROVED",
+        } as typeof owner.input),
+      ).rejects.toMatchObject({ name: "ZodError" });
+      expect(
+        await db.lateApprovalRequest.count({
+          where: { attendanceId: owner.attendance.id },
+        }),
+      ).toBe(0);
+    },
+  );
 
   it.each(["EMPLOYEE", "MANAGE_DRIVER"] as const)(
     "prevents %s from reviewing",

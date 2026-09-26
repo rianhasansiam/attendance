@@ -1,17 +1,35 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter } from "next-auth/adapters";
 import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
-import { authorizeGoogle, isEmployeeRole } from "@/modules/auth/authorization";
+import { authorizeGoogle } from "@/modules/auth/authorization";
+import {
+  hasLoginIdentity,
+  isAccountEligible,
+} from "@/modules/auth/account-policy";
+import { authorizeCredentials } from "@/modules/auth/credentials";
+
+const SESSION_MAX_AGE = 7 * 24 * 60 * 60;
+type AuthorizedIdentity =
+  | { provider: "google"; userId: string; email: string; subject: string }
+  | {
+      provider: "credentials";
+      userId: string;
+      email: string;
+      passwordHash: string;
+    };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(() => {
   const env = getEnv();
   const base = PrismaAdapter(db);
-  let authorizedIdentity:
-    { userId: string; email: string; subject: string } | undefined;
+  // This proof exists only during this request, never in callback user data,
+  // JWT claims, persisted sessions, logs, or client responses.
+  let authorizedIdentity: AuthorizedIdentity | undefined;
   const adapter: Adapter = {
     ...base,
     // Authorization never provisions users, even if provider callbacks change.
@@ -22,7 +40,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       if (account.provider !== "google")
         throw new Error("Unsupported identity provider");
       if (
-        !authorizedIdentity ||
+        authorizedIdentity?.provider !== "google" ||
         authorizedIdentity.userId !== account.userId ||
         authorizedIdentity.subject !== account.providerAccountId
       )
@@ -32,10 +50,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
         await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${account.userId} FOR UPDATE`;
         const user = await tx.user.findUnique({
           where: { id: account.userId },
+          include: { employee: true },
         });
         if (
           !user ||
-          user.status !== "ACTIVE" ||
+          !isAccountEligible(user) ||
           user.email !== identity.email ||
           user.googleAccountId !== account.providerAccountId
         )
@@ -51,31 +70,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
         });
       });
     },
-    createSession: async (session) => {
-      if (!authorizedIdentity || authorizedIdentity.userId !== session.userId)
-        throw new Error("Unauthorized identity");
-      const identity = authorizedIdentity;
-      return db.$transaction(async (tx) => {
-        // Admin revocation locks the same user before deleting sessions.
-        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${session.userId} FOR UPDATE`;
-        const user = await tx.user.findUnique({
-          where: { id: session.userId },
-        });
-        if (
-          !user ||
-          user.status !== "ACTIVE" ||
-          user.email !== identity.email ||
-          user.googleAccountId !== identity.subject
-        )
-          throw new Error("Unauthorized identity");
-        return tx.session.create({
-          data: {
-            userId: user.id,
-            sessionToken: session.sessionToken,
-            expires: session.expires,
-          },
-        });
-      });
+    createSession: async () => {
+      // Both providers use Auth.js JWT sessions. Registry entries are created
+      // only by its successful sign-in callback below, with a verified identity.
+      throw new Error("Database bearer sessions are disabled");
     },
   };
   return {
@@ -84,9 +82,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
     trustHost: true, // AUTH_URL is canonical; Nginx accepts only the configured server_name.
     useSecureCookies: env.NODE_ENV === "production",
     session: {
-      strategy: "database",
-      maxAge: 7 * 24 * 60 * 60,
-      updateAge: 60 * 60,
+      // Credentials in this Auth.js version requires JWT sessions. Auth.js
+      // remains the sole cookie/JWT issuer for Google and password sign-in.
+      strategy: "jwt",
+      maxAge: SESSION_MAX_AGE,
     },
     providers: [
       Google({
@@ -105,10 +104,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
           params: { scope: "openid email profile", prompt: "select_account" },
         },
       }),
+      Credentials({
+        credentials: {
+          email: { label: "Email", type: "email" },
+          password: { label: "Application password", type: "password" },
+        },
+        async authorize(credentials, request) {
+          authorizedIdentity = undefined;
+          const verified = await authorizeCredentials(credentials, request);
+          if (!verified) return null;
+          authorizedIdentity = {
+            provider: "credentials",
+            userId: verified.user.id,
+            ...verified.proof,
+          };
+          return verified.user;
+        },
+      }),
     ],
     pages: { signIn: "/login", error: "/login" },
     callbacks: {
-      async signIn({ account, profile }) {
+      async signIn({ user: signingInUser, account, profile }) {
+        if (account?.provider === "credentials") {
+          return (
+            authorizedIdentity?.provider === "credentials" &&
+            authorizedIdentity.userId === signingInUser.id
+          );
+        }
         authorizedIdentity = undefined;
         if (
           account?.provider !== "google" ||
@@ -126,8 +148,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
         });
         try {
           authorizeGoogle(profile, user, env.ALLOWED_GOOGLE_DOMAIN);
-          if (!user || (isEmployeeRole(user.role) && !user.employee))
-            return false;
+          if (!user || !isAccountEligible(user)) return false;
           const bound = await db.user.updateMany({
             where: {
               id: user.id,
@@ -146,6 +167,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
           });
           if (bound.count !== 1) return false;
           authorizedIdentity = {
+            provider: "google",
             userId: user.id,
             email,
             subject: profile.sub!,
@@ -163,26 +185,103 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
           return false;
         }
       },
-      async session({ session, user }) {
-        const current = await db.user.findUnique({ where: { id: user.id } });
-        const expires = session.expires.toISOString();
-        if (!current || current.status !== "ACTIVE" || !current.googleAccountId)
-          return { expires, user: { id: "", role: "EMPLOYEE" as const } };
-        const row = await db.session.findUnique({
+      async jwt({ token, user, account }) {
+        if (account) {
+          const identity = authorizedIdentity;
+          authorizedIdentity = undefined;
+          if (
+            !identity ||
+            identity.userId !== user.id ||
+            identity.provider !== account.provider
+          )
+            return null;
+          const row = await db.$transaction(async (tx) => {
+            // Password changes and admin revocations lock this same user. A
+            // password verified before a concurrent reset cannot create a session.
+            await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${identity.userId} FOR UPDATE`;
+            const current = await tx.user.findUnique({
+              where: { id: identity.userId },
+              include: { employee: true },
+            });
+            if (
+              !current ||
+              !isAccountEligible(current) ||
+              current.email !== identity.email ||
+              (identity.provider === "google"
+                ? current.googleAccountId !== identity.subject
+                : current.passwordHash !== identity.passwordHash)
+            )
+              return null;
+            if (identity.provider === "credentials") {
+              await tx.user.updateMany({
+                where: { id: current.id },
+                data: { lastLoginAt: new Date() },
+              });
+            }
+            return tx.session.create({
+              data: {
+                userId: current.id,
+                // Retain the existing Session table for revocation and passkey
+                // challenge binding. This random value is never an auth cookie.
+                sessionToken: randomUUID(),
+                expires: new Date(Date.now() + SESSION_MAX_AGE * 1000),
+              },
+              select: { id: true },
+            });
+          });
+          return row ? { sub: identity.userId, sessionId: row.id } : null;
+        }
+        if (!token.sub || !token.sessionId) return null;
+        const row = await db.session.findFirst({
           where: {
-            sessionToken: session.sessionToken,
-            userId: current.id,
+            id: token.sessionId,
+            userId: token.sub,
             expires: { gt: new Date() },
           },
           select: { id: true },
         });
-        if (!row)
-          return { expires, user: { id: "", role: "EMPLOYEE" as const } };
-        // Explicit allowlist: never send the DB sessionToken, provider subject,
-        // account status, or adapter internals through /api/auth/session.
+        if (!row) return null;
+        const current = await db.user.findUnique({
+          where: { id: token.sub },
+          include: { employee: true },
+        });
+        if (
+          !current ||
+          !isAccountEligible(current) ||
+          !hasLoginIdentity(current)
+        )
+          return null;
+        // Client session updates cannot overwrite identity, role, or registry ID.
+        return { sub: current.id, sessionId: row.id };
+      },
+      async session({ session, token }) {
+        const expires = String(session.expires);
+        const denied = { expires, user: { id: "", role: "EMPLOYEE" as const } };
+        if (!token.sub || !token.sessionId) return denied;
+        const row = await db.session.findFirst({
+          where: {
+            id: token.sessionId,
+            userId: token.sub,
+            expires: { gt: new Date() },
+          },
+          select: { id: true, expires: true },
+        });
+        const current = await db.user.findUnique({
+          where: { id: token.sub },
+          include: { employee: true },
+        });
+        if (
+          !row ||
+          !current ||
+          !isAccountEligible(current) ||
+          !hasLoginIdentity(current)
+        )
+          return denied;
+        // Explicit allowlist: no password hashes, provider subjects, DB bearer
+        // tokens, or arbitrary adapter fields through /api/auth/session.
         return {
-          expires,
-          sessionId: row?.id,
+          expires: row.expires.toISOString(),
+          sessionId: row.id,
           user: {
             id: current.id,
             role: current.role,
@@ -203,6 +302,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
             : `${origin}/`;
         } catch {
           return `${origin}/`;
+        }
+      },
+    },
+    events: {
+      async signOut(message) {
+        if (
+          "token" in message &&
+          message.token?.sub &&
+          message.token.sessionId
+        ) {
+          await db.session.deleteMany({
+            where: { id: message.token.sessionId, userId: message.token.sub },
+          });
         }
       },
     },

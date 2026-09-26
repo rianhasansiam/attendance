@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { PrismaClient, type Role } from "@prisma/client";
@@ -51,7 +52,7 @@ async function signIn(context: BrowserContext, role: Role) {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: origin,
       httpOnly: true,
       sameSite: "Lax",

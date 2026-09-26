@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
@@ -8,7 +9,7 @@ const db = new PrismaClient({
 });
 const origin = "http://localhost:3100";
 
-// This creates an ordinary Auth.js database session only in the isolated test
+// This creates an Auth.js JWT backed by the existing session registry only in the isolated test
 // database required by playwright.config.ts. There is no application bypass.
 async function fixture(context: BrowserContext) {
   const marker = `State-${randomUUID()}`;
@@ -33,7 +34,7 @@ async function fixture(context: BrowserContext) {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: origin,
       httpOnly: true,
       sameSite: "Lax",

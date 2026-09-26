@@ -141,8 +141,11 @@ export async function updateEmployee(
       );
     await validateAssignments(tx, input.officeId, input.departmentId);
     const { name, email, status, role, ...employee } = input;
-    // A changed Google identity must reauthenticate and register fresh credentials.
+    // An email change resets every sign-in method and requires fresh verification.
     if (email && email !== previous.user.email) {
+      await tx.passwordResetToken.deleteMany({
+        where: { userId: previous.userId },
+      });
       await tx.account.deleteMany({ where: { userId: previous.userId } });
       await tx.session.deleteMany({ where: { userId: previous.userId } });
       await tx.webAuthnCredential.updateMany({
@@ -164,7 +167,12 @@ export async function updateEmployee(
         status,
         role,
         ...(email && email !== previous.user.email
-          ? { googleAccountId: null, emailVerified: null, image: null }
+          ? {
+              googleAccountId: null,
+              passwordHash: null,
+              emailVerified: null,
+              image: null,
+            }
           : {}),
       },
     });

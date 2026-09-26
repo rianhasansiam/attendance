@@ -11,6 +11,7 @@ async function main() {
     const counts = await db.$transaction([
       db.rateLimit.deleteMany({ where: { resetAt: { lt: now } } }),
       db.webAuthnChallenge.deleteMany({ where: { expiresAt: { lt: now } } }),
+      db.passwordResetToken.deleteMany({ where: { expiresAt: { lt: now } } }),
       db.session.deleteMany({ where: { expires: { lt: now } } }),
     ]);
     console.log(

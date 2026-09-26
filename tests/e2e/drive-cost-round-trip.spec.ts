@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
@@ -80,7 +81,7 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: "http://localhost:3100",
       httpOnly: true,
       sameSite: "Lax",

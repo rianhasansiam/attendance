@@ -1,3 +1,4 @@
+import { testSessionCookie } from "./session-cookie";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
@@ -62,7 +63,7 @@ async function signIn(context: BrowserContext, userId: string) {
   await context.addCookies([
     {
       name: "authjs.session-token",
-      value: token,
+      value: await testSessionCookie(db, token),
       url: "http://localhost:3100",
       httpOnly: true,
       sameSite: "Lax",

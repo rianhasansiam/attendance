@@ -1512,3 +1512,84 @@ tbody tr.date-group-1:hover {
     min-width: 0;
   }
 }
+
+/* Password authentication shares the existing form and workspace design. */
+.login-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+.auth-form {
+  display: grid;
+  gap: 17px;
+  text-align: left;
+}
+.auth-form .notice {
+  margin-bottom: 0;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.auth-link {
+  color: var(--green);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: center;
+}
+.auth-back-link {
+  display: inline-block;
+  margin-top: 24px;
+}
+.auth-help {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 0;
+}
+.password-input {
+  position: relative;
+}
+.password-input input {
+  padding-right: 46px;
+}
+.password-toggle {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 42px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.password-page-card {
+  width: 430px;
+}
+.password-page-card h1 {
+  margin-bottom: 14px;
+}
+.password-page-card > .auth-help {
+  margin-bottom: 24px;
+}
+.account-security-card {
+  max-width: 560px;
+  padding: 26px;
+}
+.account-security-card h2 {
+  margin-bottom: 12px;
+}
+.account-security-card > .auth-help {
+  margin-bottom: 24px;
+}

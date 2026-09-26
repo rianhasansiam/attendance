@@ -1,3 +1,4 @@
+import { hasLoginIdentity } from "@/modules/auth/account-policy";
 import {
   Prisma,
   type ChallengePurpose,
@@ -25,7 +26,11 @@ import {
 } from "./validation";
 import type { z } from "zod";
 
-export type EmployeeActor = User & { employee: Employee; sessionId: string };
+export type EmployeeActor = Omit<User, "passwordHash"> & {
+  employee: Employee;
+  sessionId: string;
+  hasPassword?: boolean;
+};
 export const deviceSelect = {
   id: true,
   name: true,
@@ -171,7 +176,7 @@ export async function registerCredential(
       });
       if (
         currentUser.status !== "ACTIVE" ||
-        !currentUser.googleAccountId ||
+        !hasLoginIdentity(currentUser) ||
         currentUser.googleAccountId !== actor.googleAccountId ||
         !session
       ) {

@@ -15,7 +15,7 @@ const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.TEST_DATABASE_URL! }),
 });
 const origin = "http://localhost:3100";
-async function signIn(context: BrowserContext, role: Role = "ADMIN") {
+async function signIn(context: BrowserContext, role: Role = "SUPER_ADMIN") {
   const marker = randomUUID();
   const user = await db.user.create({
     data: {
@@ -237,18 +237,120 @@ function expectedPdfMoney(value: string) {
   return `${Number(value) < 0 ? "-" : ""}BDT ${new Intl.NumberFormat("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(Number(value)))}`;
 }
 
-test("PDF export is hidden and denied for admins", async ({
+test("admins can view and filter the ledger but have no write or export actions", async ({
   page,
   context,
 }) => {
+  await signIn(context);
+  const initial = await summary(context);
+  const marker = `Read-only-${randomUUID()}`;
+  const categoryResponse = await context.request.post(
+    "/api/daily-expenses/categories",
+    { headers: { origin }, data: { name: marker } },
+  );
+  expect(categoryResponse.status()).toBe(200);
+  const categoryId = (await categoryResponse.json()).data.id as string;
+  const record = await createTransaction(context, "expenses", {
+    amount: "1.00",
+    date: initial.today,
+    note: marker,
+    categoryId,
+  });
+  const before = await summary(context);
+  const auditCount = await db.auditLog.count();
   await signIn(context, "ADMIN");
   await openWorkspace(page);
-  await expect(
-    page.getByRole("button", { name: "Download PDF", exact: true }),
-  ).toHaveCount(0);
+  await page.getByLabel("Search descriptions and notes").fill(marker);
+  await page
+    .getByRole("button", { name: "Apply filters", exact: true })
+    .click();
+  await expect(page.getByRole("row").filter({ hasText: marker })).toHaveCount(
+    1,
+  );
+  for (const name of [
+    "Add Balance",
+    "Add Expense",
+    "Categories",
+    "Edit",
+    "Delete",
+    "Download PDF",
+  ])
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(
+      0,
+    );
+  for (const route of ["summary", "transactions", "categories"]) {
+    const response = await context.request.get(`/api/daily-expenses/${route}`);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+  }
+  const transaction = {
+    amount: "99.00",
+    date: initial.today,
+    idempotencyKey: randomUUID(),
+  };
+  const writes = [
+    () =>
+      context.request.post("/api/daily-expenses/balance", {
+        headers: { origin },
+        data: transaction,
+      }),
+    () =>
+      context.request.post("/api/daily-expenses/expenses", {
+        headers: { origin },
+        data: { ...transaction, categoryId },
+      }),
+    () =>
+      context.request.post("/api/daily-expenses/categories", {
+        headers: { origin },
+        data: { name: `${marker}-blocked` },
+      }),
+    ...[
+      { name: `${marker}-renamed` },
+      { archived: true },
+      { archived: false },
+    ].map(
+      (data) => () =>
+        context.request.patch(`/api/daily-expenses/categories/${categoryId}`, {
+          headers: { origin },
+          data,
+        }),
+    ),
+    () =>
+      context.request.patch(`/api/daily-expenses/transactions/${record.id}`, {
+        headers: { origin },
+        data: {
+          amount: "99.00",
+          date: initial.today,
+          categoryId,
+          expectedVersion: record.version,
+        },
+      }),
+    () =>
+      context.request.delete(`/api/daily-expenses/transactions/${record.id}`, {
+        headers: { origin },
+        data: { expectedVersion: record.version },
+      }),
+  ];
+  for (const write of writes) {
+    const response = await write();
+    expect(response.status()).toBe(403);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+  }
   const response = await context.request.get("/api/daily-expenses/report");
   expect(response.status()).toBe(403);
   expect(response.headers()["cache-control"]).toBe("no-store");
+  expect(await summary(context)).toEqual(before);
+  expect(await db.auditLog.count()).toBe(auditCount);
+  expect(
+    await db.dailyExpenseCategory.findUniqueOrThrow({
+      where: { id: categoryId },
+    }),
+  ).toMatchObject({ name: marker, archived: false });
+  expect(
+    await db.dailyExpenseTransaction.findUniqueOrThrow({
+      where: { id: record.id },
+    }),
+  ).toMatchObject({ version: record.version, deletedAt: null });
 });
 
 test("super admins download all filtered PDF records across history pages with accurate totals", async ({
@@ -450,7 +552,7 @@ test("only super admins can confirm deletion, removing rows and reversing each r
   page,
   context,
 }) => {
-  const creator = await signIn(context, "ADMIN");
+  const creator = await signIn(context, "SUPER_ADMIN");
   const initial = await summary(context);
   const marker = `Delete-${randomUUID()}`;
   const categoryResponse = await context.request.post(
@@ -477,6 +579,7 @@ test("only super admins can confirm deletion, removing rows and reversing each r
   const where = { id: { in: records.map((record) => record.id) } };
   const original = await db.dailyExpenseTransaction.findMany({ where });
   const beforeDelete = await summary(context);
+  await signIn(context, "ADMIN");
   await openWorkspace(page);
   await page.getByLabel("Search descriptions and notes").fill(marker);
   await page
@@ -739,7 +842,7 @@ test("only super admins can edit records, preserving their creator and refreshin
   page,
   context,
 }) => {
-  const creator = await signIn(context, "ADMIN");
+  const creator = await signIn(context, "SUPER_ADMIN");
   const initial = await summary(context);
   const marker = `Edit-${randomUUID()}`;
   const categoryIds: string[] = [];
@@ -774,6 +877,7 @@ test("only super admins can edit records, preserving their creator and refreshin
   const auditCount = await db.auditLog.count({
     where: { resourceId: { in: records.map((record) => record.id) } },
   });
+  await signIn(context, "ADMIN");
   await openWorkspace(page);
   await page.getByLabel("Search descriptions and notes").fill(marker);
   await page

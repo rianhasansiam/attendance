@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { DomainError } from "@/lib/errors";
+import { measureServerTiming, type ServerTiming } from "@/lib/server-timing";
 import { locationSchema, verifyGeofence } from "@/modules/geofence/service";
 import {
   extractClientIp,
@@ -166,12 +167,18 @@ export async function recordAttendance(
   action: AttendanceAction,
   evidence: AttendanceEvidence,
   headers: Headers,
+  timing?: ServerTiming,
 ) {
   const ip = extractClientIp(headers, getEnv());
   try {
-    const initialOffice = await db.office.findUniqueOrThrow({
-      where: { id: actor.employee.officeId },
-    });
+    const initialOffice = await measureServerTiming(
+      timing,
+      "initial_policy",
+      () =>
+        db.office.findUniqueOrThrow({
+          where: { id: actor.employee.officeId },
+        }),
+    );
     const initialPolicy = resolveAttendancePolicy(initialOffice);
     let challenge: string | undefined;
     if (initialPolicy.requireWebAuthn) {
@@ -180,190 +187,260 @@ export async function recordAttendance(
           "WEBAUTHN_REQUIRED",
           "Confirm attendance with your registered passkey.",
         );
-      challenge = await consumeChallenge(actor, action, evidence.challengeId);
+      const challengeId = evidence.challengeId;
+      challenge = await measureServerTiming(timing, "challenge", () =>
+        consumeChallenge(actor, action, challengeId),
+      );
     }
-    return await db.$transaction(
-      async (tx) => {
-        // Every attendance mutation for an employee serializes on this row. The
-        // unique day key and partial open-record index provide final DB protection.
-        await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${actor.employee.id} FOR UPDATE`;
-        const now = new Date();
-        const employee = await tx.employee.findUniqueOrThrow({
-          where: { id: actor.employee.id },
-          include: {
-            user: true,
-            office: { include: { networks: true } },
-            shifts: {
-              include: { shift: true },
-              orderBy: { startDate: "desc" },
-            },
-          },
-        });
-        if (employee.user.status !== "ACTIVE")
-          throw new DomainError(
-            "USER_INACTIVE",
-            "Your account is not active.",
-            403,
-          );
-        const session = await tx.session.findFirst({
-          where: {
-            id: actor.sessionId,
-            userId: actor.id,
-            expires: { gt: now },
-          },
-          select: { id: true },
-        });
-        if (
-          !session ||
-          !employee.user.googleAccountId ||
-          employee.user.googleAccountId !== actor.googleAccountId
-        ) {
-          throw new DomainError(
-            "USER_NOT_AUTHORIZED",
-            "Your authorization has changed. Sign in again.",
-            403,
-          );
-        }
-        if (!employee.office.active)
-          throw new DomainError(
-            "OFFICE_INACTIVE",
-            "Your assigned office is inactive.",
-            403,
-          );
-        const policy = resolveAttendancePolicy(employee.office);
-        const openAttendance = await tx.attendance.findFirst({
-          where: {
-            employeeId: employee.id,
-            checkInAt: { not: null },
-            checkOutAt: null,
-          },
-          include: { shift: true },
-        });
-        if (action === "CHECK_IN" && openAttendance)
-          throw new DomainError(
-            "ALREADY_CHECKED_IN",
-            "Check out of your current shift before checking in again.",
-            409,
-          );
-        if (action === "CHECK_OUT")
-          assertAttendanceState(action, openAttendance);
-        const assignment = resolveShiftAssignment(employee.shifts, now);
-        const shift =
-          action === "CHECK_OUT" ? openAttendance!.shift : assignment?.shift;
-        if (!shift)
-          throw new DomainError(
-            "NO_ACTIVE_SHIFT",
-            "No active shift is assigned for this date.",
-          );
-        const window = getShiftWindow(
-          now,
-          shift,
-          action === "CHECK_OUT"
-            ? openAttendance!.attendanceDate.toISOString().slice(0, 10)
-            : undefined,
-        );
-        const existing =
-          action === "CHECK_OUT"
-            ? openAttendance
-            : await tx.attendance.findUnique({
-                where: {
-                  employeeId_attendanceDate: {
-                    employeeId: employee.id,
-                    attendanceDate: window.attendanceDate,
-                  },
-                },
-              });
-        assertAttendanceState(action, existing);
-        let credentialId: string | null = null;
-        if (policy.requireWebAuthn) {
-          if (!challenge || !evidence.response)
-            throw new DomainError(
-              "WEBAUTHN_REQUIRED",
-              "Office security policy changed. Please try attendance again.",
-            );
-          credentialId = await verifyAttendanceAssertion(
-            tx,
-            actor,
-            evidence.response,
-            challenge,
-            policy.requireApprovedDevice,
-          );
-        }
-        const distance = policy.requireGeofence
-          ? verifyGeofence(
-              evidence.location,
-              employee.office,
-              policy.maximumGpsAccuracyMeters,
-            )
-          : null;
-        if (policy.requireOfficeNetwork)
-          verifyOfficeNetwork(ip, employee.office.networks);
-        // Persist coordinates only when the configured policy actually uses them.
-        const location = policy.requireGeofence ? evidence.location : undefined;
-        let record;
-        if (action === "CHECK_IN") {
-          const data = {
-            officeId: employee.officeId,
-            shiftId: shift.id,
-            scheduledEndAt: window.endsAt,
-            overtimeMinutes: 0,
-            checkInAt: now,
-            checkInLatitude: location?.latitude,
-            checkInLongitude: location?.longitude,
-            checkInAccuracy: location?.accuracy,
-            checkInDistanceMeters: distance,
-            checkInIp: ip,
-            checkInCredentialId: credentialId,
-            ...calculateCheckIn(now, window.startsAt, shift.graceMinutes),
-          };
-          record = existing
-            ? await tx.attendance.update({ where: { id: existing.id }, data })
-            : await tx.attendance.create({
-                data: {
-                  employeeId: employee.id,
-                  attendanceDate: window.attendanceDate,
-                  ...data,
-                },
-              });
-        } else {
-          record = await tx.attendance.update({
-            where: { id: existing!.id },
-            data: {
-              checkOutAt: now,
-              // Legacy open rows have no snapshot; establish it once using
-              // that row's original business date and linked shift.
-              scheduledEndAt: existing!.scheduledEndAt ?? window.endsAt,
-              checkOutLatitude: location?.latitude,
-              checkOutLongitude: location?.longitude,
-              checkOutAccuracy: location?.accuracy,
-              checkOutDistanceMeters: distance,
-              checkOutIp: ip,
-              checkOutCredentialId: credentialId,
-              ...calculateCheckOut(
-                existing!.checkInAt!,
+    // Acquisition includes pool wait and BEGIN. Finish includes commit/rollback
+    // and driver overhead; Prisma does not expose those components separately.
+    const finishAcquisition = timing?.start("tx_acquire");
+    let finishTransaction: (() => void) | undefined;
+    try {
+      return await measureServerTiming(timing, "transaction", () =>
+        db.$transaction(
+          async (tx) => {
+            finishAcquisition?.();
+            try {
+              // Every attendance mutation for an employee serializes on this row. The
+              // unique day key and partial open-record index provide final DB protection.
+              await measureServerTiming(
+                timing,
+                "employee_lock",
+                () =>
+                  tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${actor.employee.id} FOR UPDATE`,
+              );
+              const now = new Date();
+              const employee = await measureServerTiming(
+                timing,
+                "authoritative_reads",
+                () =>
+                  tx.employee.findUniqueOrThrow({
+                    where: { id: actor.employee.id },
+                    include: {
+                      user: true,
+                      office: { include: { networks: true } },
+                      shifts: {
+                        include: { shift: true },
+                        orderBy: { startDate: "desc" },
+                      },
+                    },
+                  }),
+              );
+              if (employee.user.status !== "ACTIVE")
+                throw new DomainError(
+                  "USER_INACTIVE",
+                  "Your account is not active.",
+                  403,
+                );
+              const session = await measureServerTiming(
+                timing,
+                "authoritative_reads",
+                () =>
+                  tx.session.findFirst({
+                    where: {
+                      id: actor.sessionId,
+                      userId: actor.id,
+                      expires: { gt: now },
+                    },
+                    select: { id: true },
+                  }),
+              );
+              if (
+                !session ||
+                !employee.user.googleAccountId ||
+                employee.user.googleAccountId !== actor.googleAccountId
+              ) {
+                throw new DomainError(
+                  "USER_NOT_AUTHORIZED",
+                  "Your authorization has changed. Sign in again.",
+                  403,
+                );
+              }
+              if (!employee.office.active)
+                throw new DomainError(
+                  "OFFICE_INACTIVE",
+                  "Your assigned office is inactive.",
+                  403,
+                );
+              const policy = resolveAttendancePolicy(employee.office);
+              const openAttendance = await measureServerTiming(
+                timing,
+                "authoritative_reads",
+                () =>
+                  tx.attendance.findFirst({
+                    where: {
+                      employeeId: employee.id,
+                      checkInAt: { not: null },
+                      checkOutAt: null,
+                    },
+                    include: { shift: true },
+                  }),
+              );
+              if (action === "CHECK_IN" && openAttendance)
+                throw new DomainError(
+                  "ALREADY_CHECKED_IN",
+                  "Check out of your current shift before checking in again.",
+                  409,
+                );
+              if (action === "CHECK_OUT")
+                assertAttendanceState(action, openAttendance);
+              const assignment = resolveShiftAssignment(employee.shifts, now);
+              const shift =
+                action === "CHECK_OUT"
+                  ? openAttendance!.shift
+                  : assignment?.shift;
+              if (!shift)
+                throw new DomainError(
+                  "NO_ACTIVE_SHIFT",
+                  "No active shift is assigned for this date.",
+                );
+              const window = getShiftWindow(
                 now,
-                shift.halfDayThreshold,
-                existing!.lateMinutes,
-                existing!.scheduledEndAt ?? window.endsAt,
-              ),
-            },
-          });
-        }
-        await tx.attendanceEvent.create({
-          data: {
-            employeeId: employee.id,
-            attendanceId: record.id,
-            type: `${action}_SUCCESS`,
-            metadata: { credentialId, distanceMeters: distance },
+                shift,
+                action === "CHECK_OUT"
+                  ? openAttendance!.attendanceDate.toISOString().slice(0, 10)
+                  : undefined,
+              );
+              const existing =
+                action === "CHECK_OUT"
+                  ? openAttendance
+                  : await measureServerTiming(
+                      timing,
+                      "authoritative_reads",
+                      () =>
+                        tx.attendance.findUnique({
+                          where: {
+                            employeeId_attendanceDate: {
+                              employeeId: employee.id,
+                              attendanceDate: window.attendanceDate,
+                            },
+                          },
+                        }),
+                    );
+              assertAttendanceState(action, existing);
+              const { credentialId, distance } = await measureServerTiming(
+                timing,
+                "verification",
+                async () => {
+                  let credentialId: string | null = null;
+                  if (policy.requireWebAuthn) {
+                    if (!challenge || !evidence.response)
+                      throw new DomainError(
+                        "WEBAUTHN_REQUIRED",
+                        "Office security policy changed. Please try attendance again.",
+                      );
+                    credentialId = await verifyAttendanceAssertion(
+                      tx,
+                      actor,
+                      evidence.response,
+                      challenge,
+                      policy.requireApprovedDevice,
+                    );
+                  }
+                  const distance = policy.requireGeofence
+                    ? verifyGeofence(
+                        evidence.location,
+                        employee.office,
+                        policy.maximumGpsAccuracyMeters,
+                      )
+                    : null;
+                  if (policy.requireOfficeNetwork)
+                    verifyOfficeNetwork(ip, employee.office.networks);
+                  return { credentialId, distance };
+                },
+              );
+              // Persist coordinates only when the configured policy actually uses them.
+              const location = policy.requireGeofence
+                ? evidence.location
+                : undefined;
+              const record = await measureServerTiming(
+                timing,
+                "db_write",
+                async () => {
+                  let record;
+                  if (action === "CHECK_IN") {
+                    const data = {
+                      officeId: employee.officeId,
+                      shiftId: shift.id,
+                      scheduledEndAt: window.endsAt,
+                      overtimeMinutes: 0,
+                      checkInAt: now,
+                      checkInLatitude: location?.latitude,
+                      checkInLongitude: location?.longitude,
+                      checkInAccuracy: location?.accuracy,
+                      checkInDistanceMeters: distance,
+                      checkInIp: ip,
+                      checkInCredentialId: credentialId,
+                      ...calculateCheckIn(
+                        now,
+                        window.startsAt,
+                        shift.graceMinutes,
+                      ),
+                    };
+                    record = existing
+                      ? await tx.attendance.update({
+                          where: { id: existing.id },
+                          data,
+                        })
+                      : await tx.attendance.create({
+                          data: {
+                            employeeId: employee.id,
+                            attendanceDate: window.attendanceDate,
+                            ...data,
+                          },
+                        });
+                  } else {
+                    record = await tx.attendance.update({
+                      where: { id: existing!.id },
+                      data: {
+                        checkOutAt: now,
+                        // Legacy open rows have no snapshot; establish it once using
+                        // that row's original business date and linked shift.
+                        scheduledEndAt:
+                          existing!.scheduledEndAt ?? window.endsAt,
+                        checkOutLatitude: location?.latitude,
+                        checkOutLongitude: location?.longitude,
+                        checkOutAccuracy: location?.accuracy,
+                        checkOutDistanceMeters: distance,
+                        checkOutIp: ip,
+                        checkOutCredentialId: credentialId,
+                        ...calculateCheckOut(
+                          existing!.checkInAt!,
+                          now,
+                          shift.halfDayThreshold,
+                          existing!.lateMinutes,
+                          existing!.scheduledEndAt ?? window.endsAt,
+                        ),
+                      },
+                    });
+                  }
+                  await tx.attendanceEvent.create({
+                    data: {
+                      employeeId: employee.id,
+                      attendanceId: record.id,
+                      type: `${action}_SUCCESS`,
+                      metadata: { credentialId, distanceMeters: distance },
+                    },
+                  });
+                  return record;
+                },
+              );
+              return sanitizeAttendance(record);
+            } finally {
+              finishTransaction = timing?.start("tx_finish");
+            }
           },
-        });
-        return sanitizeAttendance(record);
-      },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        timeout: 15_000,
-      },
-    );
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            timeout: 15_000,
+          },
+        ),
+      );
+    } finally {
+      finishAcquisition?.();
+      finishTransaction?.();
+    }
   } catch (error) {
     let domainError = error;
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

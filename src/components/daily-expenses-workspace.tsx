@@ -108,10 +108,12 @@ function fieldErrors(error: unknown) {
 }
 
 export function DailyExpensesWorkspace({
+  canWrite,
   canEditTransactions,
   canDeleteTransactions,
   canDownloadReport,
 }: {
+  canWrite: boolean;
   canEditTransactions: boolean;
   canDeleteTransactions: boolean;
   canDownloadReport: boolean;
@@ -165,6 +167,7 @@ export function DailyExpensesWorkspace({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const showTransactionDialog = canWrite && dialogOpen && !categoriesOpen;
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -273,7 +276,7 @@ export function DailyExpensesWorkspace({
   }, [submission]);
 
   function openTransaction(type: TransactionType) {
-    if (locked || !summary.data) return;
+    if (!canWrite || locked || !summary.data) return;
     setDraft({
       type,
       amount: "",
@@ -331,7 +334,7 @@ export function DailyExpensesWorkspace({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draft || submitting.current || conflict) return;
+    if (!canWrite || !draft || submitting.current || conflict) return;
     if (
       draft.deleting
         ? !canDeleteTransactions
@@ -548,7 +551,11 @@ export function DailyExpensesWorkspace({
     <div className={styles.workspace}>
       <PageHeader
         title="Daily Expenses"
-        description="Track added funds, daily expenses, and transaction history."
+        description={
+          canWrite
+            ? "Track added funds, daily expenses, and transaction history."
+            : "View added funds, daily expenses, and transaction history. Only super admins can make changes."
+        }
         action={
           <button
             type="button"
@@ -623,33 +630,35 @@ export function DailyExpensesWorkspace({
           History filters do not change these totals.
         </p>
       )}
-      <div className={`buttons ${styles.actions}`}>
-        <button
-          type="button"
-          className="button"
-          onClick={() => openTransaction("BALANCE_ADDED")}
-          disabled={!summary.data || locked}
-        >
-          <Plus size={16} /> Add Balance
-        </button>
-        <button
-          type="button"
-          className="button secondary"
-          onClick={() => openTransaction("EXPENSE")}
-          disabled={!summary.data || locked}
-        >
-          <Wallet size={16} /> Add Expense
-        </button>
-        <button
-          type="button"
-          className="button secondary"
-          onClick={() => setCategoriesOpen(true)}
-          disabled={busy}
-        >
-          <FolderOpen size={16} /> Categories
-        </button>
-      </div>
-      {uncertain && (
+      {canWrite && (
+        <div className={`buttons ${styles.actions}`}>
+          <button
+            type="button"
+            className="button"
+            onClick={() => openTransaction("BALANCE_ADDED")}
+            disabled={!summary.data || locked}
+          >
+            <Plus size={16} /> Add Balance
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => openTransaction("EXPENSE")}
+            disabled={!summary.data || locked}
+          >
+            <Wallet size={16} /> Add Expense
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setCategoriesOpen(true)}
+            disabled={busy}
+          >
+            <FolderOpen size={16} /> Categories
+          </button>
+        </div>
+      )}
+      {canWrite && uncertain && (
         <div className={`notice ${styles.pending}`} role="alert">
           <span>
             A transaction change is awaiting confirmation. Safely retry it
@@ -894,12 +903,16 @@ export function DailyExpensesWorkspace({
             title={
               hasFilters || page > 1
                 ? "No matching transactions"
-                : "Your ledger is ready"
+                : canWrite
+                  ? "Your ledger is ready"
+                  : "No transactions yet"
             }
             description={
               hasFilters || page > 1
                 ? "Try changing the filters or returning to the first page."
-                : "Add balance or record your first expense. The balance carries forward every day."
+                : canWrite
+                  ? "Add balance or record your first expense. The balance carries forward every day."
+                  : "Transactions will appear here when a super admin records them."
             }
           />
         ) : null}
@@ -914,10 +927,10 @@ export function DailyExpensesWorkspace({
         )}
       </section>
 
-      {dialogOpen &&
+      {showTransactionDialog &&
+        canDeleteTransactions &&
         draft?.deleting &&
-        draft.transaction &&
-        !categoriesOpen && (
+        draft.transaction && (
           <Modal
             title={
               draft.type === "EXPENSE" ? "Delete Expense" : "Delete Balance"
@@ -996,7 +1009,7 @@ export function DailyExpensesWorkspace({
             </form>
           </Modal>
         )}
-      {dialogOpen && draft && !draft.deleting && !categoriesOpen && (
+      {showTransactionDialog && draft && !draft.deleting && (
         <Modal
           title={
             draft.transaction
@@ -1200,7 +1213,7 @@ export function DailyExpensesWorkspace({
           </form>
         </Modal>
       )}
-      {categoriesOpen && (
+      {canWrite && categoriesOpen && (
         <CategoryDialog
           close={() => setCategoriesOpen(false)}
           onCreated={(category) => {

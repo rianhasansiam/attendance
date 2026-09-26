@@ -45,10 +45,12 @@ import {
 } from "./ui";
 import { baseApi } from "@/store/api/base-api";
 import { errorMessage } from "@/store/api/errors";
-import { useAppDispatch } from "@/store/hooks";
+import { useAppDispatch, useAppStore } from "@/store/hooks";
 import { useQueryView } from "@/store/use-query-view";
 import { useFreshness } from "@/store/freshness";
 import {
+  applyConfirmedAttendance,
+  attendanceApi,
   attendanceChangedTags,
   devicesChangedTags,
   useEmployeeDayQuery,
@@ -69,6 +71,22 @@ import {
 } from "@/lib/client/attendance-ceremony";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { LateReasonDialog } from "./late-reason-dialog";
+import {
+  beginAttendanceTiming,
+  type AttendanceTimingTrace,
+} from "@/lib/client/attendance-timing";
+import {
+  attendanceIntent,
+  recoveredAttendance,
+  type AttendanceIntent,
+} from "@/lib/client/attendance-recovery";
+import type { AttendanceRecord } from "@/store/features/attendance/contracts";
+
+type AttendanceAttempt = {
+  controller: AbortController;
+  intent: AttendanceIntent;
+  timing: AttendanceTimingTrace;
+};
 
 const attendanceColumns = [
   { key: "attendanceDate", label: "Date", format: "date" as const },
@@ -91,26 +109,123 @@ function friendlyError(error: unknown) {
 }
 export function EmployeeDashboard() {
   const dispatch = useAppDispatch();
+  const store = useAppStore();
   const dayQuery = useEmployeeDayQuery(undefined, useFreshness(true));
   const { data, error, loading, refresh, isFetching } = useQueryView(dayQuery);
   const submitting = useRef(false);
-  const ceremony = useRef<AbortController | null>(null);
-  useEffect(() => () => ceremony.current?.abort(), []);
+  const attempt = useRef<AttendanceAttempt | null>(null);
+  const recovery = useRef<AttendanceAttempt | null>(null);
+  const [busy, setBusy] = useState("");
+  useEffect(
+    () => () => {
+      attempt.current?.controller.abort();
+      attempt.current?.timing.finish("cancelled");
+      // Activity can hide this route without discarding component state.
+      // Clear transient work so a revealed dashboard is not stuck as busy.
+      submitting.current = false;
+      setBusy("");
+    },
+    [],
+  );
   const [needsReconcile, setNeedsReconcile] = useState(false);
+  const [visibleConfirmation, setVisibleConfirmation] = useState<{
+    record: AttendanceRecord;
+    attempt: AttendanceAttempt;
+    outcome: "confirmed" | "recovered";
+  }>();
+  function isCurrent(current: AttendanceAttempt) {
+    return (
+      attempt.current === current &&
+      !current.controller.signal.aborted &&
+      store.getState().workspaceUi.status === "active"
+    );
+  }
+  useEffect(() => {
+    if (!visibleConfirmation || busy) return;
+    const { record, attempt: current, outcome } = visibleConfirmation;
+    if (
+      !current.controller.signal.aborted &&
+      store.getState().workspaceUi.status === "active" &&
+      data?.today?.id === record.id &&
+      data?.today?.checkInAt === record.checkInAt &&
+      data?.today?.checkOutAt === record.checkOutAt
+    ) {
+      // Measure the committed React display, not just receipt of the POST.
+      current.timing.finish(outcome);
+    }
+  }, [visibleConfirmation, busy, data?.today, store]);
   async function refreshDay() {
+    let pending = recovery.current;
+    if (
+      pending?.controller.signal.aborted &&
+      attempt.current === pending &&
+      store.getState().workspaceUi.status === "active"
+    ) {
+      // Resume only the authoritative read after a retained route is revealed;
+      // the cancelled attendance request and its evidence are never replayed.
+      pending = {
+        ...pending,
+        controller: new AbortController(),
+        timing: beginAttendanceTiming(pending.intent.action),
+      };
+      recovery.current = pending;
+      attempt.current = pending;
+    }
+    if (pending && !isCurrent(pending)) return;
+    if (pending) setBusy("Checking the latest attendance…");
     try {
-      await refresh().unwrap();
+      if (pending) {
+        // A read that began before the uncertain write is not a recovery read.
+        const running = dispatch(
+          attendanceApi.util.getRunningQueryThunk("employeeDay", undefined),
+        );
+        if (running) {
+          running.abort();
+          await running;
+        }
+        if (!isCurrent(pending)) return;
+      }
+      const read = () => refresh().unwrap();
+      const day = pending
+        ? await pending.timing.measure("recovery", read)
+        : await read();
+      if (!pending) return;
+      if (!isCurrent(pending)) return;
+      const record = recoveredAttendance(day, pending.intent);
+      if (!record) {
+        setActionError(
+          "The latest attendance does not yet confirm this action. Refresh again before another attempt.",
+        );
+        return;
+      }
+      const applied = await dispatch(
+        applyConfirmedAttendance(
+          record,
+          pending.intent.employeeId,
+          pending.controller.signal,
+        ),
+      );
+      if (!applied || !isCurrent(pending)) return;
+      recovery.current = null;
       setNeedsReconcile(false);
+      setActionError("");
+      setSuccess(
+        pending.intent.action === "CHECK_IN"
+          ? "You’re checked in. Your attendance was confirmed after refreshing."
+          : "You’re checked out. Your attendance was confirmed after refreshing.",
+      );
+      setVisibleConfirmation({
+        record,
+        attempt: pending,
+        outcome: "recovered",
+      });
+      dispatch(baseApi.util.invalidateTags([...attendanceChangedTags]));
     } catch {
       // Keep the operation disabled until an authoritative read succeeds.
+    } finally {
+      if (pending && isCurrent(pending)) setBusy("");
     }
   }
-  const [busy, setBusy] = useState("");
-  const [confirmedOperation, setConfirmedOperation] = useState<{
-    action: "CHECK_IN" | "CHECK_OUT";
-    attendanceDate: string;
-    observedRead?: number;
-  }>();
   const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
   const [dismissedReasonId, setDismissedReasonId] = useState("");
@@ -142,53 +257,71 @@ export function EmployeeDashboard() {
       />
     ) : null;
   async function attend(action: "CHECK_IN" | "CHECK_OUT") {
-    if (submitting.current || needsReconcile) return;
+    if (submitting.current || needsReconcile || !data) return;
+    const timing = beginAttendanceTiming(action);
     setActionError("");
     setSuccess("");
     if (!navigator.onLine) {
       setActionError(
         "You’re offline. Connect to the internet to record attendance.",
       );
+      timing.finish("failed");
       return;
     }
     submitting.current = true;
     const controller = new AbortController();
-    ceremony.current = controller;
+    const current: AttendanceAttempt = {
+      controller,
+      intent: attendanceIntent(action, data),
+      timing,
+    };
+    attempt.current = current;
+    setBusy("Preparing verification…");
     try {
       const record = await recordAttendance({
         action,
-        requireGeofence: data?.employee.office.policy.requireGeofence !== false,
+        timing,
         progress: (message) => {
-          if (!controller.signal.aborted) setBusy(message);
+          if (isCurrent(current)) setBusy(message);
         },
         signal: controller.signal,
       });
-      controller.signal.throwIfAborted();
-      setConfirmedOperation({
-        action,
-        attendanceDate: record.attendanceDate,
-        observedRead: dayQuery.fulfilledTimeStamp,
-      });
+      if (!isCurrent(current)) return;
+      const applied = await dispatch(
+        applyConfirmedAttendance(
+          record,
+          current.intent.employeeId,
+          controller.signal,
+        ),
+      );
+      if (!applied || !isCurrent(current)) return;
       if (action === "CHECK_IN") setDismissedReasonId("");
       setSuccess(
         action === "CHECK_IN"
           ? "You’re checked in. Have a good workday!"
           : "You’re checked out. Your attendance has been recorded.",
       );
+      setVisibleConfirmation({
+        record,
+        attempt: current,
+        outcome: "confirmed",
+      });
       dispatch(baseApi.util.invalidateTags([...attendanceChangedTags]));
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (!isCurrent(current)) {
+        timing.finish("cancelled");
+        return;
+      }
       setActionError(friendlyError(error));
       if (error instanceof UncertainCeremonyError) {
+        recovery.current = current;
         setNeedsReconcile(true);
-        setBusy("Checking the latest attendance…");
         await refreshDay();
-      }
+      } else timing.finish("failed");
     } finally {
-      if (ceremony.current === controller) {
-        ceremony.current = null;
+      if (attempt.current === current) {
         submitting.current = false;
-        setBusy("");
+        if (isCurrent(current)) setBusy("");
       }
     }
   }
@@ -212,13 +345,6 @@ export function EmployeeDashboard() {
   const policy = (office.policy || {}) as DataRow;
   const user = data.employee.user as DataRow;
   const today = data.today;
-  const awaitingConfirmedState =
-    !!confirmedOperation &&
-    (dayQuery.fulfilledTimeStamp === confirmedOperation.observedRead ||
-      (confirmedOperation.attendanceDate === today?.attendanceDate &&
-        (confirmedOperation.action === "CHECK_IN"
-          ? !today?.checkInAt
-          : !today?.checkOutAt)));
   const approved = data.devices.filter(
     (device) => device.approved && !device.revokedAt,
   );
@@ -237,7 +363,9 @@ export function EmployeeDashboard() {
         </p>
       )}
       {needsReconcile && (
-        <Notice>Refresh attendance successfully before trying again.</Notice>
+        <Notice>
+          Refresh attendance to confirm the previous action before trying again.
+        </Notice>
       )}
       {success && (
         <Notice>
@@ -287,7 +415,6 @@ export function EmployeeDashboard() {
               disabled={
                 !!busy ||
                 needsReconcile ||
-                awaitingConfirmedState ||
                 isFetching ||
                 !!today?.checkInAt ||
                 !data.shift
@@ -302,7 +429,6 @@ export function EmployeeDashboard() {
               disabled={
                 !!busy ||
                 needsReconcile ||
-                awaitingConfirmedState ||
                 isFetching ||
                 !today?.checkInAt ||
                 !!today?.checkOutAt

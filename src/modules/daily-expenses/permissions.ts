@@ -2,9 +2,13 @@ import { DomainError } from "@/lib/errors";
 
 export type DailyExpensesActor = { id: string; role: string; status?: string };
 
-/** Shared by navigation and every server entry point; independent of Employee. */
+/** Workspace viewing access, shared by navigation and server entry points. */
 export function canManageDailyExpenses(role: string): boolean {
   return role === "ADMIN" || role === "SUPER_ADMIN";
+}
+
+export function canWriteDailyExpenses(role: string): boolean {
+  return role === "SUPER_ADMIN";
 }
 
 export function canEditDailyExpenseTransactions(role: string): boolean {
@@ -28,6 +32,17 @@ export function authorizeDailyExpenses(actor: DailyExpensesActor): void {
     throw new DomainError(
       "FORBIDDEN",
       "You do not have access to Daily Expenses.",
+      403,
+    );
+  }
+}
+
+export function authorizeDailyExpenseWrite(actor: DailyExpensesActor): void {
+  authorizeDailyExpenses(actor);
+  if (!canWriteDailyExpenses(actor.role)) {
+    throw new DomainError(
+      "FORBIDDEN",
+      "Only super administrators can make changes to Daily Expenses.",
       403,
     );
   }

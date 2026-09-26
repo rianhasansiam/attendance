@@ -183,7 +183,7 @@ describe("employee and drive-cost invalidation", () => {
     });
   });
 
-  it("refreshes attendance and readiness after safe ceremony invalidation and device revocation", async () => {
+  it("refreshes history after attendance confirmation and readiness after device revocation", async () => {
     const app = store();
     await Promise.all([
       app.dispatch(attendanceApi.endpoints.employeeDay.initiate()),
@@ -199,13 +199,14 @@ describe("employee and drive-cost invalidation", () => {
     ]);
     app.dispatch(baseApi.util.invalidateTags([...attendanceChangedTags]));
     await vi.waitFor(() => expect(reads("/api/attendance/history")).toBe(2));
+    expect(reads("/api/attendance/me")).toBe(1);
     await app
       .dispatch(
         attendanceApi.endpoints.revokeEmployeeDevice.initiate("device-one"),
       )
       .unwrap();
     await vi.waitFor(() => {
-      expect(reads("/api/attendance/me")).toBe(3);
+      expect(reads("/api/attendance/me")).toBe(2);
       expect(reads("/api/webauthn/devices")).toBe(2);
     });
   });

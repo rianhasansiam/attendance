@@ -10,7 +10,7 @@ export const reportsApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
     getAdminDashboard: build.query<AdminDashboardDto, void>({
       query: () => "/api/admin/dashboard",
-      providesTags: ["Dashboard"],
+      providesTags: [{ type: "Dashboard", id: "ADMIN_SUMMARY" }],
     }),
     getAdminReport: build.query<ReportPage, ReportQuery>({
       query: (params) => ({

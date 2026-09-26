@@ -4,6 +4,7 @@ import { requireEmployee } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { assertSameOrigin, rateLimit } from "@/lib/security";
+import { measureServerTiming, requestServerTiming } from "@/lib/server-timing";
 import type { EmployeeActor } from "@/modules/webauthn/service";
 import {
   attendanceEvidenceSchema,
@@ -56,17 +57,21 @@ async function logAttendanceRejection(
   }
 }
 
-export function handleAttendanceRequest(
+export async function handleAttendanceRequest(
   request: Request,
   action: AttendanceAction,
 ) {
-  return api(async () => {
+  const timing = requestServerTiming(request);
+  const response = await api(async () => {
     let actor: EmployeeActor | undefined;
     let evidence: AttendanceEvidence;
     try {
       assertSameOrigin(request);
-      actor = await requireEmployee();
-      await rateLimit(`attendance:${actor.id}`, 15, 60);
+      actor = await measureServerTiming(timing, "auth", requireEmployee);
+      const rateLimitKey = `attendance:${actor.id}`;
+      await measureServerTiming(timing, "rate_limit", () =>
+        rateLimit(rateLimitKey, 15, 60),
+      );
       evidence = await readJson(request, attendanceEvidenceSchema);
     } catch (error) {
       await logAttendanceRejection(action, actor, error);
@@ -74,8 +79,9 @@ export function handleAttendanceRequest(
     }
     // The domain service owns its transactional success/rejection events. Keeping
     // this call outside the catch ensures those failures are never double logged.
-    return recordAttendance(actor, action, evidence, request.headers);
+    return recordAttendance(actor, action, evidence, request.headers, timing);
   });
+  return timing?.apply(response) ?? response;
 }
 
 export function handleLateReasonRequest(request: Request) {

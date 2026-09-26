@@ -27,6 +27,7 @@ import {
 } from "./contracts";
 import {
   authorizeDailyExpenses,
+  authorizeDailyExpenseWrite,
   authorizeDailyExpenseTransactionEdit,
   authorizeDailyExpenseTransactionDelete,
   authorizeDailyExpenseReport,
@@ -310,6 +311,24 @@ type NormalizedTransactionInput = {
   categoryId?: string;
 };
 
+async function authorizePersistedWriter(
+  tx: Prisma.TransactionClient,
+  actor: DailyExpensesActor,
+) {
+  // Keep demotion or deactivation from racing a permitted write.
+  const [currentActor] = await tx.$queryRaw<DailyExpensesActor[]>(Prisma.sql`
+    SELECT "id", "role", "status" FROM "User" WHERE "id" = ${actor.id} FOR SHARE
+  `);
+  if (!currentActor) {
+    throw new DomainError(
+      "FORBIDDEN",
+      "Your account cannot make changes to Daily Expenses.",
+      403,
+    );
+  }
+  authorizeDailyExpenseWrite(currentActor);
+}
+
 async function postTransaction(
   actor: DailyExpensesActor,
   type: DailyExpenseTransactionType,
@@ -352,21 +371,22 @@ async function postTransaction(
     }
     return { transaction: transactionDTO(existing), replayed: true };
   }
-  // Safe retries are checked before category state: archiving after a successful
-  // save must never turn its retry into another financial operation or an error.
-  const existing = await db.dailyExpenseTransaction.findUnique({
-    where: uniqueKey,
-    include: transactionInclude,
-  });
-  if (existing) return replay(existing);
-  if (input.date > todayInTimezone(ledger.timezone)) {
-    throw new DomainError(
-      "FUTURE_DATE",
-      "Use today or an earlier transaction date.",
-    );
-  }
   try {
-    const transaction = await db.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
+      await authorizePersistedWriter(tx, actor);
+      // Authorize retries too, then check them before category state: archiving
+      // after a save must never turn a retry into another financial operation.
+      const existing = await tx.dailyExpenseTransaction.findUnique({
+        where: uniqueKey,
+        include: transactionInclude,
+      });
+      if (existing) return replay(existing);
+      if (input.date > todayInTimezone(ledger.timezone)) {
+        throw new DomainError(
+          "FUTURE_DATE",
+          "Use today or an earlier transaction date.",
+        );
+      }
       if (type === "EXPENSE") {
         const categories = await tx.$queryRaw<
           Array<{ id: string; archived: boolean }>
@@ -404,19 +424,22 @@ async function postTransaction(
         transactionDTO(created),
         tx,
       );
-      return created;
+      return { transaction: transactionDTO(created), replayed: false };
     });
-    return { transaction: transactionDTO(transaction), replayed: false };
   } catch (error) {
+    if (error instanceof DomainError && error.status === 403) throw error;
     // Uniqueness is enforced by PostgreSQL. Re-read after rollback so concurrent
     // identical submissions return the winner. Also covers an archive racing a
     // duplicate request after the first request has already committed.
-    const winner = await db.dailyExpenseTransaction.findUnique({
-      where: uniqueKey,
-      include: transactionInclude,
+    return db.$transaction(async (tx) => {
+      await authorizePersistedWriter(tx, actor);
+      const winner = await tx.dailyExpenseTransaction.findUnique({
+        where: uniqueKey,
+        include: transactionInclude,
+      });
+      if (winner) return replay(winner);
+      throw error;
     });
-    if (winner) return replay(winner);
-    throw error;
   }
 }
 
@@ -424,7 +447,7 @@ export async function addDailyExpenseBalance(
   actor: DailyExpensesActor,
   raw: unknown,
 ): Promise<DailyExpenseMutationDTO> {
-  authorizeDailyExpenses(actor);
+  authorizeDailyExpenseWrite(actor);
   return postTransaction(actor, "BALANCE_ADDED", balanceInputSchema.parse(raw));
 }
 
@@ -432,7 +455,7 @@ export async function addDailyExpense(
   actor: DailyExpensesActor,
   raw: unknown,
 ): Promise<DailyExpenseMutationDTO> {
-  authorizeDailyExpenses(actor);
+  authorizeDailyExpenseWrite(actor);
   return postTransaction(actor, "EXPENSE", expenseInputSchema.parse(raw));
 }
 
@@ -672,11 +695,12 @@ export async function createDailyExpenseCategory(
   actor: DailyExpensesActor,
   raw: unknown,
 ): Promise<DailyExpenseCategoryDTO> {
-  authorizeDailyExpenses(actor);
+  authorizeDailyExpenseWrite(actor);
   const input = categoryCreateSchema.parse(raw);
   const ledger = await getLedger();
   try {
     return await db.$transaction(async (tx) => {
+      await authorizePersistedWriter(tx, actor);
       const category = await tx.dailyExpenseCategory.create({
         data: { ledgerId: ledger.id, name: input.name },
       });
@@ -707,12 +731,13 @@ export async function updateDailyExpenseCategory(
   id: string,
   raw: unknown,
 ): Promise<DailyExpenseCategoryDTO> {
-  authorizeDailyExpenses(actor);
+  authorizeDailyExpenseWrite(actor);
   dailyExpenseIdSchema.parse(id);
   const input = categoryUpdateSchema.parse(raw);
   const ledger = await getLedger();
   try {
     return await db.$transaction(async (tx) => {
+      await authorizePersistedWriter(tx, actor);
       // Serialize category mutations and keep their audit before/after snapshots
       // accurate. FOR UPDATE conflicts with the shared locks held by expenses.
       const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`

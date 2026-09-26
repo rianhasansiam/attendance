@@ -35,12 +35,13 @@ const actor = {
   employee: { id: "employee" },
   sessionId: "session",
 };
-const request = (body = "{}") =>
+const request = (body = "{}", timing = false) =>
   new Request("https://attendance.example/api/attendance/check-in", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       origin: "https://attendance.example",
+      ...(timing ? { "x-attendance-timing": "1" } : {}),
     },
     body,
   });
@@ -241,6 +242,7 @@ describe("attendance HTTP rejection logging", () => {
       "CHECK_IN",
       {},
       expect.any(Headers),
+      undefined,
     );
     expect(mocks.createEvent).not.toHaveBeenCalled();
   });
@@ -251,5 +253,38 @@ describe("attendance HTTP rejection logging", () => {
       data: { id: "record" },
     });
     expect(mocks.createEvent).not.toHaveBeenCalled();
+    expect(response.headers.has("Server-Timing")).toBe(false);
+  });
+
+  it("adds timings only to an opted-in response without changing its data", async () => {
+    const response = await checkIn(request("{}", true));
+    expect(await response.json()).toEqual({
+      success: true,
+      data: { id: "record" },
+    });
+    expect(response.headers.get("Server-Timing")).toMatch(/auth;dur=[\d.]+/);
+    expect(response.headers.get("Server-Timing")).toMatch(
+      /rate_limit;dur=[\d.]+/,
+    );
+    expect(response.headers.get("Server-Timing")).toMatch(/total;dur=[\d.]+/);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.recordAttendance.mock.calls[0][4]).toBeDefined();
+  });
+
+  it("preserves rejected authorization and rejection logging with timing enabled", async () => {
+    mocks.requireEmployee.mockRejectedValue(
+      new DomainError("UNAUTHENTICATED", "Sign in.", 401),
+    );
+    const response = await checkOut(request("{}", true));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Server-Timing")).toMatch(/auth;dur=[\d.]+/);
+    expect(mocks.recordAttendance).not.toHaveBeenCalled();
+    expect(mocks.createEvent).toHaveBeenCalledExactlyOnceWith({
+      data: {
+        employeeId: null,
+        type: "CHECK_OUT_REJECTED",
+        reason: "UNAUTHENTICATED",
+      },
+    });
   });
 });

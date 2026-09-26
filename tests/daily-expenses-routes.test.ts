@@ -48,10 +48,12 @@ const request = (method = "GET", body?: unknown) =>
     },
   );
 const context = { params: Promise.resolve({ id: "category" }) };
-const routes: [string, () => Promise<Response>][] = [
+const readRoutes: [string, () => Promise<Response>][] = [
   ["summary", summary],
   ["history", () => history(request())],
   ["categories", categories],
+];
+const mutationRoutes: [string, () => Promise<Response>][] = [
   ["create category", () => createCategory(request("POST", {}))],
   ["update category", () => updateCategory(request("PATCH", {}), context)],
   ["balance", () => balance(request("POST", {}))],
@@ -65,6 +67,7 @@ const routes: [string, () => Promise<Response>][] = [
     () => deleteTransaction(request("DELETE", {}), context),
   ],
 ];
+const routes = [...readRoutes, ...mutationRoutes];
 function actor(role: string) {
   vi.mocked(requireUser).mockResolvedValue({
     id: "session-actor",
@@ -75,10 +78,31 @@ function actor(role: string) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  actor("ADMIN");
+  actor("SUPER_ADMIN");
 });
 
 describe("Daily Expenses API boundaries", () => {
+  it.each(mutationRoutes)(
+    "rejects ADMIN %s before validation or business logic",
+    async (_name, run) => {
+      actor("ADMIN");
+      const response = await run();
+      expect(response.status).toBe(403);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toMatchObject({
+        success: false,
+        error: { code: "FORBIDDEN" },
+      });
+      for (const operation of Object.values(service))
+        expect(operation).not.toHaveBeenCalled();
+    },
+  );
+  it.each(readRoutes)("allows ADMIN to view %s", async (_name, run) => {
+    actor("ADMIN");
+    const response = await run();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
   it.each(routes)("requires a session for %s", async (_name, run) => {
     vi.mocked(requireUser).mockRejectedValue(
       new DomainError("UNAUTHENTICATED", "Sign in", 401),
@@ -176,19 +200,6 @@ describe("Daily Expenses API boundaries", () => {
         idempotencyKey: body.idempotencyKey,
       }),
     );
-  });
-
-  it("rejects ADMIN transaction edits before validation or business logic", async () => {
-    const response = await updateTransaction(request("PATCH", {}), context);
-    expect(response.status).toBe(403);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(service.updateDailyExpenseTransaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects ADMIN deletion before validation or business logic", async () => {
-    const response = await deleteTransaction(request("DELETE", {}), context);
-    expect(response.status).toBe(403);
-    expect(service.deleteDailyExpenseTransaction).not.toHaveBeenCalled();
   });
 
   it("deletes with the authenticated super admin and required version", async () => {

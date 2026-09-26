@@ -16,6 +16,8 @@ import {
 import {
   authorizeDailyExpenses,
   canManageDailyExpenses,
+  authorizeDailyExpenseWrite,
+  canWriteDailyExpenses,
   authorizeDailyExpenseTransactionEdit,
   canEditDailyExpenseTransactions,
   authorizeDailyExpenseTransactionDelete,
@@ -25,6 +27,33 @@ import {
 } from "@/modules/daily-expenses/permissions";
 
 describe("Daily Expenses client-safe validation", () => {
+  it("reserves all writes for active super admins while admins retain read access", () => {
+    expect(canWriteDailyExpenses("SUPER_ADMIN")).toBe(true);
+    expect(() =>
+      authorizeDailyExpenseWrite({
+        id: "super",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE",
+      }),
+    ).not.toThrow();
+    for (const role of ["ADMIN", "EMPLOYEE", "MANAGE_DRIVER", "unknown"]) {
+      expect(canWriteDailyExpenses(role)).toBe(false);
+      expect(() =>
+        authorizeDailyExpenseWrite({ id: "user", role, status: "ACTIVE" }),
+      ).toThrow();
+    }
+    for (const actor of [
+      { id: "super", role: "SUPER_ADMIN", status: "INACTIVE" },
+      { id: "super", role: "SUPER_ADMIN", status: "SUSPENDED" },
+      { id: "", role: "SUPER_ADMIN", status: "ACTIVE" },
+    ]) {
+      expect(() => authorizeDailyExpenseWrite(actor)).toThrow();
+    }
+    expect(() =>
+      authorizeDailyExpenses({ id: "admin", role: "ADMIN", status: "ACTIVE" }),
+    ).not.toThrow();
+  });
+
   it("allows only active super admins to download daily expense reports", () => {
     expect(canDownloadDailyExpenseReport("SUPER_ADMIN")).toBe(true);
     expect(() =>

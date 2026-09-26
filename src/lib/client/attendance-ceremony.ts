@@ -5,6 +5,10 @@ import type {
   startRegistration as StartRegistration,
 } from "@simplewebauthn/browser";
 import { api } from "./request";
+import {
+  beginAttendanceTiming,
+  type AttendanceTimingTrace,
+} from "./attendance-timing";
 import type {
   AttendanceRecord,
   DeviceMetadata,
@@ -32,11 +36,14 @@ export class UncertainCeremonyError extends Error {
   }
 }
 
-function getLocation(signal?: AbortSignal): Promise<{
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-}> {
+const locationFreshnessMs = 30_000;
+type LocationFix = {
+  location: { latitude: number; longitude: number; accuracy: number };
+  receivedAt: number;
+  ageAtReceipt: number;
+};
+
+function getLocation(signal?: AbortSignal): Promise<LocationFix> {
   return new Promise((resolve, reject) => {
     signal?.throwIfAborted();
     if (!navigator.geolocation)
@@ -45,17 +52,26 @@ function getLocation(signal?: AbortSignal): Promise<{
           "Location is unavailable in this browser. Use a supported browser with location enabled.",
         ),
       );
-    const abort = () => reject(signal?.reason);
+    const abort = () => {
+      cleanup();
+      reject(signal?.reason);
+    };
     signal?.addEventListener("abort", abort, { once: true });
     const cleanup = () => signal?.removeEventListener("abort", abort);
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
+      ({ coords, timestamp }) => {
         cleanup();
         if (signal?.aborted) return;
         resolve({
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
+          location: {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+          },
+          receivedAt: performance.now(),
+          ageAtReceipt: Number.isFinite(timestamp)
+            ? Math.max(0, Date.now() - timestamp)
+            : 0,
         });
       },
       (error) => {
@@ -72,6 +88,44 @@ function getLocation(signal?: AbortSignal): Promise<{
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
   });
+}
+
+/** Unknown/prompt permissions stay sequential to avoid competing browser prompts. */
+async function canOverlapLocation(signal: AbortSignal): Promise<boolean> {
+  signal.throwIfAborted();
+  if (!navigator.permissions?.query) return false;
+  return new Promise((resolve, reject) => {
+    // Permission inspection is optional. A slow/unavailable implementation must
+    // not strand an attendance attempt before either verification can begin.
+    const timer = setTimeout(() => finish(false), 200);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    };
+    const finish = (granted: boolean) => {
+      cleanup();
+      resolve(granted);
+    };
+    const abort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      void navigator.permissions.query({ name: "geolocation" }).then(
+        (permission) => finish(permission.state === "granted"),
+        () => finish(false),
+      );
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+function locationIsFresh(fix: LocationFix) {
+  return (
+    fix.ageAtReceipt + performance.now() - fix.receivedAt <= locationFreshnessMs
+  );
 }
 
 async function verifyWithDevice<T>(
@@ -99,67 +153,123 @@ async function verifyWithDevice<T>(
 // No Redux imports, dispatches, retries, retained request objects, or logging.
 export async function recordAttendance({
   action,
-  requireGeofence,
   progress,
   signal,
+  timing = beginAttendanceTiming(action),
 }: {
   action: "CHECK_IN" | "CHECK_OUT";
-  requireGeofence: boolean;
   progress: (message: string) => void;
   signal?: AbortSignal;
+  timing?: AttendanceTimingTrace;
 }): Promise<AttendanceRecord> {
   signal?.throwIfAborted();
-  progress("Preparing verification…");
-  const challenge = await api<{
-    required?: boolean;
-    challengeId?: string;
-    options?: Parameters<typeof startAuthentication>[0]["optionsJSON"];
-  }>("/api/webauthn/authenticate/options", {
-    method: "POST",
-    body: JSON.stringify({ action }),
-    signal,
-  });
-  signal?.throwIfAborted();
-  let response;
-  if (challenge.required !== false && challenge.options) {
-    progress("Verify with your registered device…");
-    const { startAuthentication, WebAuthnAbortService } =
-      await import("@simplewebauthn/browser");
-    signal?.throwIfAborted();
-    const options = challenge.options;
-    response = await verifyWithDevice(
-      () => startAuthentication({ optionsJSON: options }),
-      () => WebAuthnAbortService.cancelCeremony(),
-      signal,
-    );
-    signal?.throwIfAborted();
-  }
-  let location;
-  if (requireGeofence) {
-    progress("Getting your location…");
-    location = await getLocation(signal);
-    signal?.throwIfAborted();
-  }
-  progress("Recording your attendance…");
+  const attempt = new AbortController();
+  const abort = () => attempt.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  const attemptSignal = attempt.signal;
   try {
-    const record = await api<AttendanceRecord>(
-      `/api/attendance/${action === "CHECK_IN" ? "check-in" : "check-out"}`,
-      {
+    progress("Preparing verification…");
+    const challenge = await timing.measure("options", () =>
+      api<{
+        required: boolean;
+        requireGeofence: boolean;
+        challengeId?: string;
+        options?: Parameters<typeof startAuthentication>[0]["optionsJSON"];
+      }>("/api/webauthn/authenticate/options", {
         method: "POST",
-        signal,
-        body: JSON.stringify({
-          challengeId: challenge.challengeId,
-          response,
-          location,
-        }),
-      },
+        body: JSON.stringify({ action }),
+        signal: attemptSignal,
+        headers: timing.headers,
+      }),
     );
-    signal?.throwIfAborted();
-    return record;
+    attemptSignal.throwIfAborted();
+    if (
+      typeof challenge.required !== "boolean" ||
+      typeof challenge.requireGeofence !== "boolean" ||
+      (challenge.required && (!challenge.options || !challenge.challengeId))
+    )
+      throw new Error(
+        "Verification requirements are unavailable. Please try again.",
+      );
+
+    const authenticate = async () => {
+      if (!challenge.required) return undefined;
+      return timing.measure("passkey", async () => {
+        const { startAuthentication, WebAuthnAbortService } =
+          await import("@simplewebauthn/browser");
+        attemptSignal.throwIfAborted();
+        return verifyWithDevice(
+          () => startAuthentication({ optionsJSON: challenge.options! }),
+          () => WebAuthnAbortService.cancelCeremony(),
+          attemptSignal,
+        );
+      });
+    };
+    const locate = () =>
+      timing.measure("gps", () => getLocation(attemptSignal));
+    let response;
+    let fix: LocationFix | undefined;
+    const overlap =
+      challenge.required &&
+      challenge.requireGeofence &&
+      (await canOverlapLocation(attemptSignal));
+    attemptSignal.throwIfAborted();
+    if (overlap) {
+      progress("Verify your device while your location is acquired…");
+      // Promise.all attaches rejection handlers to both branches immediately.
+      // The outer catch aborts the sibling and ignores its later completion.
+      [response, fix] = await Promise.all([authenticate(), locate()]);
+    } else {
+      if (challenge.required) progress("Verify with your registered device…");
+      response = await authenticate();
+      attemptSignal.throwIfAborted();
+      if (challenge.requireGeofence) {
+        progress("Getting your location…");
+        fix = await locate();
+      }
+    }
+    attemptSignal.throwIfAborted();
+    if (fix && !locationIsFresh(fix)) {
+      progress("Refreshing your location…");
+      fix = await timing.measure("gps-refresh", () =>
+        getLocation(attemptSignal),
+      );
+      attemptSignal.throwIfAborted();
+      if (!locationIsFresh(fix))
+        throw new Error(
+          "A fresh location could not be obtained. Please try again.",
+        );
+    }
+    progress("Recording your attendance…");
+    try {
+      const record = await timing.measure("post", () =>
+        api<AttendanceRecord>(
+          `/api/attendance/${action === "CHECK_IN" ? "check-in" : "check-out"}`,
+          {
+            method: "POST",
+            signal: attemptSignal,
+            headers: timing.headers,
+            body: JSON.stringify({
+              challengeId: challenge.challengeId,
+              response,
+              location: fix?.location,
+            }),
+          },
+        ),
+      );
+      attemptSignal.throwIfAborted();
+      timing.mark("post-confirmed");
+      return record;
+    } catch (error) {
+      attemptSignal.throwIfAborted();
+      if (isAmbiguousWrite(error)) throw new UncertainCeremonyError();
+      throw error;
+    }
   } catch (error) {
-    signal?.throwIfAborted();
-    if (isAmbiguousWrite(error)) throw new UncertainCeremonyError();
+    attempt.abort(error);
     throw error;
+  } finally {
+    signal?.removeEventListener("abort", abort);
   }
 }
 

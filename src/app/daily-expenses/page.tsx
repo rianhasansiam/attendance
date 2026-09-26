@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { DomainError } from "@/lib/errors";
 import {
   authorizeDailyExpenses,
+  canWriteDailyExpenses,
   canEditDailyExpenseTransactions,
   canDeleteDailyExpenseTransactions,
   canDownloadDailyExpenseReport,
@@ -41,6 +42,7 @@ async function AuthorizedWorkspace() {
         }}
       >
         <DailyExpensesWorkspace
+          canWrite={canWriteDailyExpenses(user.role)}
           canEditTransactions={canEditDailyExpenseTransactions(user.role)}
           canDeleteTransactions={canDeleteDailyExpenseTransactions(user.role)}
           canDownloadReport={canDownloadDailyExpenseReport(user.role)}

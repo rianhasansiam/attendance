@@ -16,6 +16,7 @@ import {
 import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { DomainError } from "@/lib/errors";
+import { measureServerTiming, type ServerTiming } from "@/lib/server-timing";
 import { resolveAttendancePolicy } from "@/modules/attendance/policy";
 import {
   assertChallengeUsable,
@@ -237,41 +238,58 @@ export async function registerCredential(
 export async function authenticationOptions(
   actor: EmployeeActor,
   action: "CHECK_IN" | "CHECK_OUT",
+  timing?: ServerTiming,
 ) {
-  const office = await db.office.findUniqueOrThrow({
-    where: { id: actor.employee.officeId },
-  });
+  const office = await measureServerTiming(timing, "initial_policy", () =>
+    db.office.findUniqueOrThrow({
+      where: { id: actor.employee.officeId },
+    }),
+  );
   if (!office.active)
     throw new DomainError(
       "OFFICE_INACTIVE",
       "Your assigned office is inactive.",
     );
   const policy = resolveAttendancePolicy(office);
-  if (!policy.requireWebAuthn) return { required: false as const };
-  const credentials = await db.webAuthnCredential.findMany({
-    where: {
-      employeeId: actor.employee.id,
-      revokedAt: null,
-      ...(policy.requireApprovedDevice ? { approved: true } : {}),
-    },
-  });
+  if (!policy.requireWebAuthn)
+    return {
+      required: false as const,
+      requireGeofence: policy.requireGeofence,
+    };
+  const credentials = await measureServerTiming(
+    timing,
+    "authoritative_reads",
+    () =>
+      db.webAuthnCredential.findMany({
+        where: {
+          employeeId: actor.employee.id,
+          revokedAt: null,
+          ...(policy.requireApprovedDevice ? { approved: true } : {}),
+        },
+      }),
+  );
   if (!credentials.length)
     throw new DomainError(
       "NO_APPROVED_DEVICE",
       "Register a passkey and have an administrator approve it before attendance.",
     );
-  const options = await generateAuthenticationOptions({
-    rpID: getEnv().WEBAUTHN_RP_ID,
-    userVerification: "required",
-    timeout: 60_000,
-    allowCredentials: credentials.map((credential) => ({
-      id: credential.credentialId,
-      transports: transports(credential),
-    })),
-  });
+  const options = await measureServerTiming(timing, "challenge", () =>
+    generateAuthenticationOptions({
+      rpID: getEnv().WEBAUTHN_RP_ID,
+      userVerification: "required",
+      timeout: 60_000,
+      allowCredentials: credentials.map((credential) => ({
+        id: credential.credentialId,
+        transports: transports(credential),
+      })),
+    }),
+  );
   return {
     required: true as const,
-    challengeId: await storeChallenge(actor, action, options.challenge),
+    requireGeofence: policy.requireGeofence,
+    challengeId: await measureServerTiming(timing, "challenge", () =>
+      storeChallenge(actor, action, options.challenge),
+    ),
     options,
   };
 }

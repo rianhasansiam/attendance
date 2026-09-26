@@ -4,7 +4,7 @@ State management: [architecture, cache matrix and test instructions](docs/state-
 
 A modular Next.js application for Google-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, PDF reports, and append-only audit history.
 
-See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results.
+See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results. The [check-in/out performance notes](docs/attendance-performance.md) describe immediate confirmed display, concurrent verification, opt-in timing, and device measurement steps.
 
 Late check-ins prompt the employee to enter a reason after attendance is recorded. The prompt uses the shift's existing grace period, preserves the check-in time, and returns on the dashboard until a reason is saved. Reasons appear in employee history, administrator attendance records, and PDF reports. Apply the included `20260921000000_attendance_late_reason` migration with `pnpm db:migrate` before running this version against an existing database.
 

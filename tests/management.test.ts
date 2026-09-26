@@ -203,6 +203,25 @@ describe("attendance corrections", () => {
       scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
     });
   });
+  it("offsets actual late minutes when correcting overnight checkout", () => {
+    expect(
+      calculateCorrection(
+        previous,
+        {
+          reason: "Verified delayed checkout",
+          checkInAt: "2025-01-06T20:30:00Z",
+          checkOutAt: "2025-01-07T06:00:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      lateMinutes: 30,
+      overtimeMinutes: 30,
+      workedMinutes: 570,
+      scheduledStartAt: new Date("2025-01-06T20:00:00Z"),
+      scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+    });
+  });
   it("preserves the original scheduled end after a Shift edit", () => {
     expect(
       calculateCorrection(
@@ -221,6 +240,104 @@ describe("attendance corrections", () => {
     ).toMatchObject({
       overtimeMinutes: 90,
       scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+    });
+  });
+  it("preserves actual lateness from the captured start after a Shift edit", () => {
+    expect(
+      calculateCorrection(
+        {
+          ...previous,
+          scheduledStartAt: new Date("2025-01-06T20:00:00Z"),
+          scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+          shift: { ...previous.shift, startTime: "21:00" },
+        },
+        {
+          reason: "Verified delayed checkout",
+          checkInAt: "2025-01-06T20:30:00Z",
+          checkOutAt: "2025-01-07T05:30:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      status: "LATE",
+      lateMinutes: 30,
+      overtimeMinutes: 0,
+      scheduledStartAt: new Date("2025-01-06T20:00:00Z"),
+    });
+  });
+  it.each([{ graceMinutes: 60 }, { startTime: "21:00" }])(
+    "preserves recorded late minutes on checkout-only correction after shift settings changed: %o",
+    (shiftChange) => {
+      expect(
+        calculateCorrection(
+          {
+            ...previous,
+            checkInAt: new Date("2025-01-06T20:30:00Z"),
+            checkOutAt: new Date("2025-01-07T05:00:00Z"),
+            lateMinutes: 30,
+            scheduledStartAt: new Date("2025-01-06T20:00:00Z"),
+            scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+            shift: { ...previous.shift, ...shiftChange },
+          },
+          {
+            reason: "Verified checkout without changing arrival",
+            checkOutAt: "2025-01-07T05:30:00Z",
+          },
+          now,
+        ),
+      ).toMatchObject({
+        status: "LATE",
+        lateMinutes: 30,
+        overtimeMinutes: 0,
+      });
+    },
+  );
+  it("preserves a grace-excused arrival when unchanged punches are explicitly submitted", () => {
+    expect(
+      calculateCorrection(
+        {
+          ...previous,
+          checkInAt: new Date("2025-01-06T20:10:00Z"),
+          checkOutAt: new Date("2025-01-07T05:00:00Z"),
+          lateMinutes: 0,
+          scheduledStartAt: new Date("2025-01-06T20:00:00Z"),
+          scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+          shift: { ...previous.shift, graceMinutes: 0 },
+        },
+        {
+          reason: "Verified checkout without changing arrival",
+          checkInAt: "2025-01-06T20:10:00Z",
+          checkOutAt: "2025-01-07T05:30:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      status: "PRESENT",
+      lateMinutes: 0,
+      overtimeMinutes: 30,
+    });
+  });
+  it("recalculates late minutes when a correction changes the arrival", () => {
+    expect(
+      calculateCorrection(
+        {
+          ...previous,
+          checkInAt: new Date("2025-01-06T20:30:00Z"),
+          checkOutAt: new Date("2025-01-07T05:30:00Z"),
+          lateMinutes: 30,
+          scheduledStartAt: new Date("2025-01-06T20:00:00Z"),
+          scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+        },
+        {
+          reason: "Corrected the verified arrival",
+          checkInAt: "2025-01-06T20:20:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      status: "LATE",
+      lateMinutes: 20,
+      overtimeMinutes: 10,
     });
   });
   it("clears overtime when an administrator removes checkout", () => {
@@ -254,7 +371,11 @@ describe("attendance corrections", () => {
           input,
           now,
         ),
-      ).toMatchObject({ scheduledEndAt: null, overtimeMinutes: null });
+      ).toMatchObject({
+        scheduledStartAt: null,
+        scheduledEndAt: null,
+        overtimeMinutes: null,
+      });
     },
   );
   it("rejects invalid chronology, unrelated dates, future punches, and contradictory status", () => {

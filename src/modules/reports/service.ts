@@ -3,6 +3,7 @@ import { Prisma, type AttendanceStatus } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { authorizeRole } from "@/modules/auth/authorization";
+import { attendanceOutcome } from "@/modules/attendance/outcome";
 import type { Actor } from "@/modules/management/permissions";
 import { DomainError } from "@/lib/errors";
 import { reportFilterSchema, utcDate } from "@/modules/management/validation";
@@ -13,6 +14,11 @@ import {
 } from "@/modules/shifts/calculations";
 
 type Filters = z.infer<typeof reportFilterSchema>;
+const lateApprovalSelect = {
+  status: true,
+  checkInAt: true,
+  lateMinutes: true,
+} satisfies Prisma.LateApprovalRequestSelect;
 const officeSelect = {
   id: true,
   name: true,
@@ -46,10 +52,12 @@ const attendanceSelect = {
   status: true,
   checkInAt: true,
   checkOutAt: true,
+  scheduledEndAt: true,
   lateMinutes: true,
   lateReason: true,
   workedMinutes: true,
   overtimeMinutes: true,
+  lateApproval: { select: lateApprovalSelect },
   employee: { select: employeeSelect },
   office: { select: officeSelect },
   shift: { select: shiftSelect },
@@ -63,18 +71,25 @@ const candidateSelect = {
   status: true,
   checkInAt: true,
   checkOutAt: true,
+  scheduledEndAt: true,
   lateMinutes: true,
   workedMinutes: true,
   overtimeMinutes: true,
+  lateApproval: { select: lateApprovalSelect },
   employee: { select: { employeeCode: true } },
   shift: { select: shiftSelect },
 } satisfies Prisma.AttendanceSelect;
 type Candidate = Prisma.AttendanceGetPayload<{
   select: typeof candidateSelect;
 }>;
-export type ReportRecord = Prisma.AttendanceGetPayload<{
+type DetailedAttendance = Prisma.AttendanceGetPayload<{
   select: typeof attendanceSelect;
-}> & { derived: boolean };
+}>;
+export type ReportRecord = Omit<
+  DetailedAttendance,
+  "scheduledEndAt" | "lateApproval"
+> &
+  ReturnType<typeof attendanceOutcome<AttendanceStatus>> & { derived: boolean };
 type Entry =
   | { derived: false; record: Candidate }
   | { derived: true; record: ReportRecord };
@@ -96,7 +111,7 @@ function sanitizedEmployee(
   };
 }
 function sanitizedRecord(
-  record: Omit<ReportRecord, "derived">,
+  record: DetailedAttendance,
   derived: boolean,
 ): ReportRecord {
   return {
@@ -105,13 +120,12 @@ function sanitizedRecord(
     office: record.office,
     shift: record.shift,
     attendanceDate: record.attendanceDate,
-    status: record.status,
     checkInAt: record.checkInAt,
     checkOutAt: record.checkOutAt,
     lateMinutes: record.lateMinutes,
     lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
-    overtimeMinutes: record.overtimeMinutes,
+    ...attendanceOutcome(record),
     derived,
   };
 }
@@ -366,10 +380,12 @@ async function reportEntries(
             status,
             checkInAt: null,
             checkOutAt: null,
+            scheduledEndAt: null,
             lateMinutes: 0,
             lateReason: null,
             workedMinutes: 0,
             overtimeMinutes: 0,
+            lateApproval: null,
           },
           true,
         ),
@@ -380,7 +396,11 @@ async function reportEntries(
   }
   return rows
     .filter(
-      (entry) => !filters.status || entry.record.status === filters.status,
+      (entry) =>
+        !filters.status ||
+        (entry.derived
+          ? entry.record.status
+          : attendanceOutcome(entry.record).status) === filters.status,
     )
     .sort(
       (a, b) =>
@@ -420,9 +440,11 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
       status,
       checkInAt,
       checkOutAt,
+      scheduledEndAt,
       lateMinutes,
       workedMinutes,
       overtimeMinutes,
+      lateApproval,
       shift,
     } = entry.record;
     return sanitizedRecord(
@@ -433,9 +455,11 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
         status,
         checkInAt,
         checkOutAt,
+        scheduledEndAt,
         lateMinutes,
         workedMinutes,
         overtimeMinutes,
+        lateApproval,
         shift,
       },
       false,
@@ -511,7 +535,7 @@ export async function getAdminDashboard(actor: Actor, now = new Date()) {
   };
   for (const { record } of today) {
     if (record.checkInAt !== null) totals.presentToday++;
-    if (record.lateMinutes > 0) totals.lateToday++;
+    if (attendanceOutcome(record).effectiveLateMinutes > 0) totals.lateToday++;
     if (record.status === "ABSENT") totals.absentToday++;
     if (record.checkOutAt !== null) totals.checkedOut++;
   }
@@ -531,9 +555,12 @@ export async function getReport(actor: Actor, filters: Filters) {
   const entries = await reportEntries(filters, now);
   if (filters.format === "json") {
     const summary = { overtimeMinutes: 0, unknownOvertimeRecords: 0 };
-    for (const { record } of entries) {
-      if (record.overtimeMinutes === null) summary.unknownOvertimeRecords++;
-      else summary.overtimeMinutes += record.overtimeMinutes;
+    for (const entry of entries) {
+      const overtimeMinutes = entry.derived
+        ? entry.record.overtimeMinutes
+        : attendanceOutcome(entry.record).overtimeMinutes;
+      if (overtimeMinutes === null) summary.unknownOvertimeRecords++;
+      else summary.overtimeMinutes += overtimeMinutes;
     }
     return {
       items: await hydrateEntries(

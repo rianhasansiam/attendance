@@ -64,12 +64,19 @@ export async function attendanceReportPdf(
       { label: "Check out", width: 65 },
       { label: "Worked", width: 57 },
       { label: "Overtime", width: 66 },
-      { label: "Late (min)", width: 40, align: "right" },
+      { label: "Actual late (min)", width: 40, align: "right" },
       { label: "Status", width: 72 },
       { label: "Late reason", width: 100 },
     ],
     rows: records.map((row) => {
       const zone = row.shift.timezone;
+      const approvalNote = row.isExcusedLate
+        ? "\nExcused late"
+        : row.lateApprovalStatus === "APPROVED"
+          ? "\nLate approval: approved\nApproval no longer matches attendance"
+          : row.lateApprovalStatus
+            ? `\nLate approval: ${row.lateApprovalStatus.toLowerCase()}`
+            : "";
       const punch = (value: Date | null) =>
         value
           ? `${formatInTimeZone(value, zone, "yyyy-MM-dd")}\n${formatInTimeZone(value, zone, "HH:mm")}`
@@ -85,11 +92,11 @@ export async function attendanceReportPdf(
           ? "Unknown"
           : duration(row.overtimeMinutes),
         String(row.lateMinutes),
-        `${row.status.replaceAll("_", " ")}${row.derived ? "\nScheduled day" : ""}`,
+        `${row.status.replaceAll("_", " ")}${approvalNote}${row.derived ? "\nScheduled day" : ""}`,
         row.lateReason || "-",
       ];
     }),
-    footerNote: `Times use each row's shift timezone. Overtime counts completed minutes.${unknown ? ` Total excludes ${unknown} record${unknown === 1 ? "" : "s"} with unknown overtime.` : ""}`,
+    footerNote: `Times use each row's shift timezone. Actual late minutes are retained; status reflects approved late requests. Overtime counts completed minutes after scheduled end, less actual late minutes.${unknown ? ` Total excludes ${unknown} record${unknown === 1 ? "" : "s"} with unknown overtime.` : ""}`,
   });
   return new Response(new Uint8Array(bytes), {
     headers: {

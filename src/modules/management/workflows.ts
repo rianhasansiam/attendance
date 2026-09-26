@@ -394,6 +394,7 @@ export async function correctAttendance(
       const result = await tx.attendance.update({
         where: { id },
         data: calculateCorrection(previous, input),
+        include: { lateApproval: true },
       });
       await tx.attendanceEvent.create({
         data: {

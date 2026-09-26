@@ -90,6 +90,12 @@ describe("late attendance reason persistence", () => {
     await expect(saveLateReason(actor, input)).resolves.toEqual({
       ...record,
       lateReason: "Train delayed.",
+      actualStatus: "LATE",
+      actualLateMinutes: 20,
+      effectiveLateMinutes: 20,
+      isExcusedLate: false,
+      lateApprovalStatus: null,
+      rawOvertimeMinutes: 0,
     });
     expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: "Serializable",
@@ -163,6 +169,71 @@ describe("late attendance reason persistence", () => {
       status: 409,
     });
     expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("creates an approval request with authoritative attendance facts alongside the reason", async () => {
+    mocks.attendance.mockResolvedValue({
+      ...record,
+      scheduledStartAt: new Date("2026-09-20T09:00:00Z"),
+    });
+    mocks.update.mockResolvedValue({
+      ...record,
+      lateReason: "Train delayed.",
+      lateApproval: {
+        id: "approval",
+        status: "PENDING",
+        checkInAt: record.checkInAt,
+        lateMinutes: 20,
+      },
+    });
+    const result = await saveLateReason(actor, {
+      ...input,
+      requestApproval: true,
+    });
+    expect(result.lateApprovalStatus).toBe("PENDING");
+    expect(result.effectiveLateMinutes).toBe(20);
+    expect(mocks.update.mock.calls[0][0].data.lateApproval.create).toEqual({
+      checkInAt: record.checkInAt,
+      scheduledStartAt: new Date("2026-09-20T09:00:00Z"),
+      lateMinutes: 20,
+      reason: "Train delayed.",
+    });
+    expect(mocks.event).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["PENDING", "APPROVED", "REJECTED"] as const)(
+    "does not duplicate or reset an existing %s request",
+    async (status) => {
+      mocks.attendance.mockResolvedValue({
+        ...record,
+        lateReason: "Train delayed.",
+        lateApproval: {
+          id: "approval",
+          status,
+          checkInAt: record.checkInAt,
+          lateMinutes: 20,
+        },
+      });
+      const result = await saveLateReason(actor, {
+        ...input,
+        requestApproval: true,
+      });
+      expect(result.lateApprovalStatus).toBe(status);
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.event).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects client-supplied approval decisions and calculated durations", () => {
+    for (const extra of [
+      { status: "APPROVED" },
+      { lateMinutes: 0 },
+      { overtimeMinutes: 60 },
+      { requestApproval: "yes" },
+    ])
+      expect(lateReasonSchema.safeParse({ ...input, ...extra }).success).toBe(
+        false,
+      );
   });
 
   it("rechecks session expiry before reading or updating attendance", async () => {

@@ -92,7 +92,7 @@ export function AdminDashboard() {
             <Metric
               title="Late arrivals"
               value={data.lateToday}
-              note="Arrivals beyond shift grace time"
+              note="Unexcused arrivals beyond shift grace time"
               icon={<Clock3 size={18} />}
             />
             <Metric
@@ -189,6 +189,11 @@ export function AdminDashboard() {
                     Leave requests
                     <ArrowUpRight size={12} />
                   </Link>
+                  <Link className="quick-link" href="/admin/late-approvals">
+                    <Clock3 size={17} />
+                    Late approvals
+                    <ArrowUpRight size={12} />
+                  </Link>
                   <Link className="quick-link" href="/admin/shifts">
                     <Clock3 size={17} />
                     Shifts
@@ -221,7 +226,7 @@ export function AdminDashboard() {
                   label: "Overtime",
                   format: "nullable-duration",
                 },
-                { key: "status", label: "Status", format: "badge" },
+                { key: "status", label: "Status", format: "attendance-status" },
                 { key: "lateReason", label: "Late reason", format: "text" },
               ]}
             />
@@ -246,8 +251,8 @@ const reportColumns = [
     label: "Overtime",
     format: "nullable-duration" as const,
   },
-  { key: "lateMinutes", label: "Late (min)" },
-  { key: "status", label: "Status", format: "badge" as const },
+  { key: "lateMinutes", label: "Actual late (min)" },
+  { key: "status", label: "Status", format: "attendance-status" as const },
   { key: "lateReason", label: "Late reason", format: "text" as const },
 ];
 export function AdminReports({
@@ -595,7 +600,10 @@ export function AdminReports({
                 }}
               />
               <FormField
-                row={editing}
+                row={{
+                  ...editing,
+                  status: editing.actualStatus ?? editing.status,
+                }}
                 field={{
                   name: "status",
                   label: "Attendance status",

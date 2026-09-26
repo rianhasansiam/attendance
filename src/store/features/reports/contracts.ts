@@ -29,6 +29,12 @@ export type AttendanceReportRow = JsonRecord & {
   lateMinutes: number;
   lateReason: string | null;
   status: AttendanceStatus;
+  actualStatus?: AttendanceStatus;
+  actualLateMinutes?: number;
+  effectiveLateMinutes?: number;
+  isExcusedLate?: boolean;
+  lateApprovalStatus?: "PENDING" | "APPROVED" | "REJECTED" | null;
+  rawOvertimeMinutes?: number | null;
   derived: boolean;
 };
 export type ReportPage = PageDto<AttendanceReportRow> & {

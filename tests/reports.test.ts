@@ -205,6 +205,108 @@ describe("dynamic report derivation", () => {
     ).toBeNull();
   });
 
+  it("recalculates historical overtime from captured schedule and actual late minutes", async () => {
+    const record = {
+      ...attendance(),
+      scheduledEndAt: new Date("2025-01-06T17:00:00Z"),
+      checkOutAt: new Date("2025-01-06T17:30:00Z"),
+      overtimeMinutes: 30,
+    };
+    mocks.attendances.mockResolvedValue([record]);
+    const result = await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+    });
+    expect(result).toMatchObject({
+      summary: { overtimeMinutes: 0, unknownOvertimeRecords: 0 },
+      items: [
+        {
+          actualLateMinutes: 30,
+          effectiveLateMinutes: 30,
+          rawOvertimeMinutes: 30,
+          overtimeMinutes: 0,
+        },
+      ],
+    });
+  });
+
+  it.each(["PENDING", "APPROVED", "REJECTED"] as const)(
+    "uses %s late approval consistently in report status and filters",
+    async (status) => {
+      const record = attendance();
+      mocks.attendances.mockResolvedValue([
+        {
+          ...record,
+          lateApproval: {
+            status,
+            checkInAt: record.checkInAt,
+            lateMinutes: 30,
+          },
+        },
+      ]);
+      const rows = await reportRecords(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+        status: status === "APPROVED" ? "PRESENT" : "LATE",
+      });
+      expect(rows).toMatchObject([
+        {
+          status: status === "APPROVED" ? "PRESENT" : "LATE",
+          actualStatus: "LATE",
+          actualLateMinutes: 30,
+          effectiveLateMinutes: status === "APPROVED" ? 0 : 30,
+          lateApprovalStatus: status,
+        },
+      ]);
+      expect(JSON.stringify(rows)).not.toContain('"lateApproval":');
+      if (status === "APPROVED") {
+        const lateRows = await reportRecords(admin, {
+          ...filters,
+          from: "2025-01-06",
+          to: "2025-01-06",
+          status: "LATE",
+        });
+        expect(lateRows).toHaveLength(0);
+      }
+    },
+  );
+
+  it("retains the scanned approval and schedule when review completes during hydration", async () => {
+    const record = attendance();
+    const scanned = {
+      ...record,
+      checkOutAt: new Date("2025-01-06T18:00:00Z"),
+      scheduledEndAt: new Date("2025-01-06T17:00:00Z"),
+      lateApproval: {
+        status: "PENDING",
+        checkInAt: record.checkInAt,
+        lateMinutes: 30,
+      },
+    };
+    mocks.attendances.mockResolvedValueOnce([scanned]).mockResolvedValueOnce([
+      {
+        ...scanned,
+        scheduledEndAt: new Date("2025-01-06T18:00:00Z"),
+        lateApproval: { ...scanned.lateApproval, status: "APPROVED" },
+      },
+    ]);
+    const result = await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      status: "LATE",
+    });
+    expect(result).toMatchObject({
+      total: 1,
+      summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
+      items: [
+        { status: "LATE", lateApprovalStatus: "PENDING", overtimeMinutes: 30 },
+      ],
+    });
+  });
+
   it("does not derive an absence inside grace, before joining, or for a deactivated account today", async () => {
     mocks.attendances.mockResolvedValue([]);
     const today = { ...filters, from: "2025-01-08", to: "2025-01-08" };
@@ -418,6 +520,65 @@ describe("filtered overtime totals", () => {
 });
 
 describe("attendance PDF exports", () => {
+  it("explains why a previous approval no longer excuses corrected attendance", async () => {
+    const record = attendance();
+    mocks.attendances.mockResolvedValue([
+      {
+        ...record,
+        lateApproval: {
+          status: "APPROVED",
+          checkInAt: new Date("2025-01-06T09:20:00Z"),
+          lateMinutes: 20,
+        },
+      },
+    ]);
+    await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      status: "LATE",
+      format: "pdf",
+    });
+    const document = mocks.pdf.mock.calls[0][0];
+    expect(document.rows[0][8]).toBe(
+      "LATE\nLate approval: approved\nApproval no longer matches attendance",
+    );
+  });
+
+  it("exports excused status alongside actual late minutes without creating overtime", async () => {
+    const record = attendance();
+    mocks.attendances.mockResolvedValue([
+      {
+        ...record,
+        checkOutAt: new Date("2025-01-06T17:30:00Z"),
+        scheduledEndAt: new Date("2025-01-06T17:00:00Z"),
+        overtimeMinutes: 30,
+        lateApproval: {
+          status: "APPROVED",
+          checkInAt: record.checkInAt,
+          lateMinutes: 30,
+        },
+      },
+    ]);
+    await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      status: "PRESENT",
+      format: "pdf",
+    });
+    const document = mocks.pdf.mock.calls[0][0];
+    expect(document.rows).toHaveLength(1);
+    expect(document.rows[0][3]).toBe("2025-01-06\n09:30");
+    expect(document.rows[0][6]).toBe("0h 0m");
+    expect(document.rows[0][7]).toBe("30");
+    expect(document.rows[0][8]).toBe("PRESENT\nExcused late");
+    expect(document.summary).toContainEqual({
+      label: "Total overtime",
+      value: "0h 0m (0 min)",
+    });
+  });
+
   it("exports all filtered records and exact overtime totals regardless of pagination", async () => {
     const records = [
       { ...attendance(employee(), "2025-01-05"), overtimeMinutes: 40 },
@@ -509,6 +670,30 @@ describe("attendance PDF exports", () => {
 });
 
 describe("live dashboard", () => {
+  it.each(["PENDING", "APPROVED", "REJECTED"] as const)(
+    "counts effective late attendance for %s requests",
+    async (status) => {
+      const record = attendance(employee(), "2025-01-08");
+      mocks.attendances.mockResolvedValue([
+        {
+          ...record,
+          lateApproval: {
+            status,
+            checkInAt: record.checkInAt,
+            lateMinutes: 30,
+          },
+        },
+      ]);
+      const result = await getAdminDashboard(admin, now);
+      expect(result.lateToday).toBe(status === "APPROVED" ? 0 : 1);
+      expect(result.recentAttendance[0]).toMatchObject({
+        status: status === "APPROVED" ? "PRESENT" : "LATE",
+        actualStatus: "LATE",
+        lateApprovalStatus: status,
+      });
+    },
+  );
+
   it("stops employee pagination in the first batch that exceeds an office's limit", async () => {
     mocks.attendances.mockResolvedValue([]);
     const target = employee();

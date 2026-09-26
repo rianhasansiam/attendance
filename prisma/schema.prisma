@@ -30,6 +30,11 @@ enum LeaveStatus {
   REJECTED
   CANCELLED
 }
+enum LateApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
 enum ChallengePurpose {
   REGISTRATION
   CHECK_IN
@@ -65,6 +70,7 @@ model User {
   auditLogs AuditLog[]
   driveCosts DriveCost[]
   dailyExpenseTransactions DailyExpenseTransaction[]
+  reviewedLateApprovals LateApprovalRequest[]
 }
 model Account {
   id String @id @default(cuid())
@@ -215,6 +221,8 @@ model Attendance {
   officeId String
   shiftId String
   attendanceDate DateTime @db.Date
+  /// Scheduled start captured for review; null for historical records.
+  scheduledStartAt DateTime?
   /// Scheduled shift end captured at check-in; null only for legacy records.
   scheduledEndAt DateTime?
   checkInAt DateTime?
@@ -235,7 +243,7 @@ model Attendance {
   lateMinutes Int @default(0)
   lateReason String? @db.VarChar(1000)
   workedMinutes Int @default(0)
-  /// Full minutes worked after scheduled end. Null means unknown legacy overtime.
+  /// Completed after-hours minutes minus actual late minutes. Null means unknown legacy overtime.
   overtimeMinutes Int? @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -243,11 +251,30 @@ model Attendance {
   office Office @relation(fields: [officeId], references: [id], onDelete: Restrict)
   shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   events AttendanceEvent[]
+  lateApproval LateApprovalRequest?
   @@unique([employeeId, attendanceDate])
   @@index([officeId, attendanceDate])
   @@index([status, attendanceDate])
   @@index([shiftId, attendanceDate])
   @@index([updatedAt(sort: Desc), id(sort: Desc)])
+}
+model LateApprovalRequest {
+  id String @id @default(cuid())
+  attendanceId String @unique
+  status LateApprovalStatus @default(PENDING)
+  /// Immutable attendance facts at submission; approval only excuses matching facts.
+  checkInAt DateTime
+  scheduledStartAt DateTime?
+  lateMinutes Int
+  reason String @db.VarChar(1000)
+  requestedAt DateTime @default(now())
+  reviewedById String?
+  reviewedAt DateTime?
+  reviewNote String? @db.VarChar(1000)
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  reviewedBy User? @relation(fields: [reviewedById], references: [id], onDelete: Restrict)
+  @@index([status, requestedAt(sort: Desc), id(sort: Desc)])
+  @@index([reviewedById])
 }
 model AttendanceEvent {
   id String @id @default(cuid())

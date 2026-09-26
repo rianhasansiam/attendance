@@ -6,6 +6,7 @@ import {
 import {
   calculateCheckIn,
   calculateCheckOut,
+  calculateOvertime,
   getShiftWindow,
 } from "../src/modules/shifts/calculations";
 import { resolveAttendancePolicy } from "../src/modules/attendance/policy";
@@ -133,7 +134,7 @@ describe("attendance calculations", () => {
         600,
         new Date("2026-09-19T12:00:00Z"),
       ),
-    ).toEqual({ workedMinutes: 30, overtimeMinutes: 30, status: "HALF_DAY" });
+    ).toEqual({ workedMinutes: 30, overtimeMinutes: 0, status: "HALF_DAY" });
   });
   it.each([
     ["2026-09-19T13:31:29.499Z", 0],
@@ -153,7 +154,7 @@ describe("attendance calculations", () => {
         ),
       ).toEqual({
         workedMinutes: minutes,
-        overtimeMinutes: minutes,
+        overtimeMinutes: 0,
         status: "HALF_DAY",
       });
     },
@@ -169,7 +170,7 @@ describe("attendance calculations", () => {
       ),
     ).toEqual({ workedMinutes: 630, overtimeMinutes: null, status: "PRESENT" });
   });
-  it("does not subtract arrival lateness from time worked after shift end", () => {
+  it("offsets arrival lateness against time worked after shift end", () => {
     expect(
       calculateCheckOut(
         new Date("2026-09-19T04:00:00Z"),
@@ -178,7 +179,48 @@ describe("attendance calculations", () => {
         60,
         new Date("2026-09-19T12:00:00Z"),
       ),
-    ).toEqual({ workedMinutes: 570, overtimeMinutes: 90, status: "LATE" });
+    ).toEqual({ workedMinutes: 570, overtimeMinutes: 30, status: "LATE" });
+  });
+  it.each([
+    ["08:30", "17:30", 0, 30, 30],
+    ["09:00", "17:30", 30, 30, 0],
+    ["09:00", "18:00", 30, 60, 30],
+    ["08:45", "17:10", 15, 10, 0],
+    ["09:00", "17:00", 30, 0, 0],
+  ])(
+    "offsets actual late minutes for %s–%s without negative overtime",
+    (checkIn, checkOut, lateMinutes, rawOvertimeMinutes, overtimeMinutes) => {
+      const checkInAt = new Date(`2026-09-19T${checkIn}:00+06:00`);
+      const checkOutAt = new Date(`2026-09-19T${checkOut}:00+06:00`);
+      const startsAt = new Date("2026-09-19T08:30:00+06:00");
+      const endsAt = new Date("2026-09-19T17:00:00+06:00");
+      const arrival = calculateCheckIn(checkInAt, startsAt, 0);
+      expect(arrival.lateMinutes).toBe(lateMinutes);
+      expect(
+        calculateOvertime(checkInAt, checkOutAt, arrival.lateMinutes, endsAt),
+      ).toEqual({ rawOvertimeMinutes, overtimeMinutes });
+    },
+  );
+  it("preserves grace when offsetting overtime", () => {
+    const endsAt = new Date("2026-09-19T12:00:00Z");
+    const checkOutAt = new Date("2026-09-19T12:30:00Z");
+    for (const [checkIn, expectedLate, overtimeMinutes] of [
+      ["2026-09-19T03:15:00Z", 0, 30],
+      ["2026-09-19T03:15:01Z", 16, 14],
+    ] as const) {
+      const checkInAt = new Date(checkIn);
+      const arrival = calculateCheckIn(checkInAt, startsAt, 15);
+      expect(arrival.lateMinutes).toBe(expectedLate);
+      expect(
+        calculateCheckOut(
+          checkInAt,
+          checkOutAt,
+          240,
+          arrival.lateMinutes,
+          endsAt,
+        ).overtimeMinutes,
+      ).toBe(overtimeMinutes);
+    }
   });
   it.each([
     ["09:30", "17:30", "2026-09-19T18:15:00+06:00"],

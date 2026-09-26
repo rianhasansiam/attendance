@@ -15,6 +15,7 @@ type Domain =
   | "Management"
   | "Reference"
   | "Attendance"
+  | "LateApprovals"
   | "Dashboard"
   | "Leave"
   | "Devices"
@@ -55,6 +56,7 @@ const dependencies: Partial<
     domains: [
       "Profile",
       "Attendance",
+      "LateApprovals",
       "Dashboard",
       "Reports",
       "Devices",
@@ -67,6 +69,7 @@ const dependencies: Partial<
     domains: [
       "Profile",
       "Attendance",
+      "LateApprovals",
       "Dashboard",
       "Reports",
       "Devices",
@@ -93,7 +96,7 @@ const dependencies: Partial<
   shifts: {
     lists: ["assignments", "employees"],
     reference: "shifts",
-    domains: ["Profile", "Attendance", "Dashboard", "Reports"],
+    domains: ["Profile", "Attendance", "LateApprovals", "Dashboard", "Reports"],
   },
   assignments: {
     lists: ["employees"],

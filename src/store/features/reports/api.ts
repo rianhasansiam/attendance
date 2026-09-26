@@ -28,7 +28,9 @@ export const reportsApi = baseApi.injectEndpoints({
       // The UI needs confirmation only, never historical verification evidence.
       transformResponse: (response: { id: string }) => ({ id: response.id }),
       invalidatesTags: (_result, error) =>
-        error ? [] : ["Attendance", "Dashboard", "Reports", "Audit"],
+        error
+          ? []
+          : ["Attendance", "LateApprovals", "Dashboard", "Reports", "Audit"],
     }),
   }),
 });

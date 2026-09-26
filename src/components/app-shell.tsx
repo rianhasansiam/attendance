@@ -37,6 +37,7 @@ const adminNavigation = [
   { label: "Overview", href: "dashboard", icon: House },
   { label: "Employees", href: "employees", icon: Users },
   { label: "Attendance", href: "attendance", icon: CalendarCheck2 },
+  { label: "Late approvals", href: "late-approvals", icon: Clock3 },
   { label: "Reports", href: "reports", icon: ChartNoAxesCombined },
   { label: "Drive Cost", href: "drive-cost", icon: CarFront },
   {

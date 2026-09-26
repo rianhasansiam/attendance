@@ -86,6 +86,44 @@ export function Badge({ value }: { value: unknown }) {
     </span>
   );
 }
+export function AttendanceStatus({ record }: { record: DataRow }) {
+  return (
+    <div
+      className="stack"
+      style={{
+        gap: 5,
+        alignItems: "flex-start",
+        fontSize: 12,
+        lineHeight: 1.4,
+        letterSpacing: "normal",
+        fontWeight: 400,
+      }}
+    >
+      <Badge value={record.status} />
+      {record.actualStatus != null && record.actualStatus !== record.status && (
+        <small className="muted">
+          Actual status:{" "}
+          {String(record.actualStatus).replaceAll("_", " ").toLowerCase()}
+        </small>
+      )}
+      {record.lateApprovalStatus != null && (
+        <small>
+          Late approval: <Badge value={record.lateApprovalStatus} />
+        </small>
+      )}
+      {record.isExcusedLate === true && (
+        <small className="muted">Excused late · not counted</small>
+      )}
+      {record.lateApprovalStatus === "APPROVED" &&
+        record.isExcusedLate === false && (
+          <small className="muted">
+            Approval no longer matches attendance
+            {Number(record.lateMinutes) > 0 ? " · late still counted" : ""}
+          </small>
+        )}
+    </div>
+  );
+}
 export function nested(row: DataRow, key: string): unknown {
   return key
     .split(".")
@@ -140,7 +178,13 @@ export function Table({
     key: string;
     label: string;
     format?:
-      "date" | "time" | "badge" | "duration" | "nullable-duration" | "text";
+      | "date"
+      | "time"
+      | "badge"
+      | "attendance-status"
+      | "duration"
+      | "nullable-duration"
+      | "text";
   }[];
   actions?: (row: DataRow) => ReactNode;
   dateGroupKey?: string;
@@ -174,7 +218,9 @@ export function Table({
                 const value = nested(row, column.key);
                 return (
                   <td key={column.key}>
-                    {column.format === "badge" ? (
+                    {column.format === "attendance-status" ? (
+                      <AttendanceStatus record={row} />
+                    ) : column.format === "badge" ? (
                       <Badge value={value} />
                     ) : column.format === "date" ? (
                       date(value)

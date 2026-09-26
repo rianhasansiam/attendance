@@ -1,4 +1,5 @@
 import { attendanceDisplaySelect } from "./queries";
+import { attendanceOutcome, type AttendanceOutcomeInput } from "./outcome";
 import { Prisma, type Shift, type EmployeeShift } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -39,6 +40,7 @@ export const lateReasonSchema = z
   .object({
     attendanceId: z.string().trim().min(1).max(100),
     reason: z.string().trim().min(1).max(1000),
+    requestApproval: z.boolean().optional(),
   })
   .strict();
 
@@ -46,7 +48,8 @@ export async function saveLateReason(
   actor: EmployeeActor,
   input: z.infer<typeof lateReasonSchema>,
 ) {
-  const { attendanceId, reason } = lateReasonSchema.parse(input);
+  const { attendanceId, reason, requestApproval } =
+    lateReasonSchema.parse(input);
   return db.$transaction(
     async (tx) => {
       // Serialize with check-in and checkout so the reason belongs to the same
@@ -102,25 +105,52 @@ export async function saveLateReason(
         );
       if (record.lateReason !== null) {
         // Retrying a successful request must not create another audit event.
-        if (record.lateReason === reason) return sanitizeAttendance(record);
-        throw new DomainError(
-          "LATE_REASON_ALREADY_SUBMITTED",
-          "A reason has already been submitted for this attendance.",
-          409,
-        );
+        if (record.lateReason !== reason)
+          throw new DomainError(
+            "LATE_REASON_ALREADY_SUBMITTED",
+            "A reason has already been submitted for this attendance.",
+            409,
+          );
       }
+      const createApproval = requestApproval && !record.lateApproval;
+      if (record.lateReason !== null && !createApproval)
+        return sanitizeAttendance(record);
       const updated = await tx.attendance.update({
         where: { id: record.id },
-        data: { lateReason: reason },
+        data: {
+          lateReason: reason,
+          ...(createApproval
+            ? {
+                lateApproval: {
+                  create: {
+                    checkInAt: record.checkInAt,
+                    scheduledStartAt: record.scheduledStartAt,
+                    lateMinutes: record.lateMinutes,
+                    reason,
+                  },
+                },
+              }
+            : {}),
+        },
         select: attendanceDisplaySelect,
       });
-      await tx.attendanceEvent.create({
-        data: {
-          employeeId: employee.id,
-          attendanceId: record.id,
-          type: "LATE_REASON_SUBMITTED",
-        },
-      });
+      if (record.lateReason === null)
+        await tx.attendanceEvent.create({
+          data: {
+            employeeId: employee.id,
+            attendanceId: record.id,
+            type: "LATE_REASON_SUBMITTED",
+          },
+        });
+      if (createApproval)
+        await tx.attendanceEvent.create({
+          data: {
+            employeeId: employee.id,
+            attendanceId: record.id,
+            type: "LATE_APPROVAL_REQUESTED",
+            metadata: { requestId: updated.lateApproval!.id },
+          },
+        });
       return sanitizeAttendance(updated);
     },
     {
@@ -363,6 +393,7 @@ export async function recordAttendance(
                     const data = {
                       officeId: employee.officeId,
                       shiftId: shift.id,
+                      scheduledStartAt: window.startsAt,
                       scheduledEndAt: window.endsAt,
                       overtimeMinutes: 0,
                       checkInAt: now,
@@ -382,6 +413,7 @@ export async function recordAttendance(
                       ? await tx.attendance.update({
                           where: { id: existing.id },
                           data,
+                          select: attendanceDisplaySelect,
                         })
                       : await tx.attendance.create({
                           data: {
@@ -389,6 +421,7 @@ export async function recordAttendance(
                             attendanceDate: window.attendanceDate,
                             ...data,
                           },
+                          select: attendanceDisplaySelect,
                         });
                   } else {
                     record = await tx.attendance.update({
@@ -399,6 +432,8 @@ export async function recordAttendance(
                         // that row's original business date and linked shift.
                         scheduledEndAt:
                           existing!.scheduledEndAt ?? window.endsAt,
+                        scheduledStartAt:
+                          existing!.scheduledStartAt ?? window.startsAt,
                         checkOutLatitude: location?.latitude,
                         checkOutLongitude: location?.longitude,
                         checkOutAccuracy: location?.accuracy,
@@ -413,6 +448,7 @@ export async function recordAttendance(
                           existing!.scheduledEndAt ?? window.endsAt,
                         ),
                       },
+                      select: attendanceDisplaySelect,
                     });
                   }
                   await tx.attendanceEvent.create({
@@ -472,7 +508,7 @@ export async function recordAttendance(
 }
 
 export function sanitizeAttendance<
-  T extends {
+  T extends AttendanceOutcomeInput & {
     id: string;
     attendanceDate: Date;
     checkInAt: Date | null;
@@ -489,11 +525,10 @@ export function sanitizeAttendance<
     attendanceDate: record.attendanceDate,
     checkInAt: record.checkInAt,
     checkOutAt: record.checkOutAt,
-    status: record.status,
     lateMinutes: record.lateMinutes,
     lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
-    overtimeMinutes: record.overtimeMinutes,
+    ...attendanceOutcome(record),
   };
 }
 

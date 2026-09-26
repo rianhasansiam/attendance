@@ -6,6 +6,9 @@ import type {
   AttendanceRecord,
   DeviceList,
   EmployeeDay,
+  LateApprovalPage,
+  LateApprovalQuery,
+  LateApprovalRequest,
 } from "./contracts";
 
 // Derived from attendance/service, reports/service, and management/workflows.
@@ -58,7 +61,7 @@ export const attendanceApi = baseApi.injectEndpoints({
     }),
     saveLateReason: build.mutation<
       AttendanceRecord,
-      { attendanceId: string; reason: string }
+      { attendanceId: string; reason: string; requestApproval?: boolean }
     >({
       query: (body) => ({
         url: "/api/attendance/late-reason",
@@ -68,7 +71,29 @@ export const attendanceApi = baseApi.injectEndpoints({
       invalidatesTags: (_result, error) =>
         error
           ? []
-          : [{ type: "Attendance", id: "DAY" }, ...attendanceChangedTags],
+          : [
+              "LateApprovals",
+              { type: "Attendance", id: "DAY" },
+              ...attendanceChangedTags,
+            ],
+    }),
+    lateApprovals: build.query<LateApprovalPage, LateApprovalQuery>({
+      query: (params) => ({ url: "/api/admin/late-approvals", params }),
+      providesTags: ["LateApprovals"],
+    }),
+    reviewLateApproval: build.mutation<
+      LateApprovalRequest,
+      { id: string; status: "APPROVED" | "REJECTED"; reviewNote?: string }
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/api/admin/late-approvals/${encodeURIComponent(id)}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: (_result, error) =>
+        error
+          ? []
+          : ["LateApprovals", "Attendance", "Dashboard", "Reports", "Audit"],
     }),
   }),
 });
@@ -82,6 +107,24 @@ function displayRecord(record: AttendanceRecord): AttendanceRecord {
     checkInAt: record.checkInAt,
     checkOutAt: record.checkOutAt,
     status: record.status,
+    ...(record.actualStatus !== undefined
+      ? { actualStatus: record.actualStatus }
+      : {}),
+    ...(record.actualLateMinutes !== undefined
+      ? { actualLateMinutes: record.actualLateMinutes }
+      : {}),
+    ...(record.effectiveLateMinutes !== undefined
+      ? { effectiveLateMinutes: record.effectiveLateMinutes }
+      : {}),
+    ...(record.isExcusedLate !== undefined
+      ? { isExcusedLate: record.isExcusedLate }
+      : {}),
+    ...(record.lateApprovalStatus !== undefined
+      ? { lateApprovalStatus: record.lateApprovalStatus }
+      : {}),
+    ...(record.rawOvertimeMinutes !== undefined
+      ? { rawOvertimeMinutes: record.rawOvertimeMinutes }
+      : {}),
     lateMinutes: record.lateMinutes,
     lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
@@ -175,4 +218,6 @@ export const {
   useEmployeeDevicesQuery,
   useRevokeEmployeeDeviceMutation,
   useSaveLateReasonMutation,
+  useLateApprovalsQuery,
+  useReviewLateApprovalMutation,
 } = attendanceApi;

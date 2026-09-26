@@ -11,4 +11,9 @@ export const attendanceDisplaySelect = {
   lateReason: true,
   workedMinutes: true,
   overtimeMinutes: true,
+  scheduledStartAt: true,
+  scheduledEndAt: true,
+  lateApproval: {
+    select: { id: true, status: true, checkInAt: true, lateMinutes: true },
+  },
 } satisfies Prisma.AttendanceSelect;

@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import {
   Badge,
+  AttendanceStatus,
   date,
   duration,
   Empty,
@@ -98,9 +99,9 @@ const attendanceColumns = [
     label: "Overtime",
     format: "nullable-duration" as const,
   },
-  { key: "lateMinutes", label: "Late (min)" },
+  { key: "lateMinutes", label: "Actual late (min)" },
   { key: "lateReason", label: "Late reason", format: "text" as const },
-  { key: "status", label: "Status", format: "badge" as const },
+  { key: "status", label: "Status", format: "attendance-status" as const },
 ];
 function friendlyError(error: unknown) {
   if (error instanceof Error && error.name === "NotAllowedError")
@@ -245,7 +246,11 @@ export function EmployeeDashboard() {
   }, [pendingReasonId]);
   const saveReason = useCallback((record: DataRow) => {
     setSavedReasonId(String(record.id));
-    setSuccess("Your late attendance reason has been saved.");
+    setSuccess(
+      record.lateApprovalStatus
+        ? "Your late attendance reason has been saved and approval requested."
+        : "Your late attendance reason has been saved.",
+    );
   }, []);
   const reasonDialog =
     pendingReason && dismissedReasonId !== pendingReasonId ? (
@@ -519,14 +524,20 @@ export function EmployeeDashboard() {
       <div className="stats-grid">
         <Metric
           title="Today’s status"
-          value={<Badge value={today?.status || "Not checked in"} />}
-          note="Based on your office timezone"
+          value={
+            <AttendanceStatus record={today || { status: "Not checked in" }} />
+          }
+          note="Effective status used in attendance reports"
           icon={<CalendarDays size={18} />}
         />
         <Metric
-          title="Late arrival"
+          title="Actual late arrival"
           value={`${Number(today?.lateMinutes || 0)} min`}
-          note="Calculated from your assigned shift"
+          note={
+            today?.isExcusedLate
+              ? "Excused; actual arrival retained"
+              : "Calculated from your assigned shift"
+          }
           icon={<Clock3 size={18} />}
         />
         <Metric

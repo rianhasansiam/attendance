@@ -112,6 +112,26 @@ afterEach(() => {
 });
 
 describe("server-confirmed attendance cache", () => {
+  it("retains authoritative approval and effective attendance display fields", async () => {
+    const app = store();
+    seed(app);
+    const confirmed = {
+      ...record,
+      status: "PRESENT",
+      actualStatus: "LATE",
+      actualLateMinutes: 20,
+      effectiveLateMinutes: 0,
+      isExcusedLate: true,
+      lateApprovalStatus: "APPROVED" as const,
+      rawOvertimeMinutes: 20,
+      overtimeMinutes: 0,
+    };
+    expect(
+      await app.dispatch(applyConfirmedAttendance(confirmed, "employee-1")),
+    ).toBe(true);
+    expect(cachedDay(app).data?.today).toEqual(confirmed);
+    expect(cachedDay(app).data?.recent).toEqual([confirmed]);
+  });
   it.each(["PRESENT", "LATE"])(
     "renders a %s check-in from its response without a dashboard GET and preserves unrelated data",
     async (status) => {
@@ -357,6 +377,37 @@ describe("server-confirmed attendance cache", () => {
 });
 
 describe("selective attendance invalidation", () => {
+  it.each(["employees", "users", "shifts"] as const)(
+    "refreshes late review employee, reviewer and timezone data after %s changes",
+    async (resource) => {
+      let reads = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (request: Request) => {
+          if (new URL(request.url).pathname === "/api/admin/late-approvals")
+            reads++;
+          return response({ items: [], total: 0, page: 1, pageSize: 25 });
+        }),
+      );
+      const app = store();
+      await app.dispatch(
+        attendanceApi.endpoints.lateApprovals.initiate({
+          page: 1,
+          pageSize: 25,
+        }),
+      );
+      await app.dispatch(
+        managementApi.endpoints.writeManagement.initiate({
+          resource,
+          id: "changed",
+          method: "PATCH",
+          body: { name: "Updated" },
+        }),
+      );
+      await vi.waitFor(() => expect(reads).toBe(2));
+    },
+  );
+
   it("refreshes active history, summary, report, events and audit queries without refetching the confirmed day or unrelated views", async () => {
     const requests: string[] = [];
     vi.stubGlobal(

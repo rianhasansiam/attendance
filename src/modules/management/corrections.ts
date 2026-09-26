@@ -13,7 +13,9 @@ export function calculateCorrection(
   previous: {
     checkInAt: Date | null;
     checkOutAt: Date | null;
+    lateMinutes?: number;
     attendanceDate: Date;
+    scheduledStartAt?: Date | null;
     scheduledEndAt?: Date | null;
     shift: ShiftDefinition;
   },
@@ -65,14 +67,30 @@ export function calculateCorrection(
       "ATTENDANCE_DATE_MISMATCH",
       "The check-in time must belong to this attendance date's shift.",
     );
+  // A checkout/status correction must not reinterpret an unchanged arrival
+  // using grace or shift settings that were edited after attendance was recorded.
+  const unchangedArrival =
+    checkInAt && previous.checkInAt?.getTime() === checkInAt.getTime();
   const arrival = checkInAt
-    ? calculateCheckIn(checkInAt, window.startsAt, previous.shift.graceMinutes)
+    ? unchangedArrival && previous.lateMinutes !== undefined
+      ? {
+          lateMinutes: previous.lateMinutes,
+          status:
+            previous.lateMinutes > 0 ? ("LATE" as const) : ("PRESENT" as const),
+        }
+      : calculateCheckIn(
+          checkInAt,
+          previous.scheduledStartAt ?? window.startsAt,
+          previous.shift.graceMinutes,
+        )
     : { lateMinutes: 0, status: "ABSENT" as const };
   // A completed legacy row has no historical schedule evidence. Editing its
   // punches/status must not silently turn today's Shift into a known snapshot.
   const legacyCompleted = previous.checkInAt && previous.checkOutAt;
   const scheduledEndAt =
     previous.scheduledEndAt ?? (legacyCompleted ? null : window.endsAt);
+  const scheduledStartAt =
+    previous.scheduledStartAt ?? (legacyCompleted ? null : window.startsAt);
   const departure =
     checkInAt && checkOutAt
       ? calculateCheckOut(
@@ -104,6 +122,7 @@ export function calculateCorrection(
     status,
     lateMinutes: arrival.lateMinutes,
     workedMinutes: departure?.workedMinutes ?? 0,
+    scheduledStartAt,
     scheduledEndAt,
     overtimeMinutes: departure ? departure.overtimeMinutes : 0,
   };

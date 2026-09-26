@@ -5,6 +5,12 @@ export type AttendanceRecord = {
   checkInAt: string | null;
   checkOutAt: string | null;
   status: string;
+  actualStatus?: string;
+  actualLateMinutes?: number;
+  effectiveLateMinutes?: number;
+  isExcusedLate?: boolean;
+  lateApprovalStatus?: "PENDING" | "APPROVED" | "REJECTED" | null;
+  rawOvertimeMinutes?: number | null;
   lateMinutes: number;
   lateReason: string | null;
   workedMinutes: number;
@@ -62,6 +68,44 @@ export type AttendanceHistory = {
 };
 export type DeviceList = {
   items: DeviceMetadata[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type LateApprovalStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type LateApprovalRequest = {
+  id: string;
+  attendanceId: string;
+  status: LateApprovalStatus;
+  reason: string;
+  lateMinutes: number;
+  checkInAt: string;
+  scheduledStartAt: string | null;
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  reviewedBy: { id: string; name: string | null; email: string } | null;
+  attendance: {
+    id: string;
+    attendanceDate: string;
+    checkInAt: string | null;
+    lateMinutes: number;
+    employee: {
+      id: string;
+      employeeCode: string;
+      user: { name: string | null; email: string };
+    };
+    shift: { timezone: string };
+  };
+};
+export type LateApprovalQuery = {
+  status?: LateApprovalStatus;
+  page: number;
+  pageSize: number;
+};
+export type LateApprovalPage = {
+  items: LateApprovalRequest[];
   total: number;
   page: number;
   pageSize: number;

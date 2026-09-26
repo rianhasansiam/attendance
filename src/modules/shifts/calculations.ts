@@ -67,23 +67,42 @@ export function calculateCheckOut(
   );
   return {
     workedMinutes,
-    // Only time actually worked after scheduled end counts. Arriving after
-    // scheduled end must not credit the time before check-in as overtime.
-    overtimeMinutes: scheduledEndAt
-      ? Math.max(
-          0,
-          Math.floor(
-            (checkOutAt.getTime() -
-              Math.max(checkInAt.getTime(), scheduledEndAt.getTime())) /
-              60_000,
-          ),
-        )
-      : null,
+    overtimeMinutes: calculateOvertime(
+      checkInAt,
+      checkOutAt,
+      lateMinutes,
+      scheduledEndAt,
+    ).overtimeMinutes,
     status:
       workedMinutes < halfDayThreshold
         ? ("HALF_DAY" as const)
         : lateMinutes > 0
           ? ("LATE" as const)
           : ("PRESENT" as const),
+  };
+}
+
+/** Approval never changes the actual lateness used to offset overtime. */
+export function calculateOvertime(
+  checkInAt: Date,
+  checkOutAt: Date,
+  actualLateMinutes: number,
+  scheduledEndAt: Date | null,
+) {
+  // Preserve unknown overtime when no historical schedule was captured.
+  if (!scheduledEndAt)
+    return { rawOvertimeMinutes: null, overtimeMinutes: null };
+  // Only completed minutes actually worked after the scheduled end count.
+  const rawOvertimeMinutes = Math.max(
+    0,
+    Math.floor(
+      (checkOutAt.getTime() -
+        Math.max(checkInAt.getTime(), scheduledEndAt.getTime())) /
+        60_000,
+    ),
+  );
+  return {
+    rawOvertimeMinutes,
+    overtimeMinutes: Math.max(0, rawOvertimeMinutes - actualLateMinutes),
   };
 }

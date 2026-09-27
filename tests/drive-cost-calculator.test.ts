@@ -23,10 +23,10 @@ beforeEach(() => {
   mocks.findMany.mockResolvedValue([]);
 });
 
-const calculate = () =>
+const calculate = (query = "") =>
   GET(
     new Request(
-      "https://attendance.example.test/api/admin/drive-costs/calculate?from=2026-09-21",
+      `https://attendance.example.test/api/admin/drive-costs/calculate?from=2026-09-21${query}`,
     ),
   );
 
@@ -62,6 +62,7 @@ describe("drive cost calculator", () => {
     expect(await response.json()).toMatchObject({
       success: true,
       data: {
+        paymentStatus: null,
         totalRecords: 4,
         totalKilometers: "26.29",
         totalCost: "131.65",
@@ -92,5 +93,99 @@ describe("drive cost calculator", () => {
         },
       },
     });
+  });
+
+  it.each([
+    ["PAID", "25.00", "125.00", "0.00"],
+    ["UNPAID", "1.25", "0.00", "12.50"],
+  ])(
+    "calculates totals and returns only %s trips for the selected date range",
+    async (paymentStatus, kilometers, inTimeCost, overTimeCost) => {
+      const records = [
+        {
+          paymentStatus: "PAID",
+          kilometers: new Prisma.Decimal("12.50"),
+          isRoundTrip: true,
+          rateType: "IN_TIME",
+          totalCost: new Prisma.Decimal("125.00"),
+        },
+        {
+          paymentStatus: "UNPAID",
+          kilometers: new Prisma.Decimal("1.25"),
+          isRoundTrip: false,
+          rateType: "OVER_TIME",
+          totalCost: new Prisma.Decimal("12.50"),
+        },
+      ];
+      mocks.findMany.mockImplementation(async ({ where }) =>
+        records.filter(
+          (record) => record.paymentStatus === where.paymentStatus,
+        ),
+      );
+
+      const response = await calculate(
+        `&to=2026-09-22&paymentStatus=${paymentStatus}`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.findMany).toHaveBeenCalledWith({
+        where: {
+          paymentStatus,
+          date: {
+            gte: new Date("2026-09-21T00:00:00.000Z"),
+            lte: new Date("2026-09-22T00:00:00.000Z"),
+          },
+        },
+        orderBy: [{ date: "asc" }, { id: "asc" }],
+      });
+      expect(await response.json()).toMatchObject({
+        data: {
+          dateFrom: "2026-09-21",
+          dateTo: "2026-09-22",
+          isSingleDay: false,
+          paymentStatus,
+          totalRecords: 1,
+          totalKilometers: kilometers,
+          totalCost: new Prisma.Decimal(inTimeCost)
+            .add(overTimeCost)
+            .toFixed(2),
+          breakdown: {
+            inTime: { totalCost: inTimeCost },
+            overTime: { totalCost: overTimeCost },
+          },
+          records: [{ paymentStatus }],
+        },
+      });
+    },
+  );
+
+  it("treats an empty payment filter as all statuses and returns its applied scope", async () => {
+    const response = await calculate("&paymentStatus=");
+
+    expect(response.status).toBe(200);
+    expect(mocks.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          date: {
+            gte: new Date("2026-09-21T00:00:00.000Z"),
+            lte: new Date("2026-09-21T00:00:00.000Z"),
+          },
+        },
+      }),
+    );
+    expect(await response.json()).toMatchObject({
+      data: { paymentStatus: null },
+    });
+  });
+
+  it("rejects invalid payment filters before querying trips", async () => {
+    const response = await calculate("&paymentStatus=PENDING");
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: { code: "VALIDATION_ERROR" },
+    });
+    expect(mocks.findMany).not.toHaveBeenCalled();
   });
 });

@@ -52,7 +52,7 @@ export async function getDriveCostReport(
     else overTimeCost = overTimeCost.add(record.totalCost);
   }
 
-  const { from, to, q } = filters;
+  const { from, to, q, paymentStatus } = filters;
   const period =
     from && to
       ? from === to
@@ -65,7 +65,13 @@ export async function getDriveCostReport(
           : "Period: All dates";
   const bytes = await createReportPdf({
     title: "Drive cost report",
-    subtitle: [period, ...(q ? [`Destination search: ${q}`] : [])],
+    subtitle: [
+      period,
+      ...(q ? [`Destination search: ${q}`] : []),
+      ...(paymentStatus
+        ? [`Payment status: ${paymentStatus === "PAID" ? "Paid" : "Unpaid"}`]
+        : []),
+    ],
     dateGroupColumn: 0,
     summary: [
       { label: "Total trips", value: records.length.toLocaleString("en-US") },

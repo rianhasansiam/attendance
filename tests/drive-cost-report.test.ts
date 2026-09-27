@@ -163,6 +163,45 @@ describe("drive cost PDF reports", () => {
     expect(content.rows[2].slice(5)).toEqual(["0.02", "4.50", "0.09"]);
   });
 
+  it.each([
+    ["PAID", "Paid"],
+    ["UNPAID", "Unpaid"],
+  ])(
+    "exports and labels the selected %s payment status",
+    async (paymentStatus, label) => {
+      mocks.findMany.mockResolvedValue([trip()]);
+
+      const response = await report(
+        `?from=2026-09-21&to=2026-09-21&q=Dhaka&paymentStatus=${paymentStatus}`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            paymentStatus,
+            date: { gte: day("2026-09-21"), lte: day("2026-09-21") },
+            OR: [
+              { destinationFrom: { contains: "Dhaka", mode: "insensitive" } },
+              { destinationTo: { contains: "Dhaka", mode: "insensitive" } },
+            ],
+          },
+        }),
+      );
+      expect(mocks.createPdf.mock.calls[0][0]).toMatchObject({
+        subtitle: [
+          "Date: 2026-09-21",
+          "Destination search: Dhaka",
+          `Payment status: ${label}`,
+        ],
+        summary: expect.arrayContaining([
+          { label: "Total trips", value: "1" },
+          { label: "Total cost (BDT)", value: "61.70" },
+        ]),
+      });
+    },
+  );
+
   it("includes both legs in round-trip distances and sums each saved cost once", async () => {
     mocks.findMany.mockResolvedValue([
       trip(),
@@ -298,7 +337,8 @@ describe("drive cost PDF reports", () => {
     "?to=2026-02-30",
     "?from=2026-9-1",
     "?from=2026-09-22&to=2026-09-21",
-  ])("rejects invalid dates before database access: %s", async (query) => {
+    "?paymentStatus=PENDING",
+  ])("rejects invalid filters before database access: %s", async (query) => {
     const response = await report(query);
 
     expect(response.status).toBe(400);

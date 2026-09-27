@@ -1354,6 +1354,26 @@ tbody tr.date-group-1:hover {
 }
 
 /* Cost Calculator */
+.drive-balance-card {
+  margin-bottom: 20px;
+}
+.drive-balance-card .calc-summary-card.balance-negative {
+  border-color: #efcbcd;
+  background: #fff5f5;
+}
+.drive-balance-card .calc-summary-card.balance-negative strong {
+  color: #a42f38;
+}
+.drive-balance-form {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.drive-balance-form .drive-balance-note {
+  flex-grow: 2;
+}
+.drive-balance-retry {
+  flex-basis: 100%;
+}
 .calc-card {
   border: 1px solid #c8e0cd;
   background: linear-gradient(180deg, #f8fbf8 0%, #fff 100%);

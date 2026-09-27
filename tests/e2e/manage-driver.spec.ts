@@ -193,7 +193,7 @@ test("driver managers can create, calculate, report, edit and delete drive costs
   const record = await db.driveCost.findFirstOrThrow({
     where: { createdById: user.id, destinationFrom },
   });
-  expect(record.totalCost.toFixed(2)).toBe("50.00");
+  expect(record.totalCost.toFixed(2)).toBe("55.00");
   expect(
     (await context.request.get(`/api/admin/drive-costs/${record.id}`)).status(),
   ).toBe(200);
@@ -205,7 +205,7 @@ test("driver managers can create, calculate, report, edit and delete drive costs
   });
   await expect(list.locator("tbody tr")).toHaveCount(1);
   await expect(
-    list.getByRole("cell", { name: "৳50.00", exact: true }),
+    list.getByRole("cell", { name: "৳55.00", exact: true }),
   ).toBeVisible();
 
   await page
@@ -216,7 +216,7 @@ test("driver managers can create, calculate, report, edit and delete drive costs
   await calculator
     .getByRole("button", { name: "Calculate", exact: true })
     .click();
-  await expect(calculator.locator(".calc-total")).toContainText("৳50.00");
+  await expect(calculator.locator(".calc-total")).toContainText("৳55.00");
   await expect(calculator.locator(".calc-total")).toContainText(
     "1 trip · 10 km",
   );
@@ -238,13 +238,13 @@ test("driver managers can create, calculate, report, edit and delete drive costs
   await edit.getByRole("button", { name: "Save drive cost" }).click();
   await expect(edit).toBeHidden();
   await expect(
-    list.getByRole("cell", { name: "৳60.00", exact: true }),
+    list.getByRole("cell", { name: "৳66.00", exact: true }),
   ).toBeVisible();
   expect(
     (
       await db.driveCost.findUniqueOrThrow({ where: { id: record.id } })
     ).totalCost.toFixed(2),
-  ).toBe("60.00");
+  ).toBe("66.00");
 
   await list
     .getByRole("button", {
@@ -281,8 +281,8 @@ test("ordinary employees cannot discover or use drive cost management", async ({
       destinationTo: "Client office",
       kilometers: "10.00",
       rateType: "IN_TIME",
-      ratePerKilometer: "5.00",
-      totalCost: "50.00",
+      ratePerKilometer: "5.50",
+      totalCost: "55.00",
       createdById: user.id,
     },
   });
@@ -324,6 +324,6 @@ test("ordinary employees cannot discover or use drive cost management", async ({
     where: { id: record.id },
   });
   expect(unchanged.destinationFrom).toBe("Protected trip");
-  expect(unchanged.totalCost.toFixed(2)).toBe("50.00");
+  expect(unchanged.totalCost.toFixed(2)).toBe("55.00");
   expect(await db.driveCost.count({ where: { createdById: user.id } })).toBe(1);
 });

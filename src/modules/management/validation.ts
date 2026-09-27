@@ -250,10 +250,15 @@ export const paginationSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   q: z.string().trim().max(100).optional(),
 });
+export const driveCostPaymentFilterSchema = z
+  .enum(["UNPAID", "PAID"])
+  .optional()
+  .or(z.literal("").transform(() => undefined));
 export const driveCostFilterSchema = paginationSchema
   .extend({
     from: dateSchema.optional(),
     to: dateSchema.optional(),
+    paymentStatus: driveCostPaymentFilterSchema,
   })
   .refine(
     (value) => !value.from || !value.to || value.to >= value.from,

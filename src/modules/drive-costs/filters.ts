@@ -1,15 +1,22 @@
-import type { Prisma } from "@prisma/client";
+import type { DriveCostPaymentStatus, Prisma } from "@prisma/client";
 import { utcDate } from "@/modules/management/validation";
 
 export type DriveCostFilters = {
   from?: string;
   to?: string;
   q?: string;
+  paymentStatus?: DriveCostPaymentStatus;
 };
 
-/** Share the inclusive date and destination filters between the list and PDF. */
-export function driveCostWhere({ from, to, q }: DriveCostFilters) {
+/** Keep list, calculation, and PDF filters consistent. */
+export function driveCostWhere({
+  from,
+  to,
+  q,
+  paymentStatus,
+}: DriveCostFilters) {
   return {
+    ...(paymentStatus ? { paymentStatus } : {}),
     ...(q
       ? {
           OR: [

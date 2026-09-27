@@ -340,7 +340,12 @@ function driveCostData(input: ReturnType<typeof driveCostSchema.parse>) {
     destinationTo: input.destinationTo,
     isRoundTrip: input.isRoundTrip,
     rateType: input.rateType,
-    ...calculateDriveCost(input.kilometers, input.rateType, input.isRoundTrip),
+    ...calculateDriveCost(
+      input.kilometers,
+      input.rateType,
+      input.date,
+      input.isRoundTrip,
+    ),
     ...(input.paymentStatus !== undefined
       ? { paymentStatus: input.paymentStatus }
       : {}),

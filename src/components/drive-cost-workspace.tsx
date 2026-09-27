@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Modal } from "./modal";
 import { PdfDownloadButton } from "./pdf-download-button";
+import { DriveCostBalanceSection } from "./drive-cost-balance-section";
 import {
   ErrorNotice,
   Loading,
@@ -34,13 +35,16 @@ import { errorMessage } from "@/store/api/errors";
 import {
   useDriveCostsQuery,
   useDriveCostCalculationQuery,
+  useDriveCostBalanceQuery,
   useSaveDriveCostMutation,
   useDeleteDriveCostMutation,
   useUpdateDriveCostPaymentMutation,
   type CalculationArgs,
+  type DriveCostPaymentStatus,
 } from "@/store/features/drive-costs/api";
 import {
-  DRIVE_COST_RATES,
+  DRIVE_COST_RATE_CHANGE_DATE,
+  getDriveCostRates,
   type DriveCostRateType as RateType,
 } from "@/modules/drive-costs/rates";
 
@@ -55,10 +59,16 @@ type DriveCostDraft = {
 };
 
 const PAGE_SIZE = 25;
-const RATES: Record<RateType, number> = {
-  IN_TIME: Number(DRIVE_COST_RATES.IN_TIME),
-  OVER_TIME: Number(DRIVE_COST_RATES.OVER_TIME),
+type PaymentStatusFilter = DriveCostPaymentStatus | "";
+type ListFilters = {
+  from: string;
+  to: string;
+  paymentStatus: PaymentStatusFilter;
 };
+
+function paymentStatusFilter(value: string | null): PaymentStatusFilter {
+  return value === "PAID" || value === "UNPAID" ? value : "";
+}
 
 function numberValue(value: unknown): number {
   const parsed = Number(value);
@@ -113,21 +123,24 @@ export function DriveCostWorkspace({
   const { params: urlParams, update } = useUrlFilters();
   const query = urlParams.get("q") || "";
   const search = useDebouncedValue(query);
-  const dateFilters = {
+  const dateFilters: ListFilters = {
     from: urlParams.get("from") || "",
     to: urlParams.get("to") || "",
+    paymentStatus: paymentStatusFilter(urlParams.get("paymentStatus")),
   };
-  const dateFilterKey = `${dateFilters.from}|${dateFilters.to}`;
+  const dateFilterKey = `${dateFilters.from}|${dateFilters.to}|${dateFilters.paymentStatus}`;
   const [dateEdit, setDateEdit] = useState({
     key: dateFilterKey,
     ...dateFilters,
   });
   const dateDraft = dateEdit.key === dateFilterKey ? dateEdit : dateFilters;
-  const setDateDraft = (draft: { from: string; to: string }) =>
+  const setDateDraft = (draft: ListFilters) =>
     setDateEdit({ key: dateFilterKey, ...draft });
   const params = new URLSearchParams({ q: search });
   if (dateFilters.from) params.set("from", dateFilters.from);
   if (dateFilters.to) params.set("to", dateFilters.to);
+  if (dateFilters.paymentStatus)
+    params.set("paymentStatus", dateFilters.paymentStatus);
   const filterKey = params.toString();
   const page = pageFromSearch(urlParams.get("page"));
   const [editing, setEditing] = useState<DriveCostDraft | null>(null);
@@ -143,6 +156,9 @@ export function DriveCostWorkspace({
       q: search,
       ...(dateFilters.from ? { from: dateFilters.from } : {}),
       ...(dateFilters.to ? { to: dateFilters.to } : {}),
+      ...(dateFilters.paymentStatus
+        ? { paymentStatus: dateFilters.paymentStatus }
+        : {}),
     },
     useFreshness(),
   );
@@ -155,12 +171,16 @@ export function DriveCostWorkspace({
   const [saveDriveCost] = useSaveDriveCostMutation();
   const [deleteDriveCost] = useDeleteDriveCostMutation();
   const [updatePayment] = useUpdateDriveCostPaymentMutation();
+  const balanceQuery = useDriveCostBalanceQuery(undefined, useFreshness());
+  const balanceView = useQueryView(balanceQuery);
 
   // Draft inputs are local; the calculation and records belong to RTK Query.
   const [calcMode, setCalcMode] = useState<"single" | "range">("single");
   const [calcDate, setCalcDate] = useState(today());
   const [calcFrom, setCalcFrom] = useState(today());
   const [calcTo, setCalcTo] = useState(today());
+  const [calcPaymentStatus, setCalcPaymentStatus] =
+    useState<PaymentStatusFilter>("");
   const [calcArgs, setCalcArgs] = useState<CalculationArgs>();
   const [calcOpen, setCalcOpen] = useState(false);
   const calculationQuery = useDriveCostCalculationQuery(calcArgs ?? skipToken, {
@@ -180,7 +200,7 @@ export function DriveCostWorkspace({
 
   async function refreshCosts() {
     try {
-      await refresh().unwrap();
+      await Promise.all([refresh().unwrap(), balanceView.refresh().unwrap()]);
       if (calcArgs && calcOpen) await refreshCalculation().unwrap();
       setNeedsReconcile(false);
     } catch {
@@ -198,13 +218,18 @@ export function DriveCostWorkspace({
 
   function applyDateFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    update({ from: dateDraft.from, to: dateDraft.to, page: 1 });
+    update({
+      from: dateDraft.from,
+      to: dateDraft.to,
+      paymentStatus: dateDraft.paymentStatus,
+      page: 1,
+    });
   }
 
   function resetFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setDateDraft({ from: "", to: "" });
-    update({ q: "", from: "", to: "", page: 1 });
+    setDateDraft({ from: "", to: "", paymentStatus: "" });
+    update({ q: "", from: "", to: "", paymentStatus: "", page: 1 });
   }
 
   function openNew() {
@@ -314,11 +339,17 @@ export function DriveCostWorkspace({
   }
 
   function runCalculation() {
-    const args =
-      calcMode === "single"
+    const args: CalculationArgs = {
+      ...(calcMode === "single"
         ? { from: calcDate }
-        : { from: calcFrom, to: calcTo };
-    if (calcArgs?.from === args.from && calcArgs?.to === args.to) {
+        : { from: calcFrom, to: calcTo }),
+      ...(calcPaymentStatus ? { paymentStatus: calcPaymentStatus } : {}),
+    };
+    if (
+      calcArgs?.from === args.from &&
+      calcArgs?.to === args.to &&
+      calcArgs?.paymentStatus === args.paymentStatus
+    ) {
       void refreshCalculation();
     } else {
       setCalcArgs(args);
@@ -336,10 +367,18 @@ export function DriveCostWorkspace({
     rateLabel: `${taka(record.ratePerKilometer)} / km`,
     totalLabel: taka(record.totalCost),
   }));
-  const selectedRate = editing ? RATES[editing.rateType] : RATES.IN_TIME;
+  const rates = getDriveCostRates(editing?.date ?? today());
+  const selectedRate = Number(rates[editing?.rateType ?? "IN_TIME"]);
   const previewKilometers = numberValue(editing?.kilometers);
+  // Valid distances have at most two decimal places. Work in hundredths of a
+  // kilometer and paisa so halfway totals round up exactly as they do on save.
+  const distanceHundredths = Math.round(previewKilometers * 100);
+  const ratePaisa = Math.round(selectedRate * 100);
   const previewTotal =
-    previewKilometers * selectedRate * (editing?.isRoundTrip ? 2 : 1);
+    Math.floor(
+      (distanceHundredths * ratePaisa * (editing?.isRoundTrip ? 2 : 1) + 50) /
+        100,
+    ) / 100;
 
   const calcRecordRows: DataRow[] = (calcResult?.records || []).map(
     (record) => ({
@@ -404,6 +443,15 @@ export function DriveCostWorkspace({
           {message}
         </Notice>
       )}
+
+      <DriveCostBalanceSection
+        canAddBalance={canEditPaymentStatus}
+        data={balanceView.data}
+        error={balanceView.error}
+        loading={balanceView.loading}
+        isFetching={balanceView.isFetching}
+        refresh={() => void balanceView.refresh()}
+      />
 
       {/* Cost Calculator Section */}
       {calcOpen && (
@@ -472,6 +520,20 @@ export function DriveCostWorkspace({
                 </div>
               </>
             )}
+            <div className="field">
+              <label htmlFor="calc-payment-status">Payment status</label>
+              <select
+                id="calc-payment-status"
+                value={calcPaymentStatus}
+                onChange={(event) =>
+                  setCalcPaymentStatus(paymentStatusFilter(event.target.value))
+                }
+              >
+                <option value="">All</option>
+                <option value="PAID">Paid</option>
+                <option value="UNPAID">Unpaid</option>
+              </select>
+            </div>
             <button
               type="button"
               className="button calc-run-btn"
@@ -492,7 +554,7 @@ export function DriveCostWorkspace({
           {calcResult && (
             <div className="calc-results">
               <PdfDownloadButton
-                href={`/api/admin/drive-costs/report?${new URLSearchParams({ from: calcResult.dateFrom, to: calcResult.dateTo })}`}
+                href={`/api/admin/drive-costs/report?${new URLSearchParams({ from: calcResult.dateFrom, to: calcResult.dateTo, ...(calcResult.paymentStatus ? { paymentStatus: calcResult.paymentStatus } : {}) })}`}
                 filename="drive-cost-report.pdf"
                 disabled={calcBusy}
               />
@@ -500,6 +562,12 @@ export function DriveCostWorkspace({
                 {calcResult.isSingleDay
                   ? formatDateLabel(calcResult.dateFrom)
                   : `${formatDateLabel(calcResult.dateFrom)} — ${formatDateLabel(calcResult.dateTo)}`}
+                {" · "}
+                {calcResult.paymentStatus === "PAID"
+                  ? "Paid trips"
+                  : calcResult.paymentStatus === "UNPAID"
+                    ? "Unpaid trips"
+                    : "All payment statuses"}
               </div>
 
               {calcResult.totalRecords === 0 ? (
@@ -621,6 +689,27 @@ export function DriveCostWorkspace({
                 setDateDraft({ ...dateDraft, to: event.target.value })
               }
             />
+          </div>
+          <div className="field">
+            <label htmlFor="drive-cost-filter-payment-status">
+              Payment status
+            </label>
+            <select
+              id="drive-cost-filter-payment-status"
+              name="paymentStatus"
+              disabled={loading}
+              value={dateDraft.paymentStatus}
+              onChange={(event) =>
+                setDateDraft({
+                  ...dateDraft,
+                  paymentStatus: paymentStatusFilter(event.target.value),
+                })
+              }
+            >
+              <option value="">All</option>
+              <option value="PAID">Paid</option>
+              <option value="UNPAID">Unpaid</option>
+            </select>
           </div>
           <div className="buttons">
             <button className="button" type="submit" disabled={loading}>
@@ -862,10 +951,14 @@ export function DriveCostWorkspace({
                         <strong>{title}</strong>
                         <small>{description}</small>
                       </span>
-                      <b>৳{RATES[value]}/km</b>
+                      <b>৳{Number(rates[value])}/km</b>
                     </label>
                   ))}
                 </div>
+                <small className="muted">
+                  Trips from {formatDateLabel(DRIVE_COST_RATE_CHANGE_DATE)} use
+                  ৳5.50/km in time and ৳11/km over time.
+                </small>
               </fieldset>
               <div className="drive-cost-preview full" aria-live="polite">
                 <span>

@@ -92,6 +92,11 @@ beforeEach(() => {
           finishWrite = resolve;
         });
       }
+      if (request.url.endsWith("/drive-costs/balance"))
+        return Response.json({
+          success: true,
+          data: { balance: "0.00", totalAdded: "0.00", totalPaid: "0.00" },
+        });
       return Response.json({
         success: true,
         data: {

@@ -30,10 +30,11 @@ async function seedDriveCosts(context: BrowserContext) {
         date: new Date(`2024-09-${String(day).padStart(2, "0")}T00:00:00Z`),
         destinationFrom: `Trip ${String(day).padStart(2, "0")}`,
         destinationTo: day === 11 || day === 21 ? "Chattogram" : "Dhaka office",
-        kilometers: "10.00",
+        kilometers: day % 2 === 1 ? "20.00" : "10.00",
         rateType: "IN_TIME" as const,
         ratePerKilometer: "5.00",
-        totalCost: "50.00",
+        totalCost: day % 2 === 1 ? "100.00" : "50.00",
+        paymentStatus: day % 2 === 1 ? ("PAID" as const) : ("UNPAID" as const),
         createdById: admin.id,
       };
     }),
@@ -168,6 +169,7 @@ test("drive cost date controls work on mobile independently from the calculator"
   for (const control of [
     filter.getByLabel("From date", { exact: true }),
     filter.getByLabel("To date", { exact: true }),
+    filter.getByLabel("Payment status", { exact: true }),
     filter.getByRole("button", { name: "Apply filters" }),
     filter.getByRole("button", { name: "Reset filters" }),
   ]) {
@@ -201,4 +203,129 @@ test("drive cost date controls work on mobile independently from the calculator"
   await expect(filter.getByLabel("To date", { exact: true })).toHaveValue(
     "2024-09-11",
   );
+});
+
+test("paid and unpaid filters persist in the list and independently calculate and export matching trips", async ({
+  page,
+}) => {
+  await page.goto("/admin/drive-cost");
+  const list = recordList(page);
+  const filter = page.getByRole("form", { name: "Filter drive costs by date" });
+  const status = filter.getByLabel("Payment status", { exact: true });
+  const search = page.getByRole("searchbox", { name: "Search drive costs" });
+  await expect(list).toContainText("Page 1 · 30 total records");
+  await list.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(list).toContainText("Page 2 · 30 total records");
+  await status.selectOption("PAID");
+  await filterDates(page, "2024-09-09", "2024-09-12");
+  await expect(list).toContainText("Page 1 · 2 total records");
+  await expect(
+    list.getByRole("cell", { name: "Trip 09", exact: true }),
+  ).toBeVisible();
+  await expect(
+    list.getByRole("cell", { name: "Trip 11", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/paymentStatus=PAID/);
+
+  await page.reload();
+  await expect(status).toHaveValue("PAID");
+  await expect(list).toContainText("Page 1 · 2 total records");
+  await search.fill("Chattogram");
+  await expect(list).toContainText("Page 1 · 1 total records");
+  // Unapplied drafts must not change which displayed records are exported.
+  await status.selectOption("UNPAID");
+  const reportResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/admin/drive-costs/report?"),
+  );
+  const reportDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download PDF", exact: true }).click();
+  const report = await reportResponse;
+  await reportDownload;
+  expect(report.status()).toBe(200);
+  expect(report.headers()["content-type"]).toBe("application/pdf");
+  const reportParams = new URL(report.url()).searchParams;
+  expect(reportParams.get("paymentStatus")).toBe("PAID");
+  expect(reportParams.get("q")).toBe("Chattogram");
+  expect(reportParams.get("from")).toBe("2024-09-09");
+  expect(reportParams.get("to")).toBe("2024-09-12");
+  expect(reportParams.has("page")).toBe(false);
+
+  await filter.getByRole("button", { name: "Apply filters" }).click();
+  await expect(list).toContainText("Page 1 · 0 total records");
+  await search.fill("");
+  await expect(list).toContainText("Page 1 · 2 total records");
+  await expect(
+    list.getByRole("cell", { name: "Trip 10", exact: true }),
+  ).toBeVisible();
+  await expect(
+    list.getByRole("cell", { name: "Trip 12", exact: true }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Cost calculator", exact: true })
+    .click();
+  const calculator = page.locator("section.calc-card");
+  const calculationStatus = calculator.getByLabel("Payment status", {
+    exact: true,
+  });
+  await calculator
+    .getByRole("button", { name: "Date range", exact: true })
+    .click();
+  await calculator.getByLabel("From date", { exact: true }).fill("2024-09-09");
+  await calculator.getByLabel("To date", { exact: true }).fill("2024-09-12");
+  await calculationStatus.selectOption("PAID");
+  await calculator
+    .getByRole("button", { name: "Calculate", exact: true })
+    .click();
+  await expect(calculator.locator(".calc-total")).toContainText("৳200.00");
+  await expect(calculator.locator(".calc-total")).toContainText(
+    "2 trips · 40 km",
+  );
+  await expect(calculator.locator("tbody tr")).toHaveCount(2);
+  await expect(
+    calculator.getByRole("cell", { name: "Trip 09", exact: true }),
+  ).toBeVisible();
+  await expect(
+    list.getByRole("cell", { name: "Trip 10", exact: true }),
+  ).toBeVisible();
+  await expect(status).toHaveValue("UNPAID");
+
+  await calculationStatus.selectOption("UNPAID");
+  const calculationReportResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/admin/drive-costs/report?"),
+  );
+  const calculationReportDownload = page.waitForEvent("download");
+  await calculator
+    .getByRole("button", { name: "Download PDF", exact: true })
+    .click();
+  const calculationReport = await calculationReportResponse;
+  await calculationReportDownload;
+  expect(calculationReport.status()).toBe(200);
+  expect(
+    new URL(calculationReport.url()).searchParams.get("paymentStatus"),
+  ).toBe("PAID");
+  await calculator
+    .getByRole("button", { name: "Calculate", exact: true })
+    .click();
+  await expect(calculator.locator(".calc-total")).toContainText("৳100.00");
+  await expect(calculator.locator(".calc-total")).toContainText(
+    "2 trips · 20 km",
+  );
+  await expect(
+    calculator.getByRole("cell", { name: "Trip 10", exact: true }),
+  ).toBeVisible();
+
+  await calculationStatus.selectOption("");
+  await calculator
+    .getByRole("button", { name: "Calculate", exact: true })
+    .click();
+  await expect(calculator.locator(".calc-total")).toContainText("৳300.00");
+  await expect(calculator.locator(".calc-total")).toContainText(
+    "4 trips · 60 km",
+  );
+  await filter.getByRole("button", { name: "Reset filters" }).click();
+  await expect(status).toHaveValue("");
+  await expect(page).not.toHaveURL(/paymentStatus=/);
+  await expect(list).toContainText("Page 1 · 30 total records");
+  await expect(calculator.locator(".calc-total")).toContainText("৳300.00");
 });

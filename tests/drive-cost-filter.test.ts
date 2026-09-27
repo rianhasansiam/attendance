@@ -121,6 +121,52 @@ describe("drive cost date filtering", () => {
     expect(mocks.count).toHaveBeenCalledWith({ where: {} });
   });
 
+  it.each(["PAID", "UNPAID"])(
+    "applies the %s payment filter to both the page and total queries alongside dates and search",
+    async (paymentStatus) => {
+      const response = await list(
+        `?from=2026-09-21&q=Dhaka&paymentStatus=${paymentStatus}`,
+      );
+
+      expect(response.status).toBe(200);
+      const where = {
+        paymentStatus,
+        date: { gte: new Date("2026-09-21T00:00:00.000Z") },
+        OR: [
+          { destinationFrom: { contains: "Dhaka", mode: "insensitive" } },
+          { destinationTo: { contains: "Dhaka", mode: "insensitive" } },
+        ],
+      };
+      expect(mocks.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where }),
+      );
+      expect(mocks.count).toHaveBeenCalledWith({ where });
+    },
+  );
+
+  it("treats an empty payment filter as all payment statuses", async () => {
+    expect((await list("?paymentStatus=")).status).toBe(200);
+    expect(mocks.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: {} }),
+    );
+    expect(mocks.count).toHaveBeenCalledWith({ where: {} });
+  });
+
+  it.each(["paid", "ALL", "PENDING"])(
+    "rejects an unsupported payment filter before database access: %s",
+    async (paymentStatus) => {
+      const response = await list(`?paymentStatus=${paymentStatus}`);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        success: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+      expect(mocks.findMany).not.toHaveBeenCalled();
+      expect(mocks.count).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     "?from=2026-02-30",
     "?to=2026-02-30",

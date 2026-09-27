@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import { requireDriveCostManager } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { driveCostWhere } from "@/modules/drive-costs/filters";
+import { driveCostPaymentFilterSchema } from "@/modules/management/validation";
 
 const querySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -10,20 +12,15 @@ const querySchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  paymentStatus: driveCostPaymentFilterSchema,
 });
 
 export function GET(request: Request) {
   return api(async () => {
     await requireDriveCostManager();
     const params = Object.fromEntries(new URL(request.url).searchParams);
-    const { from, to } = querySchema.parse(params);
-
-    const dateFrom = new Date(`${from}T00:00:00Z`);
-    const dateTo = to ? new Date(`${to}T00:00:00Z`) : dateFrom;
-
-    const where = {
-      date: { gte: dateFrom, lte: dateTo },
-    };
+    const { from, to, paymentStatus } = querySchema.parse(params);
+    const where = driveCostWhere({ from, to: to || from, paymentStatus });
 
     const records = await db.driveCost.findMany({
       where,
@@ -61,6 +58,7 @@ export function GET(request: Request) {
       dateFrom: from,
       dateTo: to || from,
       isSingleDay: !to || to === from,
+      paymentStatus: paymentStatus ?? null,
       totalRecords: records.length,
       totalKilometers: totals.IN_TIME.kilometers
         .add(totals.OVER_TIME.kilometers)

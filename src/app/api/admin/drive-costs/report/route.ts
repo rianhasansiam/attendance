@@ -15,6 +15,7 @@ export function GET(request: Request) {
         from: params.get("from") ?? undefined,
         to: params.get("to") ?? undefined,
         q: params.get("q") ?? undefined,
+        paymentStatus: params.get("paymentStatus") ?? undefined,
       }),
     );
   });

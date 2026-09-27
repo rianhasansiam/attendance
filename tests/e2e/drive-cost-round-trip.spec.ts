@@ -23,7 +23,7 @@ async function expectSavedTrip(isRoundTrip: boolean, totalCost: string) {
   });
   expect(record.isRoundTrip).toBe(isRoundTrip);
   expect(record.kilometers.toFixed(2)).toBe("10.00");
-  expect(record.ratePerKilometer.toFixed(2)).toBe("5.00");
+  expect(record.ratePerKilometer.toFixed(2)).toBe("5.50");
   expect(record.totalCost.toFixed(2)).toBe(totalCost);
 }
 
@@ -126,8 +126,8 @@ test("only super admins can change payment status, and trip edits preserve it", 
       destinationTo: "Client destination",
       kilometers: 10,
       rateType: "IN_TIME",
-      ratePerKilometer: 5,
-      totalCost: 50,
+      ratePerKilometer: 5.5,
+      totalCost: 55,
       createdById: adminId!,
     },
   });
@@ -182,7 +182,7 @@ test("only super admins can change payment status, and trip edits preserve it", 
   const paid = await db.driveCost.findUniqueOrThrow({ where: { id: trip.id } });
   expect(paid.paymentStatus).toBe("PAID");
   expect(paid.kilometers.toFixed(2)).toBe("10.00");
-  expect(paid.totalCost.toFixed(2)).toBe("50.00");
+  expect(paid.totalCost.toFixed(2)).toBe("55.00");
 
   await db.user.update({ where: { id: adminId }, data: { role: "ADMIN" } });
   await openList("/admin/drive-cost");
@@ -205,6 +205,8 @@ test("only super admins can change payment status, and trip edits preserve it", 
   });
   expect(updated.paymentStatus).toBe("PAID");
   expect(updated.kilometers.toFixed(2)).toBe("12.00");
+  expect(updated.ratePerKilometer.toFixed(2)).toBe("5.50");
+  expect(updated.totalCost.toFixed(2)).toBe("66.00");
 
   await db.user.update({
     where: { id: adminId },
@@ -237,12 +239,12 @@ test("round trips double distance and cost once, survive editing, and can return
     "one-way",
   );
   const preview = create.locator(".drive-cost-preview");
-  await expect(preview).toContainText("৳50.00");
+  await expect(preview).toContainText("৳55.00");
   await create
     .getByLabel("Trip type", { exact: true })
     .selectOption("round-trip");
-  await expect(preview).toContainText("10 km × ৳5/km × 2");
-  await expect(preview).toContainText("৳100.00");
+  await expect(preview).toContainText("10 km × ৳5.5/km × 2");
+  await expect(preview).toContainText("৳110.00");
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   const tripType = create.getByLabel("Trip type", { exact: true });
@@ -260,7 +262,7 @@ test("round trips double distance and cost once, survive editing, and can return
   if (desktopViewport) await page.setViewportSize(desktopViewport);
   await create.getByRole("button", { name: "Save drive cost" }).click();
   await expect(create).toBeHidden();
-  await expectSavedTrip(true, "100.00");
+  await expectSavedTrip(true, "110.00");
 
   const list = recordList(page);
   await page
@@ -274,12 +276,12 @@ test("round trips double distance and cost once, survive editing, and can return
     list.getByRole("cell", { name: "20", exact: true }),
   ).toBeVisible();
   await expect(
-    list.getByRole("cell", { name: "৳100.00", exact: true }),
+    list.getByRole("cell", { name: "৳110.00", exact: true }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Cost calculator", exact: true })
     .click();
-  await expectCalculatorTotals(page, 20, "100.00", "Round trip (×2)");
+  await expectCalculatorTotals(page, 20, "110.00", "Round trip (×2)");
 
   const editButton = list.getByRole("button", {
     name: `Edit drive cost from ${office} to Client destination`,
@@ -293,10 +295,10 @@ test("round trips double distance and cost once, survive editing, and can return
   await expect(edit.getByLabel("Trip type", { exact: true })).toHaveValue(
     "round-trip",
   );
-  await expect(edit.locator(".drive-cost-preview")).toContainText("৳100.00");
+  await expect(edit.locator(".drive-cost-preview")).toContainText("৳110.00");
   await edit.getByRole("button", { name: "Save drive cost" }).click();
   await expect(edit).toBeHidden();
-  await expectSavedTrip(true, "100.00");
+  await expectSavedTrip(true, "110.00");
 
   await editButton.click();
   await expect(
@@ -306,13 +308,13 @@ test("round trips double distance and cost once, survive editing, and can return
     "round-trip",
   );
   await edit.getByLabel("Trip type", { exact: true }).selectOption("one-way");
-  await expect(edit.locator(".drive-cost-preview")).toContainText("৳50.00");
+  await expect(edit.locator(".drive-cost-preview")).toContainText("৳55.00");
   await expect(edit.locator(".drive-cost-preview p")).toHaveText(
-    "10 km × ৳5/km",
+    "10 km × ৳5.5/km",
   );
   await edit.getByRole("button", { name: "Save drive cost" }).click();
   await expect(edit).toBeHidden();
-  await expectSavedTrip(false, "50.00");
+  await expectSavedTrip(false, "55.00");
   await expect(
     list.getByRole("cell", { name: "One way", exact: true }),
   ).toBeVisible();
@@ -320,7 +322,114 @@ test("round trips double distance and cost once, survive editing, and can return
     list.getByRole("cell", { name: "10", exact: true }),
   ).toBeVisible();
   await expect(
-    list.getByRole("cell", { name: "৳50.00", exact: true }),
+    list.getByRole("cell", { name: "৳55.00", exact: true }),
   ).toBeVisible();
-  await expectCalculatorTotals(page, 10, "50.00", "One way");
+  await expectCalculatorTotals(page, 10, "55.00", "One way");
+});
+
+test("trip dates select the effective rates and previews match saved fractional costs", async ({
+  page,
+}) => {
+  await page.goto("/admin/drive-cost");
+  await page
+    .getByRole("button", { name: "Add drive cost", exact: true })
+    .click();
+  const create = page.getByRole("dialog", { name: "Add drive cost" });
+  await create.getByLabel("Date *", { exact: true }).fill("2026-09-25");
+  await create.getByLabel("Destination from *", { exact: true }).fill(office);
+  await create
+    .getByLabel("Destination to *", { exact: true })
+    .fill("Client destination");
+  await create
+    .getByLabel("Kilometers (one way) *", { exact: true })
+    .fill("0.41");
+  await expect(
+    create.getByRole("radio", {
+      name: "In time Standard work time ৳5/km",
+      exact: true,
+    }),
+  ).toBeChecked();
+  await expect(
+    create.getByRole("radio", {
+      name: "Over time Outside work time ৳10/km",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(create.locator(".drive-cost-preview strong")).toHaveText(
+    "৳2.05",
+  );
+  await create.getByRole("button", { name: "Save drive cost" }).click();
+  await expect(create).toBeHidden();
+  const record = await db.driveCost.findFirstOrThrow({
+    where: { createdById: adminId, destinationFrom: office },
+  });
+  expect(record.ratePerKilometer.toFixed(2)).toBe("5.00");
+  expect(record.totalCost.toFixed(2)).toBe("2.05");
+
+  await page
+    .getByRole("searchbox", { name: "Search drive costs" })
+    .fill(office);
+  const list = recordList(page);
+  const editButton = list.getByRole("button", {
+    name: `Edit drive cost from ${office} to Client destination`,
+    exact: true,
+  });
+  await editButton.click();
+  const edit = page.getByRole("dialog", { name: "Edit drive cost" });
+  await expect(edit.locator(".drive-cost-preview strong")).toHaveText("৳2.05");
+  await edit.getByLabel("Date *", { exact: true }).fill("2026-09-26");
+  await expect(
+    edit.getByRole("radio", {
+      name: "In time Standard work time ৳5.5/km",
+      exact: true,
+    }),
+  ).toBeChecked();
+  const overtime = edit.getByRole("radio", {
+    name: "Over time Outside work time ৳11/km",
+    exact: true,
+  });
+  await expect(overtime).toBeVisible();
+  // 0.41 × 5.5 = 2.255: the displayed and saved total must both round to 2.26.
+  await expect(edit.locator(".drive-cost-preview strong")).toHaveText("৳2.26");
+  await edit.getByRole("button", { name: "Save drive cost" }).click();
+  await expect(edit).toBeHidden();
+  const updated = await db.driveCost.findUniqueOrThrow({
+    where: { id: record.id },
+  });
+  expect(updated.date.toISOString().slice(0, 10)).toBe("2026-09-26");
+  expect(updated.ratePerKilometer.toFixed(2)).toBe("5.50");
+  expect(updated.totalCost.toFixed(2)).toBe("2.26");
+  await expect(
+    list.getByRole("cell", { name: "৳2.26", exact: true }),
+  ).toBeVisible();
+
+  await editButton.click();
+  await edit
+    .getByLabel("Trip type", { exact: true })
+    .selectOption("round-trip");
+  await expect(edit.locator(".drive-cost-preview strong")).toHaveText("৳4.51");
+  await overtime.check();
+  await expect(edit.locator(".drive-cost-preview strong")).toHaveText("৳9.02");
+  await edit.getByLabel("Date *", { exact: true }).fill("2026-09-25");
+  await expect(
+    edit.getByRole("radio", {
+      name: "Over time Outside work time ৳10/km",
+      exact: true,
+    }),
+  ).toBeChecked();
+  await expect(edit.locator(".drive-cost-preview strong")).toHaveText("৳8.20");
+  await edit.getByLabel("Date *", { exact: true }).fill("2026-09-26");
+  await expect(edit.locator(".drive-cost-preview strong")).toHaveText("৳9.02");
+  await edit.getByRole("button", { name: "Save drive cost" }).click();
+  await expect(edit).toBeHidden();
+  const roundTrip = await db.driveCost.findUniqueOrThrow({
+    where: { id: record.id },
+  });
+  expect(roundTrip.rateType).toBe("OVER_TIME");
+  expect(roundTrip.isRoundTrip).toBe(true);
+  expect(roundTrip.ratePerKilometer.toFixed(2)).toBe("11.00");
+  expect(roundTrip.totalCost.toFixed(2)).toBe("9.02");
+  await expect(
+    list.getByRole("cell", { name: "৳9.02", exact: true }),
+  ).toBeVisible();
 });

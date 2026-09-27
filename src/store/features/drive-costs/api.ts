@@ -1,6 +1,8 @@
 import { baseApi } from "@/store/api/base-api";
 import type { DriveCostRateType } from "@/modules/drive-costs/rates";
 
+export type DriveCostPaymentStatus = "UNPAID" | "PAID";
+
 export type DriveCostRecord = {
   id: string;
   date: string;
@@ -9,7 +11,7 @@ export type DriveCostRecord = {
   kilometers: string;
   isRoundTrip: boolean;
   rateType: DriveCostRateType;
-  paymentStatus: "UNPAID" | "PAID";
+  paymentStatus: DriveCostPaymentStatus;
   ratePerKilometer: string;
   totalCost: string;
 };
@@ -25,6 +27,7 @@ export type DriveCostListArgs = {
   q: string;
   from?: string;
   to?: string;
+  paymentStatus?: DriveCostPaymentStatus;
 };
 export type DriveCostInput = {
   date: string;
@@ -36,7 +39,11 @@ export type DriveCostInput = {
   isRoundTrip: boolean;
   rateType: DriveCostRateType;
 };
-export type CalculationArgs = { from: string; to?: string };
+export type CalculationArgs = {
+  from: string;
+  to?: string;
+  paymentStatus?: DriveCostPaymentStatus;
+};
 type CalculationGroup = {
   records: number;
   kilometers: string;
@@ -46,11 +53,28 @@ export type DriveCostCalculation = {
   dateFrom: string;
   dateTo: string;
   isSingleDay: boolean;
+  paymentStatus: DriveCostPaymentStatus | null;
   totalRecords: number;
   totalKilometers: string;
   totalCost: string;
   breakdown: { inTime: CalculationGroup; overTime: CalculationGroup };
   records: DriveCostRecord[];
+};
+export type DriveCostBalance = {
+  balance: string;
+  totalAdded: string;
+  totalPaid: string;
+};
+export type AddDriveCostBalanceInput = {
+  requestId: string;
+  amount: string;
+  note?: string;
+};
+type DriveCostBalanceAddition = {
+  id: string;
+  amount: string;
+  note: string | null;
+  createdAt: string;
 };
 const changedTags = ["DriveCosts", "Audit"] as const;
 
@@ -75,6 +99,21 @@ export const driveCostsApi = baseApi.injectEndpoints({
           id,
         })) ?? []),
       ],
+    }),
+    driveCostBalance: build.query<DriveCostBalance, void>({
+      query: () => "/api/admin/drive-costs/balance",
+      providesTags: [{ type: "DriveCosts", id: "BALANCE" }],
+    }),
+    addDriveCostBalance: build.mutation<
+      DriveCostBalanceAddition,
+      AddDriveCostBalanceInput
+    >({
+      query: (input) => ({
+        url: "/api/admin/drive-costs/balance",
+        method: "POST",
+        body: input,
+      }),
+      invalidatesTags: (_result, error) => (error ? [] : changedTags),
     }),
     saveDriveCost: build.mutation<
       DriveCostRecord,
@@ -111,6 +150,8 @@ export const driveCostsApi = baseApi.injectEndpoints({
 export const {
   useDriveCostsQuery,
   useDriveCostCalculationQuery,
+  useDriveCostBalanceQuery,
+  useAddDriveCostBalanceMutation,
   useSaveDriveCostMutation,
   useDeleteDriveCostMutation,
   useUpdateDriveCostPaymentMutation,

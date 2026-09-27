@@ -101,4 +101,30 @@ describe("canonical attendance outcome", () => {
       }),
     ).toMatchObject({ overtimeMinutes: null, rawOvertimeMinutes: null });
   });
+
+  it("retains the work shortfall even when lateness is approved", () => {
+    expect(
+      attendanceOutcome({
+        ...record,
+        checkOutAt: new Date("2026-09-19T16:00:00Z"),
+        overtimeMinutes: 0,
+        lateApproval: {
+          status: "APPROVED",
+          checkInAt: record.checkInAt,
+          lateMinutes: 30,
+        },
+      }),
+    ).toMatchObject({
+      status: "PRESENT",
+      effectiveLateMinutes: 0,
+      rawOvertimeMinutes: 0,
+      overtimeMinutes: -90,
+    });
+  });
+
+  it("keeps open attendance at zero until checkout", () => {
+    expect(
+      attendanceOutcome({ ...record, checkOutAt: null, overtimeMinutes: 0 }),
+    ).toMatchObject({ rawOvertimeMinutes: 0, overtimeMinutes: 0 });
+  });
 });

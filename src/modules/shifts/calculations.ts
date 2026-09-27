@@ -92,17 +92,22 @@ export function calculateOvertime(
   // Preserve unknown overtime when no historical schedule was captured.
   if (!scheduledEndAt)
     return { rawOvertimeMinutes: null, overtimeMinutes: null };
-  // Only completed minutes actually worked after the scheduled end count.
-  const rawOvertimeMinutes = Math.max(
+  // Keep the signed difference so early departure is a shortfall. Flooring
+  // retains the existing completed-minute rule on either side of shift end.
+  const endBalanceMinutes = Math.floor(
+    (checkOutAt.getTime() - scheduledEndAt.getTime()) / 60_000,
+  );
+  const workedMinutes = Math.max(
     0,
-    Math.floor(
-      (checkOutAt.getTime() -
-        Math.max(checkInAt.getTime(), scheduledEndAt.getTime())) /
-        60_000,
-    ),
+    Math.floor((checkOutAt.getTime() - checkInAt.getTime()) / 60_000),
   );
   return {
-    rawOvertimeMinutes,
-    overtimeMinutes: Math.max(0, rawOvertimeMinutes - actualLateMinutes),
+    rawOvertimeMinutes: Math.max(0, Math.min(workedMinutes, endBalanceMinutes)),
+    // Lateness already includes any arrival delay after shift end. Subtract it
+    // from the end balance once, while never crediting more time than worked.
+    overtimeMinutes: Math.min(
+      workedMinutes,
+      endBalanceMinutes - actualLateMinutes,
+    ),
   };
 }

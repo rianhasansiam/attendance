@@ -198,7 +198,8 @@ export function time(value: unknown, timeZone?: string) {
 }
 export function duration(value: unknown) {
   const minutes = Number(value || 0);
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  const magnitude = Math.abs(minutes);
+  return `${minutes < 0 ? "-" : ""}${Math.floor(magnitude / 60)}h ${magnitude % 60}m`;
 }
 export function Table({
   rows,

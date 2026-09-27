@@ -219,8 +219,102 @@ integration("PostgreSQL attendance and WebAuthn integration", () => {
     });
     expect(record.checkOutAt).toBeInstanceOf(Date);
     expect(record.workedMinutes).toBeGreaterThanOrEqual(0);
-    expect(record.overtimeMinutes).toBe(0);
+    expect(record.overtimeMinutes).toBeLessThan(0);
   });
+
+  it.each([
+    {
+      checkInTime: "09:00",
+      checkOutTime: "16:15",
+      lateMinutes: 0,
+      overtimeMinutes: -45,
+      workedMinutes: 435,
+    },
+    {
+      checkInTime: "09:30",
+      checkOutTime: "16:15",
+      lateMinutes: 30,
+      overtimeMinutes: -75,
+      workedMinutes: 405,
+    },
+    {
+      checkInTime: "09:30",
+      checkOutTime: "17:00",
+      lateMinutes: 30,
+      overtimeMinutes: -30,
+      workedMinutes: 450,
+    },
+  ])(
+    "persists $overtimeMinutes overtime minutes for $checkInTime–$checkOutTime against the captured shift",
+    async ({
+      checkInTime,
+      checkOutTime,
+      lateMinutes,
+      overtimeMinutes,
+      workedMinutes,
+    }) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date(`2026-09-21T${checkInTime}:00Z`));
+        const actor = await fixture();
+        const assignment = await db.employeeShift.findFirstOrThrow({
+          where: { employeeId: actor.employee.id },
+        });
+        await db.shift.update({
+          where: { id: assignment.shiftId },
+          data: { startTime: "09:00", endTime: "17:00", graceMinutes: 0 },
+        });
+        await db.session.update({
+          where: { id: actor.sessionId },
+          data: { expires: new Date("2026-09-22T00:00:00Z") },
+        });
+        const checkedIn = await recordAttendance(
+          actor,
+          "CHECK_IN",
+          {},
+          new Headers(),
+        );
+        expect(checkedIn).toMatchObject({ lateMinutes, overtimeMinutes: 0 });
+        expect(
+          (await employeeDashboard(actor, new Headers())).today.overtimeMinutes,
+        ).toBe(0);
+
+        // Editing the shift after check-in must not change the required hours.
+        await db.shift.update({
+          where: { id: assignment.shiftId },
+          data: { startTime: "10:00", endTime: "18:00" },
+        });
+        vi.setSystemTime(new Date(`2026-09-21T${checkOutTime}:00Z`));
+        const checkedOut = await recordAttendance(
+          actor,
+          "CHECK_OUT",
+          {},
+          new Headers(),
+        );
+        expect(checkedOut).toMatchObject({
+          lateMinutes,
+          overtimeMinutes,
+          workedMinutes,
+        });
+        expect(
+          await db.attendance.findUniqueOrThrow({
+            where: { id: checkedIn.id },
+          }),
+        ).toMatchObject({
+          lateMinutes,
+          overtimeMinutes,
+          workedMinutes,
+          scheduledStartAt: new Date("2026-09-21T09:00:00Z"),
+          scheduledEndAt: new Date("2026-09-21T17:00:00Z"),
+        });
+        const dashboard = await employeeDashboard(actor, new Headers());
+        expect(dashboard.today).toEqual(checkedOut);
+        expect(dashboard.recent).toContainEqual(checkedOut);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("persists overnight overtime using the end captured at check-in despite a later Shift edit", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

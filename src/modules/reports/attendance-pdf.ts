@@ -7,7 +7,8 @@ import { DELETED_INFO } from "@/lib/deleted-info";
 import { createReportPdf } from "./pdf";
 
 function duration(minutes: number) {
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  const magnitude = Math.abs(minutes);
+  return `${minutes < 0 ? "-" : ""}${Math.floor(magnitude / 60)}h ${magnitude % 60}m`;
 }
 
 export async function attendanceReportPdf(
@@ -99,7 +100,7 @@ export async function attendanceReportPdf(
         row.lateReason || "-",
       ];
     }),
-    footerNote: `Times use each row's shift timezone. Actual late minutes are retained; status reflects approved late requests. Overtime counts completed minutes after scheduled end, less actual late minutes.${unknown ? ` Total excludes ${unknown} record${unknown === 1 ? "" : "s"} with unknown overtime.` : ""}`,
+    footerNote: `Times use each row's shift timezone. Actual late minutes are retained; status reflects approved late requests. Positive overtime counts completed minutes after scheduled end, less actual late minutes. Negative overtime shows a work-hour shortfall.${unknown ? ` Total excludes ${unknown} record${unknown === 1 ? "" : "s"} with unknown overtime.` : ""}`,
   });
   return new Response(new Uint8Array(bytes), {
     headers: {

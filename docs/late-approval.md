@@ -50,12 +50,15 @@ The canonical shift calculation uses:
 ```text
 workedMinutes = max(0, floor((checkOut - checkIn) / 60000))
 rawOvertimeMinutes = max(0, floor((checkOut - max(checkIn, scheduledEnd)) / 60000))
-overtimeMinutes = max(0, rawOvertimeMinutes - actualLateMinutes)
+endBalanceMinutes = floor((checkOut - scheduledEnd) / 60000)
+overtimeMinutes = min(workedMinutes, endBalanceMinutes - actualLateMinutes)
 ```
 
 Approval never changes this overtime calculation. For an 08:30–17:00 schedule,
 09:00–17:30 yields 30 late minutes, 30 raw overtime minutes, and zero effective
-overtime, whether approved or not. Check-out and corrections persist this result;
+overtime, whether approved or not. Leaving at 17:00 instead yields `-30` minutes;
+leaving at 16:00 yields `-90` minutes. Open attendance stays at zero until checkout.
+Check-out and corrections persist this result;
 dashboard, history, report totals, JSON, and PDF use the same server projection.
 Existing date-fns-tz, overnight, grace, half-day, leave, holiday, and weekend rules
 remain in use. No new break, overtime threshold, or rounding policy was added.
@@ -78,6 +81,11 @@ The migration recalculates known historical overtime from existing punches and
 captured scheduled ends. It does not alter punches, stored actual status, actual
 late duration, or audit history. Completed legacy records without a scheduled-end
 snapshot retain unknown overtime.
+
+The subsequent `20260927120000_signed_overtime` migration allows negative
+balances and recalculates completed records with a known scheduled end using the
+signed formula above. It preserves unknown historical balances, open attendance,
+punches, and approval records. Apply it before running this version.
 
 API changes:
 

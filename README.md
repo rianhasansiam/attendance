@@ -10,7 +10,7 @@ Late check-ins prompt the employee to enter a reason after attendance is recorde
 
 Only super administrators can correct attendance records or create manual attendance corrections for employees. Administrators can view and export attendance reports. Every correction requires a reason and is recorded in the audit log.
 
-Delayed checkout automatically records overtime: full minutes actually worked after the scheduled shift end, shown as hours and minutes in employee/admin attendance tables in PDF reports, with an exact total in minutes. Arrival lateness does not reduce overtime. The scheduled end is captured at check-in, including overnight shifts, so later Shift edits do not change it. Corrections recalculate overtime from that saved end; removing checkout resets overtime to zero. Previously completed records without a historical schedule snapshot show `—` (Unknown in PDFs), including after corrections. Legacy open records use their linked shift and original business date to establish the end at checkout. Apply `20260922000000_attendance_overtime` with `pnpm db:migrate`, then run `pnpm db:generate` before starting the updated application. This records time only; it does not calculate overtime pay or approval.
+Overtime shows the signed work-hour balance after checkout: working beyond the scheduled end offsets actual late minutes, and leaving early or not making up late arrival shows a negative value such as `-1h 30m`. Employee/admin attendance tables and PDF reports display this balance, and report totals net positive and negative minutes. Existing arrival grace still applies, early arrival does not earn overtime, and late approval does not remove a work-hour shortfall. Scheduled boundaries are captured at check-in, including overnight shifts, so later Shift edits do not change them. Corrections recalculate the balance; removing checkout resets it to zero. Previously completed records without a historical scheduled-end snapshot show `—` (Unknown in PDFs), including after corrections. Legacy open records establish their schedule at checkout using the linked shift and original business date. Apply `20260927120000_signed_overtime` with `pnpm db:migrate` before running this version: it permits negative balances and recalculates known historical overtime. This records time only; it does not calculate overtime pay or approval.
 
 Administrators and super administrators can use **Drive Cost** to record dated trips and calculate costs at ৳5/km during in-time or ৳10/km during overtime. Rates and totals are derived on the server, saved as exact decimals, and recorded in the audit log. Apply the included `20260923000000_drive_costs` migration with `pnpm db:migrate` before using this workspace page.
 
@@ -138,3 +138,6 @@ Then apply the migration to production:
 pnpm db:migrate
 pnpm db:generate
 Your current .env points to production—switch to a development database before running db:dev. Keep generated migration files; don’t manually delete tables.
+
+
+pnpm db:migrate

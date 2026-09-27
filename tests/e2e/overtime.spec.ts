@@ -107,8 +107,8 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-for (const expectedMinutes of [40, 90]) {
-  test(`late checkout records ${expectedMinutes} overtime minutes in employee, admin and report totals`, async ({
+for (const expectedMinutes of [-75, 40, 90]) {
+  test(`checkout records ${expectedMinutes} overtime minutes in employee, admin and report totals`, async ({
     page,
     context,
   }) => {
@@ -208,7 +208,7 @@ for (const expectedMinutes of [40, 90]) {
     );
     expect(overtimeMinutes).toBe(expectedMinutes);
     expect(checkedOut.overtimeMinutes).toBe(overtimeMinutes);
-    const displayedOvertime = `${Math.floor(overtimeMinutes / 60)}h ${overtimeMinutes % 60}m`;
+    const displayedOvertime = `${overtimeMinutes < 0 ? "-" : ""}${Math.floor(Math.abs(overtimeMinutes) / 60)}h ${Math.abs(overtimeMinutes) % 60}m`;
     await expectOvertimeTable(page, displayedOvertime);
 
     await page.goto("/employee/history");
@@ -294,8 +294,8 @@ test("filtered overtime includes every page and resets consistently in attendanc
   const rows = Array.from({ length: 29 }, (_, index) => {
     const days = index + 1;
     const day = dateBefore(days);
-    // The large amount is on page two; summing only visible rows would give 25m.
-    const overtimeMinutes = days === 29 ? null : days === 28 ? 61 : 1;
+    // The shortfall is on page two; summing only visible rows would give +25m.
+    const overtimeMinutes = days === 29 ? null : days === 28 ? -61 : 1;
     const scheduledEndAt = new Date(`${day}T17:00:00Z`);
     return {
       employeeId,
@@ -330,8 +330,8 @@ test("filtered overtime includes every page and resets consistently in attendanc
   expect(baselineResponse.ok()).toBeTruthy();
   const baseline = (await baselineResponse.json()).data;
   const baselineMinutes = baseline.summary.overtimeMinutes;
-  expect(baselineMinutes).toBeGreaterThanOrEqual(213);
-  const baselineDuration = `${Math.floor(baselineMinutes / 60)}h ${baselineMinutes % 60}m`;
+  expect(baseline.total).toBeGreaterThanOrEqual(30);
+  const baselineDuration = `${baselineMinutes < 0 ? "-" : ""}${Math.floor(Math.abs(baselineMinutes) / 60)}h ${Math.abs(baselineMinutes) % 60}m`;
 
   for (const route of ["attendance", "reports"]) {
     await page.goto(
@@ -346,7 +346,7 @@ test("filtered overtime includes every page and resets consistently in attendanc
     });
     if (route === "attendance") {
       await expect(employeeFilter).toHaveValue(employeeId);
-      await expect(summary).toContainText("1h 28m");
+      await expect(summary).toContainText("-0h 34m");
     } else {
       await page
         .getByRole("searchbox", { name: "Find employee", exact: true })
@@ -356,7 +356,7 @@ test("filtered overtime includes every page and resets consistently in attendanc
     await page.getByLabel("From date").fill(dateBefore(29));
     await page.getByLabel("To date").fill(dateBefore(1));
     await page.getByRole("button", { name: "Apply filters" }).click();
-    await expect(summary).toContainText("1h 28m");
+    await expect(summary).toContainText("-0h 34m");
     await expect(summary).toContainText("Across all 29 matching records");
     await expect(summary).toContainText(
       "Excludes 1 record with unknown overtime",
@@ -366,7 +366,7 @@ test("filtered overtime includes every page and resets consistently in attendanc
     await page.getByRole("button", { name: "Next", exact: true }).click();
     await expect(page.getByText("Page 2 · Times shown")).toBeVisible();
     await expect(page.locator("tbody tr")).toHaveCount(4);
-    await expect(summary).toContainText("1h 28m");
+    await expect(summary).toContainText("-0h 34m");
     await expect(summary).toContainText("Across all 29 matching records");
     await page.screenshot({
       path: `test-results/overtime-total-${route}.png`,

@@ -219,7 +219,7 @@ describe("attendance corrections", () => {
       status: "LATE",
       lateMinutes: 30,
       workedMinutes: 510,
-      overtimeMinutes: 0,
+      overtimeMinutes: -30,
     });
   });
   it("recalculates overtime after an overnight checkout correction", () => {
@@ -236,6 +236,28 @@ describe("attendance corrections", () => {
     ).toMatchObject({
       overtimeMinutes: 90,
       workedMinutes: 630,
+      scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+    });
+  });
+  it("recalculates a shortfall after an early overnight checkout correction", () => {
+    expect(
+      calculateCorrection(
+        {
+          ...previous,
+          scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
+          shift: { ...previous.shift, endTime: "07:00" },
+        },
+        {
+          reason: "Verified early checkout",
+          checkInAt: "2025-01-06T20:30:00Z",
+          checkOutAt: "2025-01-07T04:00:00Z",
+        },
+        now,
+      ),
+    ).toMatchObject({
+      lateMinutes: 30,
+      workedMinutes: 450,
+      overtimeMinutes: -90,
       scheduledEndAt: new Date("2025-01-07T05:00:00Z"),
     });
   });

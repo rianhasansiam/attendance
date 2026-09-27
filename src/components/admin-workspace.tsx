@@ -490,7 +490,7 @@ export function AdminReports({
           <Metric
             title="Total overtime"
             value={duration(data.summary.overtimeMinutes)}
-            note={`Across all ${data.total} matching records in the selected date range.${
+            note={`Across all ${data.total} matching records in the selected date range. Positive values show overtime; negative values show a work-hour shortfall.${
               data.summary.unknownOvertimeRecords > 0
                 ? ` Excludes ${data.summary.unknownOvertimeRecords} ${data.summary.unknownOvertimeRecords === 1 ? "record" : "records"} with unknown overtime.`
                 : ""

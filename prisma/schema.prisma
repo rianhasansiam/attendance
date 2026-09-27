@@ -265,7 +265,8 @@ model Attendance {
   lateMinutes Int @default(0)
   lateReason String? @db.VarChar(1000)
   workedMinutes Int @default(0)
-  /// Completed after-hours minutes minus actual late minutes. Null means unknown legacy overtime.
+  /// Signed attendance balance after actual lateness; negative means a work-hour shortfall.
+  /// Null means unknown legacy overtime.
   overtimeMinutes Int? @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

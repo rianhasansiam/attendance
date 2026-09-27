@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { describe, expect, it } from "vitest";
-import { calculateOvertime } from "@/modules/shifts/calculations";
 
 const database = process.env.TEST_DATABASE_URL;
 
@@ -76,13 +75,22 @@ describe.skipIf(!database)(
           })),
         );
         for (const record of after.filter((record) => record.checkOutAt)) {
+          // This historical migration predates signed overtime. Keep its
+          // original clamped behavior independent of the current runtime rule.
           expect(record.overtimeMinutes).toBe(
-            calculateOvertime(
-              record.checkInAt,
-              record.checkOutAt,
-              record.lateMinutes,
-              record.scheduledEndAt,
-            ).overtimeMinutes,
+            record.scheduledEndAt
+              ? Math.max(
+                  0,
+                  Math.floor(
+                    (record.checkOutAt.getTime() -
+                      Math.max(
+                        record.checkInAt.getTime(),
+                        record.scheduledEndAt.getTime(),
+                      )) /
+                      60_000,
+                  ) - record.lateMinutes,
+                )
+              : null,
           );
         }
         expect(

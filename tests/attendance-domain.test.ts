@@ -90,7 +90,11 @@ describe("attendance calculations", () => {
         0,
         new Date("2026-09-19T12:00:00Z"),
       ),
-    ).toEqual({ workedMinutes: 239, overtimeMinutes: 0, status: "HALF_DAY" });
+    ).toEqual({
+      workedMinutes: 239,
+      overtimeMinutes: -301,
+      status: "HALF_DAY",
+    });
     expect(
       calculateCheckOut(
         startsAt,
@@ -99,10 +103,11 @@ describe("attendance calculations", () => {
         20,
         new Date("2026-09-19T12:00:00Z"),
       ),
-    ).toEqual({ workedMinutes: 480, overtimeMinutes: 0, status: "LATE" });
+    ).toEqual({ workedMinutes: 480, overtimeMinutes: -80, status: "LATE" });
   });
   it.each([
-    ["2026-09-19T11:59:00Z", 0],
+    ["2026-09-19T11:59:00Z", -1],
+    ["2026-09-19T11:59:59.999Z", -1],
     ["2026-09-19T12:00:00Z", 0],
     ["2026-09-19T12:00:59Z", 0],
     ["2026-09-19T12:00:59.999Z", 0],
@@ -134,16 +139,16 @@ describe("attendance calculations", () => {
         600,
         new Date("2026-09-19T12:00:00Z"),
       ),
-    ).toEqual({ workedMinutes: 30, overtimeMinutes: 0, status: "HALF_DAY" });
+    ).toEqual({ workedMinutes: 30, overtimeMinutes: -510, status: "HALF_DAY" });
   });
   it.each([
-    ["2026-09-19T13:31:29.499Z", 0],
-    ["2026-09-19T13:31:29.500Z", 1],
-    ["2026-09-19T14:30:29.499Z", 59],
-    ["2026-09-19T14:30:29.500Z", 60],
+    ["2026-09-19T13:31:29.499Z", 0, -540],
+    ["2026-09-19T13:31:29.500Z", 1, -540],
+    ["2026-09-19T14:30:29.499Z", 59, -481],
+    ["2026-09-19T14:30:29.500Z", 60, -481],
   ])(
     "counts only complete elapsed minutes when check-in is after shift end: %s",
-    (checkout, minutes) => {
+    (checkout, minutes, overtimeMinutes) => {
       expect(
         calculateCheckOut(
           new Date("2026-09-19T13:30:29.500Z"),
@@ -154,7 +159,7 @@ describe("attendance calculations", () => {
         ),
       ).toEqual({
         workedMinutes: minutes,
-        overtimeMinutes: 0,
+        overtimeMinutes,
         status: "HALF_DAY",
       });
     },
@@ -185,10 +190,12 @@ describe("attendance calculations", () => {
     ["08:30", "17:30", 0, 30, 30],
     ["09:00", "17:30", 30, 30, 0],
     ["09:00", "18:00", 30, 60, 30],
-    ["08:45", "17:10", 15, 10, 0],
-    ["09:00", "17:00", 30, 0, 0],
+    ["08:45", "17:10", 15, 10, -5],
+    ["09:00", "17:00", 30, 0, -30],
+    ["08:30", "16:00", 0, 0, -60],
+    ["09:00", "16:00", 30, 0, -90],
   ])(
-    "offsets actual late minutes for %s–%s without negative overtime",
+    "shows the signed work balance for %s–%s",
     (checkIn, checkOut, lateMinutes, rawOvertimeMinutes, overtimeMinutes) => {
       const checkInAt = new Date(`2026-09-19T${checkIn}:00+06:00`);
       const checkOutAt = new Date(`2026-09-19T${checkOut}:00+06:00`);
@@ -246,6 +253,14 @@ describe("attendance calculations", () => {
     expect(
       calculateCheckOut(window.startsAt, checkout, 240, 0, window.endsAt),
     ).toEqual({ workedMinutes: 570, overtimeMinutes: 90, status: "PRESENT" });
+  });
+  it("counts shortfall across midnight on the original business date", () => {
+    const nightShift = { ...shift, startTime: "22:00", endTime: "06:00" };
+    const checkout = new Date("2026-09-19T23:00:00Z");
+    const window = getShiftWindow(checkout, nightShift, "2026-09-19");
+    expect(
+      calculateCheckOut(window.startsAt, checkout, 240, 0, window.endsAt),
+    ).toEqual({ workedMinutes: 420, overtimeMinutes: -60, status: "PRESENT" });
   });
   it("counts elapsed overtime correctly after a DST overnight shift", () => {
     const dstShift = {

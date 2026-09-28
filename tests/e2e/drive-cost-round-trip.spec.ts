@@ -243,7 +243,7 @@ test("round trips double distance and cost once, survive editing, and can return
   await create
     .getByLabel("Trip type", { exact: true })
     .selectOption("round-trip");
-  await expect(preview).toContainText("10 km × ৳5.5/km × 2");
+  await expect(preview).toContainText("10 km × ৳5.50 / km × 2");
   await expect(preview).toContainText("৳110.00");
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -310,7 +310,7 @@ test("round trips double distance and cost once, survive editing, and can return
   await edit.getByLabel("Trip type", { exact: true }).selectOption("one-way");
   await expect(edit.locator(".drive-cost-preview")).toContainText("৳55.00");
   await expect(edit.locator(".drive-cost-preview p")).toHaveText(
-    "10 km × ৳5.5/km",
+    "10 km × ৳5.50 / km",
   );
   await edit.getByRole("button", { name: "Save drive cost" }).click();
   await expect(edit).toBeHidden();
@@ -345,13 +345,13 @@ test("trip dates select the effective rates and previews match saved fractional 
     .fill("0.41");
   await expect(
     create.getByRole("radio", {
-      name: "In time Standard work time ৳5/km",
+      name: "In time Standard work time ৳5.00 / km",
       exact: true,
     }),
   ).toBeChecked();
   await expect(
     create.getByRole("radio", {
-      name: "Over time Outside work time ৳10/km",
+      name: "Over time Outside work time ৳10.00 / km",
       exact: true,
     }),
   ).toBeVisible();
@@ -380,12 +380,12 @@ test("trip dates select the effective rates and previews match saved fractional 
   await edit.getByLabel("Date *", { exact: true }).fill("2026-09-26");
   await expect(
     edit.getByRole("radio", {
-      name: "In time Standard work time ৳5.5/km",
+      name: "In time Standard work time ৳5.50 / km",
       exact: true,
     }),
   ).toBeChecked();
   const overtime = edit.getByRole("radio", {
-    name: "Over time Outside work time ৳11/km",
+    name: "Over time Outside work time ৳11.00 / km",
     exact: true,
   });
   await expect(overtime).toBeVisible();
@@ -413,7 +413,7 @@ test("trip dates select the effective rates and previews match saved fractional 
   await edit.getByLabel("Date *", { exact: true }).fill("2026-09-25");
   await expect(
     edit.getByRole("radio", {
-      name: "Over time Outside work time ৳10/km",
+      name: "Over time Outside work time ৳10.00 / km",
       exact: true,
     }),
   ).toBeChecked();

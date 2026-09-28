@@ -4,6 +4,7 @@ import type { DailyExpenseReportData } from "@/modules/daily-expenses/contracts"
 import type { PdfReport } from "@/modules/reports/pdf";
 
 const mocks = vi.hoisted(() => ({
+  locale: vi.fn(),
   data: vi.fn(),
   pdf: vi.fn(),
   user: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock("@/modules/daily-expenses/service", () => ({
   getDailyExpenseReportData: mocks.data,
 }));
 vi.mock("@/modules/reports/pdf", () => ({ createReportPdf: mocks.pdf }));
+vi.mock("next-intl/server", () => ({ getLocale: mocks.locale }));
 vi.mock("@/lib/auth", () => ({ requireUser: mocks.user }));
 vi.mock("@/lib/security", () => ({
   rateLimit: mocks.rateLimit,
@@ -76,6 +78,7 @@ const request = (query = "") =>
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.locale.mockResolvedValue("en");
   mocks.user.mockResolvedValue({
     id: "super",
     role: "SUPER_ADMIN",
@@ -189,4 +192,27 @@ describe("Daily Expenses PDF reports", () => {
     });
     expect(mocks.pdf).not.toHaveBeenCalled();
   });
+});
+
+it("localizes a Chinese report while preserving BDT, business timezone, dates and stored content", async () => {
+  const data = reportData();
+  data.allTime.totalBalanceAdded = "99999999999999999990.99";
+  await createDailyExpenseReportPdf(data, "zh-CN");
+  const pdf = mocks.pdf.mock.calls[0][0] as PdfReport;
+  expect(pdf.title).toBe("日常支出报表");
+  expect(pdf.subtitle.join(" ")).toContain("Asia/Dhaka");
+  expect(pdf.subtitle.join(" ")).toContain("BDT");
+  expect(pdf.columns[0].label).toBe("日期");
+  expect(pdf.rows[0]).toEqual(
+    expect.arrayContaining([
+      "2024-01-01",
+      "支出",
+      "Supplies",
+      "Paper - কাগজ",
+      "-BDT 12.30",
+    ]),
+  );
+  expect(pdf.summary.map((item) => item.value).join(" ")).toContain(
+    "BDT 99,999,999,999,999,999,990.99",
+  );
 });

@@ -1,5 +1,7 @@
 # Office Attendance
 
+English and 简体中文 are available from the language selector. Selection persists across navigation and browser reopening without changing URLs or sessions. See [localization architecture, translation editing, and verification](docs/localization.md). No database migration is needed for this feature.
+
 State management: [architecture, cache matrix and test instructions](docs/state-management.md) · [verified findings and baseline](docs/state-audit.md).
 
 A modular Next.js application for administrator-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, PDF reports, and append-only audit history.

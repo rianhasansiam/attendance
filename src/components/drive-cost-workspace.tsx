@@ -31,7 +31,8 @@ import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
 import { useQueryView } from "@/store/use-query-view";
 import { useFreshness } from "@/store/freshness";
-import { errorMessage } from "@/store/api/errors";
+import { useLocale, useTranslations } from "next-intl";
+import { useExpenseFeedback } from "./expense-feedback";
 import {
   useDriveCostsQuery,
   useDriveCostCalculationQuery,
@@ -75,14 +76,14 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatNumber(value: unknown): string {
-  return numberValue(value).toLocaleString("en-BD", {
+function formatNumber(value: unknown, locale: string): string {
+  return numberValue(value).toLocaleString(locale, {
     maximumFractionDigits: 2,
   });
 }
 
-function taka(value: unknown): string {
-  return `৳${numberValue(value).toLocaleString("en-BD", {
+function taka(value: unknown, locale: string): string {
+  return `৳${numberValue(value).toLocaleString(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -107,11 +108,12 @@ function draftFromRow(row: DataRow): DriveCostDraft {
   };
 }
 
-function formatDateLabel(dateString: string): string {
-  return new Date(dateString + "T00:00:00").toLocaleDateString("en-BD", {
+function formatDateLabel(dateString: string, locale: string): string {
+  return new Date(dateString + "T00:00:00Z").toLocaleDateString(locale, {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -120,6 +122,8 @@ export function DriveCostWorkspace({
 }: {
   canEditPaymentStatus?: boolean;
 }) {
+  const t = useTranslations("expenses");
+  const locale = useLocale();
   const { params: urlParams, update } = useUrlFilters();
   const query = urlParams.get("q") || "";
   const search = useDebouncedValue(query);
@@ -147,8 +151,8 @@ export function DriveCostWorkspace({
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
   const [needsReconcile, setNeedsReconcile] = useState(false);
-  const [actionError, setActionError] = useState("");
-  const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useExpenseFeedback();
+  const [message, setMessage] = useExpenseFeedback();
   const costsQuery = useDriveCostsQuery(
     {
       page,
@@ -209,7 +213,7 @@ export function DriveCostWorkspace({
   }
 
   async function showWriteError(error: unknown) {
-    setActionError(errorMessage(error));
+    setActionError({ error });
     if (isAmbiguousWrite(error)) {
       setNeedsReconcile(true);
       await refreshCosts();
@@ -256,7 +260,7 @@ export function DriveCostWorkspace({
     if (!editing || submitting.current || needsReconcile) return;
     const kilometers = Number(editing.kilometers);
     if (!Number.isFinite(kilometers) || kilometers <= 0) {
-      setActionError("Enter a distance greater than zero.");
+      setActionError({ key: "positiveDistance" });
       return;
     }
     submitting.current = true;
@@ -276,11 +280,7 @@ export function DriveCostWorkspace({
         },
       }).unwrap();
       setEditing(null);
-      setMessage(
-        editing.id
-          ? "Drive cost updated successfully."
-          : "Drive cost added successfully.",
-      );
+      setMessage(editing.id ? { key: "driveUpdated" } : { key: "driveAdded" });
     } catch (error) {
       await showWriteError(error);
     } finally {
@@ -298,9 +298,10 @@ export function DriveCostWorkspace({
     const paymentStatus = row.paymentStatus === "PAID" ? "UNPAID" : "PAID";
     try {
       await updatePayment({ id: String(row.id), paymentStatus }).unwrap();
-      setMessage(
-        `Drive cost marked as ${paymentStatus === "PAID" ? "paid" : "unpaid"}.`,
-      );
+      setMessage({
+        key: "drivePaymentSaved",
+        values: { status: paymentStatus },
+      });
     } catch (error) {
       await showWriteError(error);
     } finally {
@@ -311,16 +312,17 @@ export function DriveCostWorkspace({
 
   async function remove(row: DataRow) {
     if (submitting.current || needsReconcile) return;
-    const from = String(row.destinationFrom ?? "this destination");
-    const to = String(row.destinationTo ?? "this destination");
+    const from = String(row.destinationFrom ?? t("thisDestination"));
+    const to = String(row.destinationTo ?? t("thisDestination"));
     submitting.current = true;
     setBusy(true);
     try {
       if (
         !(await confirmAction({
-          title: "Delete this drive cost?",
-          text: `Permanently delete the drive cost from ${from} to ${to}? This cannot be undone.`,
-          confirmText: "Delete drive cost",
+          title: t("deleteDriveTitle"),
+          text: t("deleteDriveConfirm", { from, to }),
+          confirmText: t("deleteDrive"),
+          cancelText: t("cancel"),
           danger: true,
         }))
       )
@@ -328,7 +330,7 @@ export function DriveCostWorkspace({
       setActionError("");
       setMessage("");
       await deleteDriveCost(String(row.id)).unwrap();
-      setMessage("Drive cost deleted successfully.");
+      setMessage({ key: "driveDeleted" });
       if ((data?.items.length || 0) === 1 && page > 1) setPage(page - 1);
     } catch (error) {
       await showWriteError(error);
@@ -358,14 +360,17 @@ export function DriveCostWorkspace({
 
   const tableRows: DataRow[] = (data?.items || []).map((record) => ({
     ...record,
-    rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
-    tripTypeLabel: record.isRoundTrip ? "Round trip (×2)" : "One way",
-    paymentStatusLabel: record.paymentStatus === "PAID" ? "Paid" : "Unpaid",
+    rateTypeLabel:
+      record.rateType === "OVER_TIME" ? t("overTime") : t("inTime"),
+    tripTypeLabel: record.isRoundTrip ? t("roundTrip") : t("oneWay"),
+    paymentStatusLabel:
+      record.paymentStatus === "PAID" ? t("paid") : t("unpaid"),
     kilometersLabel: formatNumber(
       numberValue(record.kilometers) * (record.isRoundTrip ? 2 : 1),
+      locale,
     ),
-    rateLabel: `${taka(record.ratePerKilometer)} / km`,
-    totalLabel: taka(record.totalCost),
+    rateLabel: t("ratePerKm", { rate: taka(record.ratePerKilometer, locale) }),
+    totalLabel: taka(record.totalCost, locale),
   }));
   const rates = getDriveCostRates(editing?.date ?? today());
   const selectedRate = Number(rates[editing?.rateType ?? "IN_TIME"]);
@@ -383,23 +388,28 @@ export function DriveCostWorkspace({
   const calcRecordRows: DataRow[] = (calcResult?.records || []).map(
     (record) => ({
       ...record,
-      rateTypeLabel: record.rateType === "OVER_TIME" ? "Over time" : "In time",
-      tripTypeLabel: record.isRoundTrip ? "Round trip (×2)" : "One way",
-      paymentStatusLabel: record.paymentStatus === "PAID" ? "Paid" : "Unpaid",
+      rateTypeLabel:
+        record.rateType === "OVER_TIME" ? t("overTime") : t("inTime"),
+      tripTypeLabel: record.isRoundTrip ? t("roundTrip") : t("oneWay"),
+      paymentStatusLabel:
+        record.paymentStatus === "PAID" ? t("paid") : t("unpaid"),
       kilometersLabel: formatNumber(
         numberValue(record.kilometers) * (record.isRoundTrip ? 2 : 1),
+        locale,
       ),
-      rateLabel: `${taka(record.ratePerKilometer)} / km`,
-      totalLabel: taka(record.totalCost),
+      rateLabel: t("ratePerKm", {
+        rate: taka(record.ratePerKilometer, locale),
+      }),
+      totalLabel: taka(record.totalCost, locale),
     }),
   );
 
   return (
     <>
       <PageHeader
-        eyebrow="TRAVEL EXPENSES"
-        title="Drive Cost"
-        description="Calculate and keep a clear record of every drive."
+        eyebrow={t("travelExpenses")}
+        title={t("driveCost")}
+        description={t("driveDescription")}
         action={
           <div className="page-header-actions">
             <Refresh onClick={() => void refreshCosts()} />
@@ -413,7 +423,7 @@ export function DriveCostWorkspace({
               onClick={() => setCalcOpen(!calcOpen)}
             >
               <Calculator size={16} />
-              {calcOpen ? "Hide calculator" : "Cost calculator"}
+              {calcOpen ? t("hideCalculator") : t("costCalculator")}
             </button>
             <button
               className="button"
@@ -421,7 +431,7 @@ export function DriveCostWorkspace({
               onClick={openNew}
             >
               <Plus size={16} />
-              Add drive cost
+              {t("addDrive")}
             </button>
           </div>
         }
@@ -429,14 +439,10 @@ export function DriveCostWorkspace({
       <ErrorNotice message={error || (!editing ? actionError : "")} />
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing drive costs…
+          {t("refreshingDrive")}
         </p>
       )}
-      {needsReconcile && (
-        <Notice>
-          Refresh drive costs successfully before trying another change.
-        </Notice>
-      )}
+      {needsReconcile && <Notice>{t("reconcileDrive")}</Notice>}
       {message && (
         <Notice notify>
           <Check size={16} />
@@ -460,10 +466,8 @@ export function DriveCostWorkspace({
             <div className="calc-title">
               <Calculator size={18} />
               <div>
-                <h3>Cost Calculator</h3>
-                <p>
-                  Calculate total drive costs for a single day or a date range.
-                </p>
+                <h3>{t("calculatorTitle")}</h3>
+                <p>{t("calculatorDescription")}</p>
               </div>
             </div>
           </div>
@@ -475,7 +479,7 @@ export function DriveCostWorkspace({
               onClick={() => setCalcMode("single")}
             >
               <Calendar size={14} />
-              Single day
+              {t("singleDay")}
             </button>
             <button
               type="button"
@@ -483,14 +487,14 @@ export function DriveCostWorkspace({
               onClick={() => setCalcMode("range")}
             >
               <Calendar size={14} />
-              Date range
+              {t("dateRange")}
             </button>
           </div>
 
           <div className="calc-inputs">
             {calcMode === "single" ? (
               <div className="field">
-                <label htmlFor="calc-date">Date</label>
+                <label htmlFor="calc-date">{t("date")}</label>
                 <input
                   id="calc-date"
                   type="date"
@@ -501,7 +505,7 @@ export function DriveCostWorkspace({
             ) : (
               <>
                 <div className="field">
-                  <label htmlFor="calc-from">From date</label>
+                  <label htmlFor="calc-from">{t("fromDate")}</label>
                   <input
                     id="calc-from"
                     type="date"
@@ -510,7 +514,7 @@ export function DriveCostWorkspace({
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="calc-to">To date</label>
+                  <label htmlFor="calc-to">{t("toDate")}</label>
                   <input
                     id="calc-to"
                     type="date"
@@ -521,7 +525,7 @@ export function DriveCostWorkspace({
               </>
             )}
             <div className="field">
-              <label htmlFor="calc-payment-status">Payment status</label>
+              <label htmlFor="calc-payment-status">{t("paymentStatus")}</label>
               <select
                 id="calc-payment-status"
                 value={calcPaymentStatus}
@@ -529,9 +533,9 @@ export function DriveCostWorkspace({
                   setCalcPaymentStatus(paymentStatusFilter(event.target.value))
                 }
               >
-                <option value="">All</option>
-                <option value="PAID">Paid</option>
-                <option value="UNPAID">Unpaid</option>
+                <option value="">{t("all")}</option>
+                <option value="PAID">{t("paid")}</option>
+                <option value="UNPAID">{t("unpaid")}</option>
               </select>
             </div>
             <button
@@ -540,14 +544,14 @@ export function DriveCostWorkspace({
               disabled={calcBusy}
               onClick={() => void runCalculation()}
             >
-              {calcBusy ? "Calculating…" : "Calculate"}
+              {calcBusy ? t("calculating") : t("calculate")}
             </button>
           </div>
 
           <ErrorNotice message={calcError} />
           {calcBusy && calcResult && (
             <p className="muted" role="status">
-              Refreshing calculation…
+              {t("refreshingCalculation")}
             </p>
           )}
 
@@ -560,21 +564,22 @@ export function DriveCostWorkspace({
               />
               <div className="calc-date-label">
                 {calcResult.isSingleDay
-                  ? formatDateLabel(calcResult.dateFrom)
-                  : `${formatDateLabel(calcResult.dateFrom)} — ${formatDateLabel(calcResult.dateTo)}`}
+                  ? formatDateLabel(calcResult.dateFrom, locale)
+                  : `${formatDateLabel(calcResult.dateFrom, locale)} — ${formatDateLabel(calcResult.dateTo, locale)}`}
                 {" · "}
                 {calcResult.paymentStatus === "PAID"
-                  ? "Paid trips"
+                  ? t("paidTrips")
                   : calcResult.paymentStatus === "UNPAID"
-                    ? "Unpaid trips"
-                    : "All payment statuses"}
+                    ? t("unpaidTrips")
+                    : t("allPaymentStatuses")}
               </div>
 
               {calcResult.totalRecords === 0 ? (
                 <div className="calc-empty">
                   <p>
-                    No drive costs found for this{" "}
-                    {calcResult.isSingleDay ? "date" : "date range"}.
+                    {t("noDriveCosts", {
+                      period: calcResult.isSingleDay ? "day" : "range",
+                    })}
                   </p>
                 </div>
               ) : (
@@ -582,67 +587,72 @@ export function DriveCostWorkspace({
                   {/* Summary cards */}
                   <div className="calc-summary-grid">
                     <div className="calc-summary-card calc-total">
-                      <small>Grand total</small>
-                      <strong>{taka(calcResult.totalCost)}</strong>
+                      <small>{t("grandTotal")}</small>
+                      <strong>{taka(calcResult.totalCost, locale)}</strong>
                       <p>
-                        {calcResult.totalRecords} trip
-                        {calcResult.totalRecords !== 1 ? "s" : ""} ·{" "}
-                        {formatNumber(calcResult.totalKilometers)} km
+                        {t("driveSummary", {
+                          count: calcResult.totalRecords,
+                          kilometers: formatNumber(
+                            calcResult.totalKilometers,
+                            locale,
+                          ),
+                        })}
                       </p>
                     </div>
                     <div className="calc-summary-card">
-                      <small>In time</small>
+                      <small>{t("inTime")}</small>
                       <strong>
-                        {taka(calcResult.breakdown.inTime.totalCost)}
+                        {taka(calcResult.breakdown.inTime.totalCost, locale)}
                       </strong>
                       <p>
-                        {calcResult.breakdown.inTime.records} trip
-                        {calcResult.breakdown.inTime.records !== 1
-                          ? "s"
-                          : ""} ·{" "}
-                        {formatNumber(calcResult.breakdown.inTime.kilometers)}{" "}
-                        km
+                        {t("driveSummary", {
+                          count: calcResult.breakdown.inTime.records,
+                          kilometers: formatNumber(
+                            calcResult.breakdown.inTime.kilometers,
+                            locale,
+                          ),
+                        })}
                       </p>
                     </div>
                     <div className="calc-summary-card">
-                      <small>Over time</small>
+                      <small>{t("overTime")}</small>
                       <strong>
-                        {taka(calcResult.breakdown.overTime.totalCost)}
+                        {taka(calcResult.breakdown.overTime.totalCost, locale)}
                       </strong>
                       <p>
-                        {calcResult.breakdown.overTime.records} trip
-                        {calcResult.breakdown.overTime.records !== 1
-                          ? "s"
-                          : ""}{" "}
-                        ·{" "}
-                        {formatNumber(calcResult.breakdown.overTime.kilometers)}{" "}
-                        km
+                        {t("driveSummary", {
+                          count: calcResult.breakdown.overTime.records,
+                          kilometers: formatNumber(
+                            calcResult.breakdown.overTime.kilometers,
+                            locale,
+                          ),
+                        })}
                       </p>
                     </div>
                   </div>
 
                   {/* Trip details table */}
                   <div className="calc-details">
-                    <h4>Trip details</h4>
+                    <h4>{t("tripDetails")}</h4>
                     <Table
                       rows={calcRecordRows}
                       dateGroupKey="date"
                       columns={[
-                        { key: "date", label: "Date", format: "date" },
-                        { key: "destinationFrom", label: "From" },
-                        { key: "destinationTo", label: "To" },
-                        { key: "tripTypeLabel", label: "Trip type" },
+                        { key: "date", label: t("date"), format: "date" },
+                        { key: "destinationFrom", label: t("from") },
+                        { key: "destinationTo", label: t("to") },
+                        { key: "tripTypeLabel", label: t("tripType") },
                         {
                           key: "rateTypeLabel",
-                          label: "Rate type",
+                          label: t("rateType"),
                           format: "badge",
                         },
-                        { key: "kilometersLabel", label: "Total km" },
-                        { key: "rateLabel", label: "Rate" },
-                        { key: "totalLabel", label: "Total" },
+                        { key: "kilometersLabel", label: t("totalKm") },
+                        { key: "rateLabel", label: t("rate") },
+                        { key: "totalLabel", label: t("total") },
                         {
                           key: "paymentStatusLabel",
-                          label: "Payment status",
+                          label: t("paymentStatus"),
                           format: "badge",
                         },
                       ]}
@@ -658,12 +668,12 @@ export function DriveCostWorkspace({
       <section className="card">
         <form
           className="drive-cost-date-filters"
-          aria-label="Filter drive costs by date"
+          aria-label={t("filterDriveDates")}
           onSubmit={applyDateFilters}
           onReset={resetFilters}
         >
           <div className="field">
-            <label htmlFor="drive-cost-filter-from">From date</label>
+            <label htmlFor="drive-cost-filter-from">{t("fromDate")}</label>
             <input
               id="drive-cost-filter-from"
               name="from"
@@ -677,7 +687,7 @@ export function DriveCostWorkspace({
             />
           </div>
           <div className="field">
-            <label htmlFor="drive-cost-filter-to">To date</label>
+            <label htmlFor="drive-cost-filter-to">{t("toDate")}</label>
             <input
               id="drive-cost-filter-to"
               name="to"
@@ -692,7 +702,7 @@ export function DriveCostWorkspace({
           </div>
           <div className="field">
             <label htmlFor="drive-cost-filter-payment-status">
-              Payment status
+              {t("paymentStatus")}
             </label>
             <select
               id="drive-cost-filter-payment-status"
@@ -706,41 +716,38 @@ export function DriveCostWorkspace({
                 })
               }
             >
-              <option value="">All</option>
-              <option value="PAID">Paid</option>
-              <option value="UNPAID">Unpaid</option>
+              <option value="">{t("all")}</option>
+              <option value="PAID">{t("paid")}</option>
+              <option value="UNPAID">{t("unpaid")}</option>
             </select>
           </div>
           <div className="buttons">
             <button className="button" type="submit" disabled={loading}>
-              Apply filters
+              {t("applyFilters")}
             </button>
             <button
               className="button secondary"
               type="reset"
               disabled={loading}
             >
-              Reset filters
+              {t("resetFilters")}
             </button>
           </div>
-          <p className="muted">
-            Use the same date in both fields for a single day. Leave a field
-            blank for an open-ended range.
-          </p>
+          <p className="muted">{t("dateFilterHelp")}</p>
         </form>
         <div className="toolbar">
           <div className="search-field">
             <Search size={16} />
             <input
               type="search"
-              aria-label="Search drive costs"
-              placeholder="Search destinations…"
+              aria-label={t("searchDrive")}
+              placeholder={t("searchDestinations")}
               value={query}
               onChange={(event) => update({ q: event.target.value, page: 1 })}
             />
           </div>
           <span className="muted" style={{ fontSize: 11 }}>
-            {data?.total || 0} records
+            {t("recordCount", { count: data?.total || 0 })}
           </span>
         </div>
         {loading ? (
@@ -750,17 +757,17 @@ export function DriveCostWorkspace({
             rows={tableRows}
             dateGroupKey="date"
             columns={[
-              { key: "date", label: "Date", format: "date" },
-              { key: "destinationFrom", label: "From" },
-              { key: "destinationTo", label: "To" },
-              { key: "tripTypeLabel", label: "Trip type" },
-              { key: "rateTypeLabel", label: "Rate type", format: "badge" },
-              { key: "kilometersLabel", label: "Total km" },
-              { key: "rateLabel", label: "Rate" },
-              { key: "totalLabel", label: "Total" },
+              { key: "date", label: t("date"), format: "date" },
+              { key: "destinationFrom", label: t("from") },
+              { key: "destinationTo", label: t("to") },
+              { key: "tripTypeLabel", label: t("tripType") },
+              { key: "rateTypeLabel", label: t("rateType"), format: "badge" },
+              { key: "kilometersLabel", label: t("totalKm") },
+              { key: "rateLabel", label: t("rate") },
+              { key: "totalLabel", label: t("total") },
               {
                 key: "paymentStatusLabel",
-                label: "Payment status",
+                label: t("paymentStatus"),
                 format: "badge",
               },
             ]}
@@ -771,17 +778,26 @@ export function DriveCostWorkspace({
                     type="button"
                     disabled={busy || needsReconcile || isFetching}
                     className="button small secondary"
-                    aria-label={`Mark ${row.paymentStatus === "PAID" ? "unpaid" : "paid"} for drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
+                    aria-label={t("markPaymentLabel", {
+                      status: String(row.paymentStatus),
+                      from: String(row.destinationFrom),
+                      to: String(row.destinationTo),
+                    })}
                     onClick={() => void changePaymentStatus(row)}
                   >
-                    {row.paymentStatus === "PAID" ? "Mark unpaid" : "Mark paid"}
+                    {row.paymentStatus === "PAID"
+                      ? t("markUnpaid")
+                      : t("markPaid")}
                   </button>
                 )}
                 <button
                   type="button"
                   disabled={busy || needsReconcile}
                   className="icon-button"
-                  aria-label={`Edit drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
+                  aria-label={t("editDriveLabel", {
+                    from: String(row.destinationFrom),
+                    to: String(row.destinationTo),
+                  })}
                   onClick={() => openEdit(row)}
                 >
                   <Pencil size={15} />
@@ -790,7 +806,10 @@ export function DriveCostWorkspace({
                   type="button"
                   disabled={busy || needsReconcile}
                   className="icon-button"
-                  aria-label={`Delete drive cost from ${String(row.destinationFrom)} to ${String(row.destinationTo)}`}
+                  aria-label={t("deleteDriveLabel", {
+                    from: String(row.destinationFrom),
+                    to: String(row.destinationTo),
+                  })}
                   onClick={() => void remove(row)}
                 >
                   <Trash2 size={15} />
@@ -800,9 +819,7 @@ export function DriveCostWorkspace({
           />
         )}
         <div className="pagination">
-          <span>
-            Page {page} · {data?.total || 0} total records
-          </span>
+          <span>{t("pagination", { page, count: data?.total || 0 })}</span>
           <div className="buttons">
             <button
               type="button"
@@ -811,7 +828,7 @@ export function DriveCostWorkspace({
               onClick={() => setPage(page - 1)}
             >
               <ArrowLeft size={13} />
-              Previous
+              {t("previous")}
             </button>
             <button
               type="button"
@@ -819,7 +836,7 @@ export function DriveCostWorkspace({
               disabled={page * PAGE_SIZE >= (data?.total || 0) || loading}
               onClick={() => setPage(page + 1)}
             >
-              Next
+              {t("next")}
               <ArrowRight size={13} />
             </button>
           </div>
@@ -827,7 +844,7 @@ export function DriveCostWorkspace({
       </section>
       {editing && (
         <Modal
-          title={editing.id ? "Edit drive cost" : "Add drive cost"}
+          title={editing.id ? t("editDrive") : t("addDrive")}
           close={() => {
             if (!busy) setEditing(null);
           }}
@@ -836,7 +853,7 @@ export function DriveCostWorkspace({
             <ErrorNotice message={actionError} />
             <div className="form-grid">
               <div className="field">
-                <label htmlFor="drive-cost-date">Date *</label>
+                <label htmlFor="drive-cost-date">{t("requiredDate")}</label>
                 <input
                   id="drive-cost-date"
                   name="date"
@@ -850,7 +867,7 @@ export function DriveCostWorkspace({
               </div>
               <div className="field">
                 <label htmlFor="drive-cost-kilometers">
-                  Kilometers (one way) *
+                  {t("requiredKilometers")}
                 </label>
                 <input
                   id="drive-cost-kilometers"
@@ -867,12 +884,11 @@ export function DriveCostWorkspace({
                   }
                 />
                 <small id="drive-cost-distance-help" className="muted">
-                  Enter the one-way distance. Round trips include the return
-                  journey.
+                  {t("distanceHelp")}
                 </small>
               </div>
               <div className="field">
-                <label htmlFor="drive-cost-from">Destination from *</label>
+                <label htmlFor="drive-cost-from">{t("requiredFrom")}</label>
                 <input
                   id="drive-cost-from"
                   name="destinationFrom"
@@ -888,7 +904,7 @@ export function DriveCostWorkspace({
                 />
               </div>
               <div className="field">
-                <label htmlFor="drive-cost-to">Destination to *</label>
+                <label htmlFor="drive-cost-to">{t("requiredTo")}</label>
                 <input
                   id="drive-cost-to"
                   name="destinationTo"
@@ -904,7 +920,7 @@ export function DriveCostWorkspace({
                 />
               </div>
               <div className="field full">
-                <label htmlFor="drive-cost-trip-type">Trip type</label>
+                <label htmlFor="drive-cost-trip-type">{t("tripType")}</label>
                 <select
                   id="drive-cost-trip-type"
                   name="isRoundTrip"
@@ -917,21 +933,20 @@ export function DriveCostWorkspace({
                     })
                   }
                 >
-                  <option value="one-way">One way</option>
-                  <option value="round-trip">Round trip (×2)</option>
+                  <option value="one-way">{t("oneWay")}</option>
+                  <option value="round-trip">{t("roundTrip")}</option>
                 </select>
                 <small id="drive-cost-trip-help" className="muted">
-                  For office → destination → office, choose round trip to double
-                  the distance and cost.
+                  {t("roundTripHelp")}
                 </small>
               </div>
               <fieldset className="field full drive-cost-rate-field">
-                <legend>Rate type *</legend>
+                <legend>{t("requiredRateType")}</legend>
                 <div className="drive-cost-rate-options">
                   {(
                     [
-                      ["IN_TIME", "In time", "Standard work time"],
-                      ["OVER_TIME", "Over time", "Outside work time"],
+                      ["IN_TIME", t("inTime"), t("standardTime")],
+                      ["OVER_TIME", t("overTime"), t("outsideTime")],
                     ] as const
                   ).map(([value, title, description]) => (
                     <label
@@ -951,23 +966,29 @@ export function DriveCostWorkspace({
                         <strong>{title}</strong>
                         <small>{description}</small>
                       </span>
-                      <b>৳{Number(rates[value])}/km</b>
+                      <b>
+                        {t("ratePerKm", { rate: taka(rates[value], locale) })}
+                      </b>
                     </label>
                   ))}
                 </div>
                 <small className="muted">
-                  Trips from {formatDateLabel(DRIVE_COST_RATE_CHANGE_DATE)} use
-                  ৳5.50/km in time and ৳11/km over time.
+                  {t("rateChangeHelp", {
+                    date: formatDateLabel(DRIVE_COST_RATE_CHANGE_DATE, locale),
+                  })}
                 </small>
               </fieldset>
               <div className="drive-cost-preview full" aria-live="polite">
                 <span>
-                  <small>Calculated total</small>
-                  <strong>{taka(previewTotal)}</strong>
+                  <small>{t("calculatedTotal")}</small>
+                  <strong>{taka(previewTotal, locale)}</strong>
                 </span>
                 <p>
-                  {formatNumber(previewKilometers)} km × ৳{selectedRate}/km
-                  {editing.isRoundTrip ? " × 2" : ""}
+                  {t("calculationFormula", {
+                    kilometers: formatNumber(previewKilometers, locale),
+                    rate: taka(selectedRate, locale),
+                    roundTrip: editing.isRoundTrip ? "yes" : "no",
+                  })}
                 </p>
               </div>
             </div>
@@ -978,14 +999,14 @@ export function DriveCostWorkspace({
                 className="button secondary"
                 onClick={() => setEditing(null)}
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 disabled={busy || needsReconcile}
                 type="submit"
                 className="button"
               >
-                {busy ? "Saving…" : "Save drive cost"}
+                {busy ? t("saving") : t("saveDrive")}
               </button>
             </div>
           </form>

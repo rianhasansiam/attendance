@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -30,6 +31,7 @@ export function PasswordField({
   minLength?: number;
   maxLength?: number;
 }) {
+  const t = useTranslations("auth");
   const id = useId();
   const [visible, setVisible] = useState(false);
   return (
@@ -52,7 +54,9 @@ export function PasswordField({
         <button
           type="button"
           className="password-toggle"
-          aria-label={`${visible ? "Hide" : "Show"} ${label.toLowerCase()}`}
+          aria-label={t(visible ? "hidePassword" : "showPassword", {
+            label: label.toLowerCase(),
+          })}
           aria-pressed={visible}
           aria-controls={id}
           disabled={disabled}
@@ -67,18 +71,19 @@ export function PasswordField({
 }
 
 export function NewPasswordFields({ disabled }: { disabled: boolean }) {
+  const t = useTranslations("auth");
   return (
     <>
       <PasswordField
         name="newPassword"
-        label="New application password"
+        label={t("newPassword")}
         autoComplete="new-password"
         disabled={disabled}
-        hint={PASSWORD_HINT}
+        hint={t("longPasswordHint")}
       />
       <PasswordField
         name="confirmPassword"
-        label="Confirm new password"
+        label={t("confirmPassword")}
         autoComplete="new-password"
         disabled={disabled}
       />

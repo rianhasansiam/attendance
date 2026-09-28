@@ -1,3 +1,4 @@
+import { getLocale } from "next-intl/server";
 import { api } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth";
 import { rateLimit } from "@/lib/security";
@@ -13,6 +14,7 @@ export function GET(request: Request) {
       reportFilterSchema.parse(
         Object.fromEntries(new URL(request.url).searchParams),
       ),
+      await getLocale(),
     );
   });
 }

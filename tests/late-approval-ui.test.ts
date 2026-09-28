@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, createElement as h } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, type Root } from "./i18n-root";
 import { Provider } from "react-redux";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LateReasonDialog } from "@/components/late-reason-dialog";

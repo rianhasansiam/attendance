@@ -37,6 +37,7 @@
     "lucide-react": "^1.47.0",
     "next": "16.3.5",
     "next-auth": "5.0.0-beta.32",
+    "next-intl": "4.14.7",
     "pdfkit": "^0.20.2",
     "pg": "^8.23.0",
     "react": "19.2.8",
@@ -47,6 +48,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@formatjs/icu-messageformat-parser": "3.5.12",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/jsdom": "^30.0.0",

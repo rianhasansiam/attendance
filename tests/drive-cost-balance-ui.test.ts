@@ -2,6 +2,9 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Provider } from "react-redux";
+import { NextIntlClientProvider } from "next-intl";
+import { loadMessages } from "@/i18n/messages";
+import type { Locale } from "@/i18n/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DriveCostBalanceSection } from "@/components/drive-cost-balance-section";
 import {
@@ -50,22 +53,28 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render(canAddBalance: boolean) {
+async function render(canAddBalance: boolean, locale: Locale = "en") {
+  const messages = await loadMessages(locale);
   await act(async () => {
     root.render(
-      h(Provider, {
-        store,
-        children: h(DriveCostBalanceSection, {
-          canAddBalance,
-          data: {
-            balance: "-90071992547409.93",
-            totalAdded: "50.00",
-            totalPaid: "90071992547459.93",
-          },
-          error: "",
-          loading: false,
-          isFetching: false,
-          refresh,
+      h(NextIntlClientProvider, {
+        locale,
+        timeZone: "Asia/Dhaka",
+        messages,
+        children: h(Provider, {
+          store,
+          children: h(DriveCostBalanceSection, {
+            canAddBalance,
+            data: {
+              balance: "-90071992547409.93",
+              totalAdded: "50.00",
+              totalPaid: "90071992547459.93",
+            },
+            error: "",
+            loading: false,
+            isFetching: false,
+            refresh,
+          }),
         }),
       }),
     );
@@ -198,4 +207,19 @@ describe("drive cost balance controls", () => {
       );
     },
   );
+});
+
+it("switches the balance form without losing its amount or user-written note", async () => {
+  await render(true);
+  await fill("amount", "12.50");
+  await fill("note", "September budget 九月预算");
+  await render(true, "zh-CN");
+  expect(container.textContent).toContain("行车费用余额");
+  expect(container.textContent).toContain("-৳90,071,992,547,409.93");
+  expect(input("amount").value).toBe("12.50");
+  expect(input("note").value).toBe("September budget 九月预算");
+  expect(container.textContent).toContain("金额（BDT）");
+  await render(true);
+  expect(input("amount").value).toBe("12.50");
+  expect(container.textContent).toContain("Drive cost balance");
 });

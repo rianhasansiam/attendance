@@ -1,7 +1,9 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
 import { Download } from "lucide-react";
+import { useErrorMessage } from "@/i18n/errors";
 import { ErrorNotice } from "./ui";
 import { signalAccessFailure } from "@/lib/client/session-events";
 
@@ -15,6 +17,8 @@ export function PdfDownloadButton({
   disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const t = useTranslations("common");
+  const errorMessage = useErrorMessage();
   const [error, setError] = useState("");
   const request = useRef<AbortController | null>(null);
   const urls = useRef(new Set<string>());
@@ -44,10 +48,7 @@ export function PdfDownloadButton({
       ) {
         const body = await response.json().catch(() => null);
         signalAccessFailure(response.status, body?.error?.code || "");
-        throw new Error(
-          body?.error?.message ||
-            "Unable to generate the PDF. Please try again.",
-        );
+        throw new Error(t("pdfFailed"));
       }
       const blob = await response.blob();
       if (controller.signal.aborted) return;
@@ -68,9 +69,7 @@ export function PdfDownloadButton({
       }, 1000);
     } catch (error) {
       if (controller.signal.aborted) return;
-      setError(
-        error instanceof Error ? error.message : "Unable to generate the PDF.",
-      );
+      setError(errorMessage(error, t("pdfFailed")));
     } finally {
       request.current = null;
       setBusy(false);
@@ -85,7 +84,7 @@ export function PdfDownloadButton({
         onClick={() => void download()}
       >
         <Download size={15} />
-        {busy ? "Generating PDF…" : "Download PDF"}
+        {busy ? t("generatingPdf") : t("downloadPdf")}
       </button>
       <ErrorNotice message={error} />
     </div>

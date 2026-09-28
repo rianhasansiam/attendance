@@ -1,5 +1,7 @@
 import { createElement as h } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
+import { testMessages } from "./i18n-root";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { duration, Metric, Table } from "@/components/ui";
 
@@ -52,3 +54,13 @@ describe("signed overtime display", () => {
     expect(markup).toContain('class="stat-value">-1h 30m</div>');
   });
 });
+
+function renderToStaticMarkup(children: React.ReactNode) {
+  const props = {
+    locale: "en",
+    timeZone: "Asia/Dhaka",
+    messages: testMessages,
+    children,
+  };
+  return renderMarkup(h(NextIntlClientProvider, props));
+}

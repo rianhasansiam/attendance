@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
+import { useEmployeeError, useEmployeeMessage } from "./employee-feedback";
 import {
   useCallback,
   useEffect,
@@ -46,7 +48,6 @@ import {
 } from "./ui";
 import { confirmAction } from "@/lib/client/alerts";
 import { baseApi } from "@/store/api/base-api";
-import { errorMessage } from "@/store/api/errors";
 import { useAppDispatch, useAppStore } from "@/store/hooks";
 import { useQueryView } from "@/store/use-query-view";
 import { useFreshness } from "@/store/freshness";
@@ -90,26 +91,47 @@ type AttendanceAttempt = {
   timing: AttendanceTimingTrace;
 };
 
-const attendanceColumns = [
-  { key: "attendanceDate", label: "Date", format: "date" as const },
-  { key: "checkInAt", label: "Check in", format: "time" as const },
-  { key: "checkOutAt", label: "Check out", format: "time" as const },
-  { key: "workedMinutes", label: "Worked", format: "duration" as const },
-  {
-    key: "overtimeMinutes",
-    label: "Overtime",
-    format: "nullable-duration" as const,
-  },
-  { key: "lateMinutes", label: "Actual late (min)" },
-  { key: "lateReason", label: "Late reason", format: "text" as const },
-  { key: "status", label: "Status", format: "attendance-status" as const },
-];
-function friendlyError(error: unknown) {
-  if (error instanceof Error && error.name === "NotAllowedError")
-    return "Device verification was cancelled or timed out. Please try again.";
-  return errorMessage(error);
+function useAttendanceColumns() {
+  const t = useTranslations("employee");
+  return [
+    {
+      key: "attendanceDate",
+      label: t("columns.date"),
+      format: "date" as const,
+    },
+    { key: "checkInAt", label: t("columns.checkIn"), format: "time" as const },
+    {
+      key: "checkOutAt",
+      label: t("columns.checkOut"),
+      format: "time" as const,
+    },
+    {
+      key: "workedMinutes",
+      label: t("columns.worked"),
+      format: "duration" as const,
+    },
+    {
+      key: "overtimeMinutes",
+      label: t("columns.overtime"),
+      format: "nullable-duration" as const,
+    },
+    { key: "lateMinutes", label: t("columns.lateMinutes") },
+    {
+      key: "lateReason",
+      label: t("columns.lateReason"),
+      format: "text" as const,
+    },
+    {
+      key: "status",
+      label: t("columns.status"),
+      format: "attendance-status" as const,
+    },
+  ];
 }
 export function EmployeeDashboard() {
+  const attendanceColumns = useAttendanceColumns();
+  const t = useTranslations("employee");
+  const locale = useLocale();
   const dispatch = useAppDispatch();
   const store = useAppStore();
   const dayQuery = useEmployeeDayQuery(undefined, useFreshness(true));
@@ -117,7 +139,7 @@ export function EmployeeDashboard() {
   const submitting = useRef(false);
   const attempt = useRef<AttendanceAttempt | null>(null);
   const recovery = useRef<AttendanceAttempt | null>(null);
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useEmployeeMessage();
   useEffect(
     () => () => {
       attempt.current?.controller.abort();
@@ -127,7 +149,7 @@ export function EmployeeDashboard() {
       submitting.current = false;
       setBusy("");
     },
-    [],
+    [setBusy],
   );
   const [needsReconcile, setNeedsReconcile] = useState(false);
   const [visibleConfirmation, setVisibleConfirmation] = useState<{
@@ -174,7 +196,7 @@ export function EmployeeDashboard() {
       attempt.current = pending;
     }
     if (pending && !isCurrent(pending)) return;
-    if (pending) setBusy("Checking the latest attendance…");
+    if (pending) setBusy("dashboard.checking");
     try {
       if (pending) {
         // A read that began before the uncertain write is not a recovery read.
@@ -195,9 +217,7 @@ export function EmployeeDashboard() {
       if (!isCurrent(pending)) return;
       const record = recoveredAttendance(day, pending.intent);
       if (!record) {
-        setActionError(
-          "The latest attendance does not yet confirm this action. Refresh again before another attempt.",
-        );
+        setActionError({ key: "errors.unconfirmed" });
         return;
       }
       const applied = await dispatch(
@@ -213,8 +233,8 @@ export function EmployeeDashboard() {
       setActionError("");
       setSuccess(
         pending.intent.action === "CHECK_IN"
-          ? "You’re checked in. Your attendance was confirmed after refreshing."
-          : "You’re checked out. Your attendance was confirmed after refreshing.",
+          ? "dashboard.recoveredCheckIn"
+          : "dashboard.recoveredCheckOut",
       );
       setVisibleConfirmation({
         record,
@@ -228,8 +248,8 @@ export function EmployeeDashboard() {
       if (pending && isCurrent(pending)) setBusy("");
     }
   }
-  const [actionError, setActionError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [actionError, setActionError] = useEmployeeError();
+  const [success, setSuccess] = useEmployeeMessage();
   const [dismissedReasonId, setDismissedReasonId] = useState("");
   const [savedReasonId, setSavedReasonId] = useState("");
   const reasonAttendance = data?.today;
@@ -245,14 +265,17 @@ export function EmployeeDashboard() {
   const closeReason = useCallback(() => {
     setDismissedReasonId(pendingReasonId);
   }, [pendingReasonId]);
-  const saveReason = useCallback((record: DataRow) => {
-    setSavedReasonId(String(record.id));
-    setSuccess(
-      record.lateApprovalStatus
-        ? "Your late attendance reason has been saved and approval requested."
-        : "Your late attendance reason has been saved.",
-    );
-  }, []);
+  const saveReason = useCallback(
+    (record: DataRow) => {
+      setSavedReasonId(String(record.id));
+      setSuccess(
+        record.lateApprovalStatus
+          ? "dashboard.reasonRequested"
+          : "dashboard.reasonSaved",
+      );
+    },
+    [setSuccess],
+  );
   const reasonDialog =
     pendingReason && dismissedReasonId !== pendingReasonId ? (
       <LateReasonDialog
@@ -268,9 +291,7 @@ export function EmployeeDashboard() {
     setActionError("");
     setSuccess("");
     if (!navigator.onLine) {
-      setActionError(
-        "You’re offline. Connect to the internet to record attendance.",
-      );
+      setActionError({ key: "errors.offline" });
       timing.finish("failed");
       return;
     }
@@ -282,7 +303,7 @@ export function EmployeeDashboard() {
       timing,
     };
     attempt.current = current;
-    setBusy("Preparing verification…");
+    setBusy("ceremony.preparing");
     try {
       const record = await recordAttendance({
         action,
@@ -303,9 +324,7 @@ export function EmployeeDashboard() {
       if (!applied || !isCurrent(current)) return;
       if (action === "CHECK_IN") setDismissedReasonId("");
       setSuccess(
-        action === "CHECK_IN"
-          ? "You’re checked in. Have a good workday!"
-          : "You’re checked out. Your attendance has been recorded.",
+        action === "CHECK_IN" ? "dashboard.checkedIn" : "dashboard.checkedOut",
       );
       setVisibleConfirmation({
         record,
@@ -318,7 +337,7 @@ export function EmployeeDashboard() {
         timing.finish("cancelled");
         return;
       }
-      setActionError(friendlyError(error));
+      setActionError(error);
       if (error instanceof UncertainCeremonyError) {
         recovery.current = current;
         setNeedsReconcile(true);
@@ -341,7 +360,10 @@ export function EmployeeDashboard() {
   if (!data)
     return (
       <>
-        <PageHeader title="My day" description="Your workday, at a glance." />
+        <PageHeader
+          title={t("dashboard.title")}
+          description={t("dashboard.emptyDescription")}
+        />
         <ErrorNotice message={error} />
         <Refresh onClick={() => void refreshDay()} />
         {reasonDialog}
@@ -357,22 +379,22 @@ export function EmployeeDashboard() {
   return (
     <>
       <PageHeader
-        eyebrow="YOUR WORKDAY"
-        title={`Hello, ${String(user?.name || "there").split(" ")[0]}.`}
-        description="A fresh start. A clear view of your day."
+        eyebrow={t("dashboard.eyebrow")}
+        title={
+          user?.name
+            ? t("dashboard.greeting", { name: String(user.name).split(" ")[0] })
+            : t("dashboard.greetingAnonymous")
+        }
+        description={t("dashboard.description")}
         action={<Refresh onClick={() => void refreshDay()} />}
       />
       <ErrorNotice message={error || actionError} />
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing attendance…
+          {t("dashboard.refreshing")}
         </p>
       )}
-      {needsReconcile && (
-        <Notice>
-          Refresh attendance to confirm the previous action before trying again.
-        </Notice>
-      )}
+      {needsReconcile && <Notice>{t("dashboard.reconcile")}</Notice>}
       {success && (
         <Notice notify>
           <Check size={17} />
@@ -382,13 +404,13 @@ export function EmployeeDashboard() {
       {pendingReason && (
         <div className="notice" role="status">
           <Clock3 size={17} />
-          <span>Please add a reason for your late attendance.</span>
+          <span>{t("dashboard.addReasonPrompt")}</span>
           <button
             type="button"
             className="button small secondary"
             onClick={() => setDismissedReasonId("")}
           >
-            Add late reason
+            {t("dashboard.addReason")}
           </button>
         </div>
       )}
@@ -397,23 +419,23 @@ export function EmployeeDashboard() {
         <div className="checkin-card">
           <p className="eyebrow">
             {today?.checkOutAt
-              ? "WORKDAY COMPLETE"
+              ? t("dashboard.complete")
               : today?.checkInAt
-                ? "YOU’RE CHECKED IN"
-                : "READY WHEN YOU ARE"}
+                ? t("dashboard.inProgress")
+                : t("dashboard.ready")}
           </p>
           <h2>
             {today?.checkOutAt
-              ? "See you next workday."
+              ? t("dashboard.goodbye")
               : today?.checkInAt
-                ? "Make room for good work."
-                : "Let’s start your day."}
+                ? t("dashboard.working")
+                : t("dashboard.start")}
           </h2>
           <p>
             {label(office?.name)}
             {data.shift
               ? ` · ${label(data.shift.startTime)} – ${label(data.shift.endTime)} · ${label(data.shift.timezone)}`
-              : " · No active shift assigned"}
+              : t("dashboard.noShift")}
           </p>
           <div className="checkin-actions">
             <button
@@ -428,7 +450,7 @@ export function EmployeeDashboard() {
               onClick={() => attend("CHECK_IN")}
             >
               <LogIn size={17} />
-              Check in
+              {t("columns.checkIn")}
             </button>
             <button
               className="button secondary"
@@ -442,32 +464,40 @@ export function EmployeeDashboard() {
               onClick={() => attend("CHECK_OUT")}
             >
               <LogOut size={17} />
-              Check out
+              {t("columns.checkOut")}
             </button>
           </div>
           {busy && <p role="status">{busy}</p>}
           <div className="today-metrics">
             <div>
-              <span>CHECK IN</span>
+              <span>{t("dashboard.checkInLabel")}</span>
               <strong>
-                {time(today?.checkInAt, String(office?.timezone || "UTC"))}
+                {time(
+                  today?.checkInAt,
+                  String(office?.timezone || "UTC"),
+                  locale,
+                )}
               </strong>
             </div>
             <div>
-              <span>CHECK OUT</span>
+              <span>{t("dashboard.checkOutLabel")}</span>
               <strong>
-                {time(today?.checkOutAt, String(office?.timezone || "UTC"))}
+                {time(
+                  today?.checkOutAt,
+                  String(office?.timezone || "UTC"),
+                  locale,
+                )}
               </strong>
             </div>
             <div>
-              <span>WORKED</span>
+              <span>{t("dashboard.workedLabel")}</span>
               <strong>
                 {today?.checkOutAt
-                  ? duration(today.workedMinutes)
+                  ? duration(today.workedMinutes, locale)
                   : "In progress" === today?.status
-                    ? "In progress"
+                    ? t("dashboard.ongoing")
                     : today?.checkInAt
-                      ? "In progress"
+                      ? t("dashboard.ongoing")
                       : "—"}
               </strong>
             </div>
@@ -475,27 +505,27 @@ export function EmployeeDashboard() {
         </div>
         <section className="card">
           <div className="card-header">
-            <h2>Attendance checks</h2>
+            <h2>{t("dashboard.checks")}</h2>
             <ShieldCheck size={18} color="#8c9b85" />
           </div>
           <div className="card-body">
             <Verification
               icon={<Fingerprint size={18} />}
-              title="Registered device"
+              title={t("dashboard.registeredDevice")}
               text={
                 approved.length
-                  ? `${approved.length} approved ${approved.length === 1 ? "device" : "devices"}`
-                  : "Add a device to get started"
+                  ? t("dashboard.approvedDevices", { count: approved.length })
+                  : t("dashboard.addDevice")
               }
               badge={approved.length ? "Verified" : "PENDING"}
             />
             <Verification
               icon={<MapPin size={18} />}
-              title="Office location"
+              title={t("dashboard.officeLocation")}
               text={
                 policy.requireGeofence
-                  ? "Location requested when you check in or out"
-                  : "Not required by your office"
+                  ? t("dashboard.locationRequested")
+                  : t("dashboard.notRequiredOffice")
               }
               badge={
                 policy.requireGeofence
@@ -505,11 +535,11 @@ export function EmployeeDashboard() {
             />
             <Verification
               icon={<Wifi size={18} />}
-              title="Office network"
+              title={t("dashboard.officeNetwork")}
               text={
                 policy.requireOfficeNetwork
-                  ? "Connect to an approved office network"
-                  : "Not required by your office"
+                  ? t("dashboard.connectNetwork")
+                  : t("dashboard.notRequiredOffice")
               }
               badge={
                 data.network?.verified
@@ -524,36 +554,40 @@ export function EmployeeDashboard() {
       </div>
       <div className="stats-grid">
         <Metric
-          title="Today’s status"
+          title={t("dashboard.todayStatus")}
           value={
             <AttendanceStatus record={today || { status: "Not checked in" }} />
           }
-          note="Effective status used in attendance reports"
+          note={t("dashboard.effectiveStatus")}
           icon={<CalendarDays size={18} />}
         />
         <Metric
-          title="Actual late arrival"
-          value={`${Number(today?.lateMinutes || 0)} min`}
+          title={t("dashboard.actualLate")}
+          value={t("dashboard.minutes", {
+            count: Number(today?.lateMinutes || 0),
+          })}
           note={
             today?.isExcusedLate
-              ? "Excused; actual arrival retained"
-              : "Calculated from your assigned shift"
+              ? t("dashboard.excused")
+              : t("dashboard.calculatedShift")
           }
           icon={<Clock3 size={18} />}
         />
         <Metric
-          title="Your department"
+          title={t("dashboard.department")}
           value={label(nested(data.employee, "department.name"))}
-          note={`Employee ID · ${label(data.employee.employeeCode)}`}
+          note={t("dashboard.employeeId", {
+            id: label(data.employee.employeeCode),
+          })}
           icon={<Building2 size={18} />}
         />
         <Metric
-          title="Assigned shift"
+          title={t("dashboard.shift")}
           value={label(data.shift?.name)}
           note={
             data.shift
               ? `${label(data.shift.startTime)} – ${label(data.shift.endTime)}`
-              : "Contact your administrator"
+              : t("dashboard.contactAdmin")
           }
           icon={<Clock3 size={18} />}
         />
@@ -561,11 +595,12 @@ export function EmployeeDashboard() {
       <section className="card">
         <div className="card-header">
           <div>
-            <h2>Recent attendance</h2>
-            <p>A little perspective on your workweek.</p>
+            <h2>{t("dashboard.recent")}</h2>
+            <p>{t("dashboard.recentDescription")}</p>
           </div>
           <Link href="/employee/history" className="button-link">
-            View history <ArrowUpRight size={15} />
+            {t("dashboard.viewHistory")}
+            <ArrowUpRight size={15} />
           </Link>
         </div>
         <Table rows={data.recent || []} columns={attendanceColumns} />
@@ -596,6 +631,8 @@ function Verification({
   );
 }
 export function EmployeeHistory() {
+  const attendanceColumns = useAttendanceColumns();
+  const t = useTranslations("employee");
   const { params, update } = useUrlFilters();
   const from = params.get("from") || "";
   const to = params.get("to") || "";
@@ -610,22 +647,22 @@ export function EmployeeHistory() {
   return (
     <>
       <PageHeader
-        eyebrow="YOUR RECORDS"
-        title="Attendance history"
-        description="Every check-in, check-out, and workday in one place."
+        eyebrow={t("history.eyebrow")}
+        title={t("history.title")}
+        description={t("history.description")}
         action={<Refresh onClick={refresh} />}
       />
       <ErrorNotice message={error} />
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing records…
+          {t("history.refreshing")}
         </p>
       )}
       <section className="card">
         <div className="card-body">
           <div className="filter-grid">
             <div className="field">
-              <label htmlFor="from">From date</label>
+              <label htmlFor="from">{t("history.from")}</label>
               <input
                 id="from"
                 type="date"
@@ -636,7 +673,7 @@ export function EmployeeHistory() {
               />
             </div>
             <div className="field">
-              <label htmlFor="to">To date</label>
+              <label htmlFor="to">{t("history.to")}</label>
               <input
                 id="to"
                 type="date"
@@ -665,6 +702,8 @@ export function EmployeeHistory() {
   );
 }
 export function EmployeeDevices() {
+  const t = useTranslations("employee");
+  const locale = useLocale();
   const dispatch = useAppDispatch();
   const { params, update } = useUrlFilters();
   const page = pageFromSearch(params.get("page"));
@@ -687,8 +726,8 @@ export function EmployeeDevices() {
   }
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [actionError, setActionError] = useEmployeeError();
+  const [success, setSuccess] = useEmployeeMessage();
   async function register(event: FormEvent) {
     event.preventDefault();
     if (submitting.current || needsReconcile) return;
@@ -701,15 +740,13 @@ export function EmployeeDevices() {
     try {
       await registerDevice(name, controller.signal);
       controller.signal.throwIfAborted();
-      setSuccess(
-        "Device registered. Your administrator may need to approve it before you record attendance.",
-      );
+      setSuccess("devices.registered");
       setName("");
       setPage(1);
       dispatch(baseApi.util.invalidateTags([...devicesChangedTags]));
     } catch (error) {
       if (controller.signal.aborted) return;
-      setActionError(friendlyError(error));
+      setActionError(error);
       if (error instanceof UncertainCeremonyError) {
         setNeedsReconcile(true);
         await refreshDevices();
@@ -729,9 +766,10 @@ export function EmployeeDevices() {
     try {
       if (
         !(await confirmAction({
-          title: "Revoke this device?",
-          text: "It will no longer be able to verify attendance.",
-          confirmText: "Revoke device",
+          title: t("devices.revokeTitle"),
+          text: t("devices.revokeDescription"),
+          confirmText: t("devices.revokeConfirm"),
+          cancelText: t("common.cancel"),
           danger: true,
         }))
       )
@@ -739,9 +777,9 @@ export function EmployeeDevices() {
       setActionError("");
       setSuccess("");
       await revokeDevice(id).unwrap();
-      setSuccess("Device revoked successfully.");
+      setSuccess("devices.revoked");
     } catch (error) {
-      setActionError(friendlyError(error));
+      setActionError(error);
       if (isAmbiguousWrite(error)) {
         setNeedsReconcile(true);
         await refreshDevices();
@@ -755,29 +793,25 @@ export function EmployeeDevices() {
   return (
     <>
       <PageHeader
-        eyebrow="SECURITY"
-        title="My devices"
-        description="A familiar device. An extra layer of confidence."
+        eyebrow={t("devices.eyebrow")}
+        title={t("devices.title")}
+        description={t("devices.description")}
         action={<Refresh onClick={() => void refreshDevices()} />}
       />
       <ErrorNotice message={error || actionError} />
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing devices…
+          {t("devices.refreshing")}
         </p>
       )}
-      {needsReconcile && (
-        <Notice>Refresh devices successfully before trying again.</Notice>
-      )}
+      {needsReconcile && <Notice>{t("devices.reconcile")}</Notice>}
       {success && <Notice notify>{success}</Notice>}
       <div className="content-grid">
         <section className="card">
           <div className="card-header">
             <div>
-              <h2>Register a passkey</h2>
-              <p>
-                Use your device’s built-in verification to confirm attendance.
-              </p>
+              <h2>{t("devices.registerPasskey")}</h2>
+              <p>{t("devices.registerDescription")}</p>
             </div>
             <Fingerprint size={21} color="#8c9b85" />
           </div>
@@ -785,12 +819,12 @@ export function EmployeeDevices() {
             <form onSubmit={register}>
               <div className="device-form">
                 <div className="field">
-                  <label htmlFor="device-name">Device name</label>
+                  <label htmlFor="device-name">{t("devices.name")}</label>
                   <input
                     required
                     maxLength={100}
                     id="device-name"
-                    placeholder="e.g. My MacBook"
+                    placeholder={t("devices.namePlaceholder")}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                   />
@@ -801,39 +835,38 @@ export function EmployeeDevices() {
                   type="submit"
                 >
                   <Plus size={16} />
-                  {busy ? "Verifying…" : "Register device"}
+                  {busy ? t("devices.verifying") : t("devices.register")}
                 </button>
               </div>
             </form>
             <p className="muted" style={{ fontSize: 12 }}>
-              Your fingerprint and face data stay on your device. Only a secure
-              passkey is registered.
+              {t("devices.biometricPrivacy")}
             </p>
           </div>
         </section>
         <section className="card">
           <div className="card-body">
             <ShieldCheck size={28} color="#7d9877" />
-            <h2 style={{ marginTop: 15 }}>Designed for your privacy</h2>
+            <h2 style={{ marginTop: 15 }}>{t("devices.privacyTitle")}</h2>
             <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-              Your sign-in verifies your identity. Your approved passkey
-              confirms attendance. Keep your registered devices up to date and
-              revoke any you no longer use.
+              {t("devices.privacyDescription")}
             </p>
           </div>
         </section>
       </div>
       <section className="card">
         <div className="card-header">
-          <h2>Registered devices</h2>
-          <span className="muted">{data?.total ?? 0}</span>
+          <h2>{t("devices.registeredDevices")}</h2>
+          <span className="muted">
+            {new Intl.NumberFormat(locale).format(data?.total ?? 0)}
+          </span>
         </div>
         {loading ? (
           <Loading />
         ) : !devices.length ? (
           <Empty
-            title="Your first device starts here"
-            description="Register a passkey above to get ready for your next check-in."
+            title={t("devices.emptyTitle")}
+            description={t("devices.emptyDescription")}
           />
         ) : (
           devices.map((device) => (
@@ -845,8 +878,15 @@ export function EmployeeDevices() {
                 <div>
                   <h3>{label(device.name)}</h3>
                   <p>
-                    Registered {date(device.createdAt)} ·{" "}
-                    {label(device.deviceType)}
+                    {t("devices.registrationDetails", {
+                      date: date(device.createdAt, locale),
+                      type:
+                        device.deviceType === "singleDevice"
+                          ? t("devices.singleDevice")
+                          : device.deviceType === "multiDevice"
+                            ? t("devices.multiDevice")
+                            : label(device.deviceType),
+                    })}
                   </p>
                 </div>
               </div>
@@ -866,7 +906,7 @@ export function EmployeeDevices() {
                     className="button small secondary"
                     onClick={() => revoke(String(device.id))}
                   >
-                    Revoke
+                    {t("devices.revoke")}
                   </button>
                 )}
               </div>
@@ -885,6 +925,7 @@ export function EmployeeDevices() {
   );
 }
 export function EmployeeLeaves() {
+  const t = useTranslations("employee");
   const { params, update } = useUrlFilters();
   const page = pageFromSearch(params.get("page"));
   const setPage = (page: number) => update({ page });
@@ -905,8 +946,8 @@ export function EmployeeLeaves() {
   }
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [actionError, setActionError] = useEmployeeError();
+  const [success, setSuccess] = useEmployeeMessage();
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting.current || needsReconcile) return;
@@ -922,9 +963,9 @@ export function EmployeeLeaves() {
       }).unwrap();
       setShow(false);
       setPage(1);
-      setSuccess("Leave request submitted for review.");
+      setSuccess("leaves.submitted");
     } catch (error) {
-      setActionError(friendlyError(error));
+      setActionError(error);
       if (isAmbiguousWrite(error)) {
         setNeedsReconcile(true);
         await refreshLeaves();
@@ -941,10 +982,10 @@ export function EmployeeLeaves() {
     try {
       if (
         !(await confirmAction({
-          title: "Cancel this leave request?",
-          text: "The request will be marked as cancelled.",
-          confirmText: "Cancel request",
-          cancelText: "Keep request",
+          title: t("leaves.cancelTitle"),
+          text: t("leaves.cancelDescription"),
+          confirmText: t("leaves.cancelRequest"),
+          cancelText: t("leaves.keepRequest"),
           danger: true,
         }))
       )
@@ -952,9 +993,9 @@ export function EmployeeLeaves() {
       setActionError("");
       setSuccess("");
       await cancelLeave(id).unwrap();
-      setSuccess("Your leave request has been cancelled.");
+      setSuccess("leaves.cancelled");
     } catch (error) {
-      setActionError(friendlyError(error));
+      setActionError(error);
       if (isAmbiguousWrite(error)) {
         setNeedsReconcile(true);
         await refreshLeaves();
@@ -967,15 +1008,15 @@ export function EmployeeLeaves() {
   return (
     <>
       <PageHeader
-        eyebrow="TIME AWAY"
-        title="Leave requests"
-        description="Plan a little space for life outside work."
+        eyebrow={t("leaves.eyebrow")}
+        title={t("leaves.title")}
+        description={t("leaves.description")}
         action={
           <div className="page-header-actions">
             <Refresh onClick={() => void refreshLeaves()} />
             <button className="button" onClick={() => setShow(!show)}>
               <Plus size={16} />
-              Request leave
+              {t("leaves.request")}
             </button>
           </div>
         }
@@ -983,40 +1024,36 @@ export function EmployeeLeaves() {
       <ErrorNotice message={error || (!show ? actionError : "")} />
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing leave requests…
+          {t("leaves.refreshing")}
         </p>
       )}
-      {needsReconcile && (
-        <Notice>
-          Refresh leave requests successfully before trying again.
-        </Notice>
-      )}
+      {needsReconcile && <Notice>{t("leaves.reconcile")}</Notice>}
       {success && <Notice notify>{success}</Notice>}
       {show && (
         <section className="card" style={{ marginBottom: 24 }}>
           <div className="card-header">
-            <h2>New leave request</h2>
+            <h2>{t("leaves.newRequest")}</h2>
           </div>
           <form className="card-body" onSubmit={submit}>
             <ErrorNotice message={actionError} />
             <div className="form-grid">
               <div className="field">
-                <label htmlFor="startDate">First day</label>
+                <label htmlFor="startDate">{t("leaves.firstDay")}</label>
                 <input required type="date" name="startDate" id="startDate" />
               </div>
               <div className="field">
-                <label htmlFor="endDate">Last day</label>
+                <label htmlFor="endDate">{t("leaves.lastDay")}</label>
                 <input required type="date" name="endDate" id="endDate" />
               </div>
               <div className="field full">
-                <label htmlFor="reason">Reason</label>
+                <label htmlFor="reason">{t("common.reason")}</label>
                 <textarea
                   required
                   minLength={5}
                   maxLength={1000}
                   name="reason"
                   id="reason"
-                  placeholder="Tell your team a little about your request."
+                  placeholder={t("leaves.reasonPlaceholder")}
                 />
               </div>
             </div>
@@ -1026,14 +1063,14 @@ export function EmployeeLeaves() {
                 className="button secondary"
                 onClick={() => setShow(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 disabled={busy || needsReconcile}
                 className="button"
                 type="submit"
               >
-                {busy ? "Submitting…" : "Submit request"}
+                {busy ? t("leaves.submitting") : t("leaves.submit")}
                 <ArrowRight size={15} />
               </button>
             </div>
@@ -1042,7 +1079,7 @@ export function EmployeeLeaves() {
       )}
       <section className="card">
         <div className="card-header">
-          <h2>Your requests</h2>
+          <h2>{t("leaves.yourRequests")}</h2>
           <CalendarDays size={18} color="#8c9b85" />
         </div>
         {loading ? (
@@ -1051,11 +1088,11 @@ export function EmployeeLeaves() {
           <Table
             rows={items(data)}
             columns={[
-              { key: "startDate", label: "From", format: "date" },
-              { key: "endDate", label: "To", format: "date" },
-              { key: "reason", label: "Reason" },
-              { key: "status", label: "Status", format: "badge" },
-              { key: "reviewNote", label: "Review note" },
+              { key: "startDate", label: t("columns.from"), format: "date" },
+              { key: "endDate", label: t("columns.to"), format: "date" },
+              { key: "reason", label: t("common.reason") },
+              { key: "status", label: t("columns.status"), format: "badge" },
+              { key: "reviewNote", label: t("columns.reviewNote") },
             ]}
             actions={(row) =>
               row.status === "PENDING" ? (
@@ -1064,7 +1101,7 @@ export function EmployeeLeaves() {
                   disabled={busy || needsReconcile}
                   onClick={() => cancel(String(row.id))}
                 >
-                  Cancel request
+                  {t("leaves.cancelRequest")}
                 </button>
               ) : null
             }

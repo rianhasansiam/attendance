@@ -24,15 +24,17 @@ import {
 } from "./ui";
 import { pageFromSearch, useUrlFilters } from "@/lib/client/use-url-filters";
 import { confirmAction } from "@/lib/client/alerts";
-import { DELETED_INFO } from "@/lib/deleted-info";
+import { formatMoney } from "@/i18n/format-money";
+import { useLocale, useTranslations } from "next-intl";
+import { localizeError } from "@/i18n/errors";
+import { useExpenseFeedback, type ExpenseMessage } from "./expense-feedback";
 import { useFreshness } from "@/store/freshness";
 import { useQueryView } from "@/store/use-query-view";
-import { errorMessage, isApiError } from "@/store/api/errors";
+import { isApiError } from "@/store/api/errors";
 import {
   balanceInputSchema,
   categoryCreateSchema,
   expenseInputSchema,
-  formatMoney,
   historyQuerySchema,
   todayInTimezone,
   transactionUpdateSchema,
@@ -81,8 +83,8 @@ type Filters = {
   search: string;
 };
 
-function dateLabel(value: string) {
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString("en-GB", {
+function dateLabel(value: string, locale: string) {
+  return new Date(`${value}T00:00:00Z`).toLocaleDateString(locale, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -98,11 +100,17 @@ function requestMayHaveCommitted(error: unknown) {
   );
 }
 
-function readError(error: unknown, subject: string, hasData: boolean) {
+function readError(
+  error: unknown,
+  subject: string,
+  hasData: boolean,
+  t: ReturnType<typeof useTranslations<"expenses">>,
+  locale: string,
+) {
   if (!error) return "";
   if (isApiError(error) && [400, 401, 403].includes(Number(error.status)))
-    return error.message;
-  return `${hasData ? `Could not refresh ${subject}. Previously loaded data is shown.` : `Could not load ${subject}.`} Use Refresh to try loading it again.`;
+    return localizeError(error, locale);
+  return t(hasData ? "refreshFailed" : "loadFailed", { subject });
 }
 
 function fieldErrors(error: unknown) {
@@ -120,6 +128,8 @@ export function DailyExpensesWorkspace({
   canDeleteTransactions: boolean;
   canDownloadReport: boolean;
 }) {
+  const t = useTranslations("expenses");
+  const locale = useLocale();
   const { params, update } = useUrlFilters();
   const filters: Filters = {
     from: params.get("from") || "",
@@ -178,10 +188,12 @@ export function DailyExpensesWorkspace({
   const confirmingDeletion = useRef(false);
   const submitting = useRef(false);
   const deletionPageRecovery = useRef<{ requestId?: string } | null>(null);
-  const [formError, setFormError] = useState("");
-  const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [filterError, setFilterError] = useState("");
-  const [message, setMessage] = useState("");
+  const [formError, setFormError] = useExpenseFeedback();
+  const [errors, setErrors] = useState<
+    Record<string, (string | ExpenseMessage)[]>
+  >({});
+  const [filterError, setFilterError] = useExpenseFeedback();
+  const [message, setMessage] = useExpenseFeedback();
   const [confirmedOperation, setConfirmedOperation] = useState<
     Submission["type"] | null
   >(null);
@@ -267,9 +279,7 @@ export function DailyExpensesWorkspace({
       event.stopPropagation();
       setCategoriesOpen(false);
       setDialogOpen(true);
-      setFormError(
-        "Keep this page open until this transaction change is confirmed. If the request was interrupted, use Safe retry before leaving the workspace.",
-      );
+      setFormError({ key: "keepOpen" });
     };
     window.addEventListener("beforeunload", guard);
     document.addEventListener("click", guardNavigation, true);
@@ -277,7 +287,7 @@ export function DailyExpensesWorkspace({
       window.removeEventListener("beforeunload", guard);
       document.removeEventListener("click", guardNavigation, true);
     };
-  }, [submission]);
+  }, [submission, setFormError]);
 
   function openTransaction(type: TransactionType) {
     if (!canWrite || locked || !summary.data) return;
@@ -340,27 +350,29 @@ export function DailyExpensesWorkspace({
     const amount = formatMoney(
       transaction.amount,
       summary.data.ledger.currency,
+      locale,
     );
     const isExpense = transaction.type === "EXPENSE";
     confirmingDeletion.current = true;
     setConfirming(true);
     try {
       const confirmed = await confirmAction({
-        title: isExpense ? "Delete Expense" : "Delete Balance",
+        title: isExpense ? t("deleteExpense") : t("deleteBalance"),
         text: [
-          `Amount: ${amount}`,
-          `Transaction date: ${dateLabel(transaction.date)}`,
+          t("amountDetail", { amount }),
+          t("dateDetail", { date: dateLabel(transaction.date, locale) }),
           ...(transaction.category
-            ? [`Category: ${transaction.category.name}`]
+            ? [t("categoryDetail", { category: transaction.category.name })]
             : []),
-          `Description / note: ${transaction.note || "—"}`,
+          t("noteDetail", { note: transaction.note || "—" }),
           "",
           isExpense
-            ? `Deleting this expense will increase Current Balance by ${amount}.`
-            : `Deleting this balance addition will reduce Current Balance and Total Balance Added by ${amount}. Current Balance may become negative.`,
-          "The record will be permanently removed from the database and transaction history. This action cannot be undone; its audit history will be kept.",
+            ? t("deleteExpenseImpact", { amount })
+            : t("deleteBalanceImpact", { amount }),
+          t("deletePermanent"),
         ].join("\n"),
-        confirmText: "Delete record",
+        confirmText: t("deleteRecord"),
+        cancelText: t("cancel"),
         danger: true,
       });
       if (!confirmed) return;
@@ -418,8 +430,8 @@ export function DailyExpensesWorkspace({
         note: draft.note,
       };
       if (draft.type === "EXPENSE" && !draft.categoryId) {
-        setErrors({ categoryId: ["Choose a category."] });
-        setFormError("Check the highlighted fields before saving.");
+        setErrors({ categoryId: [{ key: "chooseCategory" }] });
+        setFormError({ key: "checkFields" });
         return;
       }
       const parsed = draft.transaction
@@ -440,7 +452,7 @@ export function DailyExpensesWorkspace({
             });
       if (!parsed.success) {
         setErrors(parsed.error.flatten().fieldErrors);
-        setFormError("Check the highlighted fields before saving.");
+        setFormError({ key: "checkFields" });
         return;
       }
       if (
@@ -448,9 +460,9 @@ export function DailyExpensesWorkspace({
         draft.date > todayInTimezone(summary.data.ledger.timezone)
       ) {
         setErrors({
-          date: ["Choose today or a past date in the workspace timezone."],
+          date: [{ key: "pastDate" }],
         });
-        setFormError("Future transactions are not supported.");
+        setFormError({ key: "futureUnsupported" });
         return;
       }
       attempt = draft.transaction
@@ -481,9 +493,13 @@ export function DailyExpensesWorkspace({
           input: attempt.input,
         }).unwrap();
         deletionPageRecovery.current = { requestId: historyQuery.requestId };
-        setMessage(
-          `${reviewed.type === "EXPENSE" ? "Expense" : "Balance addition"} deleted${result.replayed ? " (the record was already deleted)" : ""}. Balances and history are being refreshed.`,
-        );
+        setMessage({
+          key: "deletedSuccess",
+          values: {
+            type: reviewed.type,
+            replayed: result.replayed ? "yes" : "no",
+          },
+        });
       } else {
         const result =
           attempt.type === "UPDATE"
@@ -494,9 +510,14 @@ export function DailyExpensesWorkspace({
             : attempt.type === "EXPENSE"
               ? await addExpense(attempt.input).unwrap()
               : await addBalance(attempt.input).unwrap();
-        setMessage(
-          `${result.transaction.type === "EXPENSE" ? "Expense" : "Balance addition"} ${attempt.type === "UPDATE" ? "updated" : "saved"}${result.replayed ? " (the earlier submission was already recorded)" : ""}. History filters are preserved; the entry may be outside the current view.`,
-        );
+        setMessage({
+          key: "savedSuccess",
+          values: {
+            type: result.transaction.type,
+            operation: attempt.type,
+            replayed: result.replayed ? "yes" : "no",
+          },
+        });
       }
       setConfirmedOperation(attempt.type);
       setSubmission(null);
@@ -513,9 +534,7 @@ export function DailyExpensesWorkspace({
         setSubmission(null);
         setUncertain(false);
         setConflict(true);
-        setFormError(
-          "This transaction has been deleted. Close and refresh to load the current balances and history. It cannot be edited or recreated by retrying this submission.",
-        );
+        setFormError({ key: "transactionDeleted" });
         return;
       }
       if (
@@ -528,8 +547,8 @@ export function DailyExpensesWorkspace({
         setConflict(true);
         setFormError(
           attempt.type === "DELETE"
-            ? "This transaction has changed since you opened it. Close and refresh, then review the latest record before deleting it. This attempt did not delete the newer version."
-            : "This transaction has changed since you opened it. Close and refresh, then reopen the latest record to review your changes. This attempt did not overwrite the newer version.",
+            ? { key: "deleteConflict" }
+            : { key: "editConflict" },
         );
         return;
       }
@@ -544,16 +563,16 @@ export function DailyExpensesWorkspace({
         setUncertain(true);
         setFormError(
           attempt.type === "DELETE"
-            ? "The deletion could not be confirmed. Use Safe retry to check or complete this exact deletion. The original record and version are preserved; retrying cannot delete a newer edit."
+            ? { key: "deleteUnconfirmed" }
             : attempt.type === "UPDATE"
-              ? "The edit could not be confirmed. Use Safe retry to check or complete this exact edit. Its values and original version are preserved so a newer edit cannot be overwritten."
-              : "The save could not be confirmed. Use Safe retry to check or complete this exact transaction. Its values and retry key are preserved; no new transaction will be created for the same submission.",
+              ? { key: "editUnconfirmed" }
+              : { key: "saveUnconfirmed" },
         );
       } else {
         setSubmission(null);
         setUncertain(false);
         setErrors(fieldErrors(error));
-        setFormError(errorMessage(error));
+        setFormError({ error });
       }
     } finally {
       submitting.current = false;
@@ -572,7 +591,9 @@ export function DailyExpensesWorkspace({
     });
     if (!parsed.success) {
       setFilterError(
-        parsed.error.issues[0]?.message ?? "Check the history filters.",
+        parsed.error.issues[0]
+          ? { error: new Error(parsed.error.issues[0].message) }
+          : { key: "checkFilters" },
       );
       return;
     }
@@ -604,29 +625,31 @@ export function DailyExpensesWorkspace({
   const currency = summary.data?.ledger.currency;
   const summaryError = readError(
     summaryQuery.error,
-    "the all-time balances",
+    t("balancesSubject"),
     !!summary.data,
+    t,
+    locale,
   );
   const historyError = readError(
     historyQuery.error,
-    "transaction history",
+    t("historySubject"),
     !!history.data,
+    t,
+    locale,
   );
   const categoryError = readError(
     categoriesQuery.error,
-    "categories",
+    t("categoriesSubject"),
     !!categories.data,
+    t,
+    locale,
   );
 
   return (
     <div className={styles.workspace}>
       <PageHeader
-        title="Daily Expenses"
-        description={
-          canWrite
-            ? "Track added funds, daily expenses, and transaction history."
-            : "View added funds, daily expenses, and transaction history. Only super admins can make changes."
-        }
+        title={t("dailyExpenses")}
+        description={canWrite ? t("writeDescription") : t("readDescription")}
         action={
           <button
             type="button"
@@ -635,7 +658,7 @@ export function DailyExpensesWorkspace({
             onClick={refresh}
           >
             <RefreshCw size={16} className={fetching ? "spin" : undefined} />{" "}
-            {fetching ? "Refreshing…" : "Refresh"}
+            {fetching ? t("refreshing") : t("refresh")}
           </button>
         }
       />
@@ -649,56 +672,58 @@ export function DailyExpensesWorkspace({
         <ErrorNotice
           message={
             confirmedOperation === "DELETE"
-              ? "Your deletion was confirmed. The latest balances or history could not be loaded. Refresh the view to load the updated ledger."
-              : "Your transaction was saved. The latest balances or history could not be loaded. Refresh the view; do not submit the saved transaction again."
+              ? t("deleteRefreshFailed")
+              : t("saveRefreshFailed")
           }
         />
       )}
       <ErrorNotice message={summaryError} />
       <section
         className={styles.summary}
-        aria-label="All-time ledger balances"
+        aria-label={t("ledgerBalances")}
         aria-busy={summary.isFetching}
       >
         <Metric
-          title="Current Balance"
+          title={t("currentBalance")}
           value={
             summary.data
               ? formatMoney(
                   summary.data.currentBalance,
                   summary.data.ledger.currency,
+                  locale,
                 )
               : summary.loading
-                ? "Loading…"
-                : "Unavailable"
+                ? t("loading")
+                : t("unavailable")
           }
           note={
-            negative
-              ? "Negative balance · all funds added minus all expenses, all time."
-              : "All funds added minus all expenses, all time."
+            negative ? t("negativeBalanceDescription") : t("balanceDescription")
           }
           icon={<Wallet size={19} />}
         />
         <Metric
-          title="Total Balance Added"
+          title={t("totalBalanceAdded")}
           value={
             summary.data
               ? formatMoney(
                   summary.data.totalBalanceAdded,
                   summary.data.ledger.currency,
+                  locale,
                 )
               : summary.loading
-                ? "Loading…"
-                : "Unavailable"
+                ? t("loading")
+                : t("unavailable")
           }
-          note="Cumulative funds added, all time. Expenses do not reduce this total."
+          note={t("totalBalanceDescription")}
           icon={<Plus size={19} />}
         />
       </section>
       {summary.data && (
         <p className={`muted ${styles.scope}`}>
-          {summary.data.ledger.currency} · {summary.data.ledger.timezone} ·
-          History filters do not change these totals.
+          {t("summaryScope", {
+            currency: summary.data.ledger.currency,
+            timezone: summary.data.ledger.timezone,
+          })}
         </p>
       )}
       {canWrite && (
@@ -709,7 +734,8 @@ export function DailyExpensesWorkspace({
             onClick={() => openTransaction("BALANCE_ADDED")}
             disabled={!summary.data || locked}
           >
-            <Plus size={16} /> Add Balance
+            <Plus size={16} />
+            {t("addBalance")}
           </button>
           <button
             type="button"
@@ -717,7 +743,8 @@ export function DailyExpensesWorkspace({
             onClick={() => openTransaction("EXPENSE")}
             disabled={!summary.data || locked}
           >
-            <Wallet size={16} /> Add Expense
+            <Wallet size={16} />
+            {t("addExpense")}
           </button>
           <button
             type="button"
@@ -725,16 +752,14 @@ export function DailyExpensesWorkspace({
             onClick={() => setCategoriesOpen(true)}
             disabled={busy}
           >
-            <FolderOpen size={16} /> Categories
+            <FolderOpen size={16} />
+            {t("categories")}
           </button>
         </div>
       )}
       {canWrite && uncertain && (
         <div className={`notice ${styles.pending}`} role="alert">
-          <span>
-            A transaction change is awaiting confirmation. Safely retry it
-            before starting another transaction.
-          </span>
+          <span>{t("pendingTransaction")}</span>
           <button
             type="button"
             className="button small secondary"
@@ -743,18 +768,15 @@ export function DailyExpensesWorkspace({
               setDialogOpen(true);
             }}
           >
-            Review pending transaction
+            {t("reviewPending")}
           </button>
         </div>
       )}
       <section className="card" aria-labelledby="daily-history-heading">
         <div className={`card-header ${styles.historyHeader}`}>
           <div>
-            <h2 id="daily-history-heading">Transaction history</h2>
-            <p>
-              Newest transaction date first. Only super admins can edit or
-              delete saved transactions.
-            </p>
+            <h2 id="daily-history-heading">{t("transactionHistory")}</h2>
+            <p>{t("historyDescription")}</p>
           </div>
           <div className={styles.historyActions}>
             {canDownloadReport && (
@@ -764,21 +786,19 @@ export function DailyExpensesWorkspace({
                   filename="daily-expenses-report.pdf"
                   disabled={locked || !summary.data}
                 />
-                <p>
-                  PDF includes all matching records for the applied filters.
-                </p>
+                <p>{t("pdfDescription")}</p>
               </>
             )}
             {history.isFetching && (
               <span className="muted" role="status">
-                Updating history…
+                {t("updatingHistory")}
               </span>
             )}
           </div>
         </div>
         <form className={styles.filters} onSubmit={applyFilters}>
           <div className="field">
-            <label htmlFor="daily-from">From date</label>
+            <label htmlFor="daily-from">{t("fromDate")}</label>
             <input
               id="daily-from"
               type="date"
@@ -788,7 +808,7 @@ export function DailyExpensesWorkspace({
             />
           </div>
           <div className="field">
-            <label htmlFor="daily-to">To date</label>
+            <label htmlFor="daily-to">{t("toDate")}</label>
             <input
               id="daily-to"
               type="date"
@@ -799,19 +819,19 @@ export function DailyExpensesWorkspace({
             />
           </div>
           <div className="field">
-            <label htmlFor="daily-type">Transaction type</label>
+            <label htmlFor="daily-type">{t("transactionType")}</label>
             <select
               id="daily-type"
               value={filterDraft.type}
               onChange={(event) => changeFilter({ type: event.target.value })}
             >
-              <option value="">All types</option>
-              <option value="BALANCE_ADDED">Balance Added</option>
-              <option value="EXPENSE">Expense</option>
+              <option value="">{t("allTypes")}</option>
+              <option value="BALANCE_ADDED">{t("balanceAdded")}</option>
+              <option value="EXPENSE">{t("expense")}</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="daily-category-filter">Category</label>
+            <label htmlFor="daily-category-filter">{t("category")}</label>
             <select
               id="daily-category-filter"
               value={filterDraft.categoryId}
@@ -819,29 +839,31 @@ export function DailyExpensesWorkspace({
                 changeFilter({ categoryId: event.target.value })
               }
             >
-              <option value="">All categories</option>
+              <option value="">{t("allCategories")}</option>
               {categories.data?.map((category) => (
                 <option key={category.id} value={category.id}>
-                  {category.name}
-                  {category.archived ? " (archived)" : ""}
+                  {t("categoryLabel", {
+                    name: category.name,
+                    archived: category.archived ? "yes" : "no",
+                  })}
                 </option>
               ))}
             </select>
           </div>
           <div className={`field ${styles.search}`}>
-            <label htmlFor="daily-search">Search descriptions and notes</label>
+            <label htmlFor="daily-search">{t("searchNotesLabel")}</label>
             <input
               id="daily-search"
               type="search"
               maxLength={200}
               value={filterDraft.search}
               onChange={(event) => changeFilter({ search: event.target.value })}
-              placeholder="Search transaction notes"
+              placeholder={t("searchNotes")}
             />
           </div>
           <div className={`buttons ${styles.filterActions}`}>
             <button className="button small" type="submit">
-              Apply filters
+              {t("applyFilters")}
             </button>
             <button
               className="button small secondary"
@@ -858,14 +880,14 @@ export function DailyExpensesWorkspace({
                 }
               }}
             >
-              Today
+              {t("today")}
             </button>
             <button
               className="button small secondary"
               type="button"
               onClick={resetFilters}
             >
-              Clear filters
+              {t("clearFilters")}
             </button>
           </div>
           {(filterError || categoryError) && (
@@ -885,56 +907,61 @@ export function DailyExpensesWorkspace({
           <div
             className={`table-scroll ${styles.historyTable}`}
             tabIndex={0}
-            aria-label="Transaction history, scroll for more columns"
+            aria-label={t("historyScroll")}
           >
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Transaction date</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Description / note</th>
-                  <th scope="col">Amount</th>
-                  <th scope="col">Recorded by</th>
+                  <th scope="col">{t("transactionDate")}</th>
+                  <th scope="col">{t("type")}</th>
+                  <th scope="col">{t("category")}</th>
+                  <th scope="col">{t("note")}</th>
+                  <th scope="col">{t("amount")}</th>
+                  <th scope="col">{t("recordedBy")}</th>
                   {(canEditTransactions || canDeleteTransactions) && (
-                    <th scope="col">Actions</th>
+                    <th scope="col">{t("actions")}</th>
                   )}
                 </tr>
               </thead>
               <tbody>
                 {history.data.items.map((transaction) => (
                   <tr key={transaction.id}>
-                    <td data-label="Transaction date">
+                    <td data-label={t("transactionDate")}>
                       <time dateTime={transaction.date}>
-                        {dateLabel(transaction.date)}
+                        {dateLabel(transaction.date, locale)}
                       </time>
                     </td>
-                    <td data-label="Type">
+                    <td data-label={t("type")}>
                       {transaction.type === "BALANCE_ADDED"
-                        ? "Balance Added"
-                        : "Expense"}
+                        ? t("balanceAdded")
+                        : t("expense")}
                     </td>
-                    <td data-label="Category">
+                    <td data-label={t("category")}>
                       {transaction.category
-                        ? `${transaction.category.name}${transaction.category.archived ? " (archived)" : ""}`
+                        ? t("categoryLabel", {
+                            name: transaction.category.name,
+                            archived: transaction.category.archived
+                              ? "yes"
+                              : "no",
+                          })
                         : "—"}
                     </td>
-                    <td data-label="Description / note" className={styles.note}>
+                    <td data-label={t("note")} className={styles.note}>
                       {transaction.note || "—"}
                     </td>
-                    <td data-label="Amount" className={styles.amount}>
+                    <td data-label={t("amount")} className={styles.amount}>
                       {transaction.type === "BALANCE_ADDED" ? "+" : "−"}
                       {currency
-                        ? formatMoney(transaction.amount, currency)
+                        ? formatMoney(transaction.amount, currency, locale)
                         : transaction.amount}
                     </td>
-                    <td data-label="Recorded by">
+                    <td data-label={t("recordedBy")}>
                       {transaction.createdBy?.name ||
                         transaction.createdBy?.email ||
-                        DELETED_INFO}
+                        t("deletedInfo")}
                     </td>
                     {(canEditTransactions || canDeleteTransactions) && (
-                      <td data-label="Actions">
+                      <td data-label={t("actions")}>
                         <div className="buttons">
                           {canEditTransactions && (
                             <button
@@ -945,7 +972,8 @@ export function DailyExpensesWorkspace({
                               }
                               onClick={() => openSavedTransaction(transaction)}
                             >
-                              <Pencil size={14} /> Edit
+                              <Pencil size={14} />
+                              {t("edit")}
                             </button>
                           )}
                           {canDeleteTransactions && (
@@ -957,7 +985,8 @@ export function DailyExpensesWorkspace({
                               }
                               onClick={() => void confirmDeletion(transaction)}
                             >
-                              <Trash2 size={14} /> Delete
+                              <Trash2 size={14} />
+                              {t("delete")}
                             </button>
                           )}
                         </div>
@@ -972,17 +1001,17 @@ export function DailyExpensesWorkspace({
           <Empty
             title={
               hasFilters || page > 1
-                ? "No matching transactions"
+                ? t("noMatchingTransactions")
                 : canWrite
-                  ? "Your ledger is ready"
-                  : "No transactions yet"
+                  ? t("ledgerReady")
+                  : t("noTransactions")
             }
             description={
               hasFilters || page > 1
-                ? "Try changing the filters or returning to the first page."
+                ? t("changeFilters")
                 : canWrite
-                  ? "Add balance or record your first expense. The balance carries forward every day."
-                  : "Transactions will appear here when a super admin records them."
+                  ? t("firstExpenseDescription")
+                  : t("noTransactionsDescription")
             }
           />
         ) : null}
@@ -1001,47 +1030,53 @@ export function DailyExpensesWorkspace({
         canDeleteTransactions &&
         draft?.deleting &&
         draft.transaction && (
-          <Modal title="Deletion recovery" close={closeTransaction}>
+          <Modal title={t("deletionRecovery")} close={closeTransaction}>
             <form onSubmit={submit}>
               <p className={`muted ${styles.formIntro}`}>
-                This is the record you confirmed for permanent deletion. Review
-                the result below before retrying the same operation.
+                {t("deletionRecoveryDescription")}
               </p>
               <dl className={styles.deleteDetails}>
-                <dt>Type</dt>
+                <dt>{t("type")}</dt>
                 <dd>
-                  {draft.type === "EXPENSE" ? "Expense" : "Balance Added"}
+                  {draft.type === "EXPENSE" ? t("expense") : t("balanceAdded")}
                 </dd>
-                <dt>Amount</dt>
+                <dt>{t("amount")}</dt>
                 <dd>
                   {currency
-                    ? formatMoney(draft.amount, currency)
+                    ? formatMoney(draft.amount, currency, locale)
                     : draft.amount}
                 </dd>
-                <dt>Transaction date</dt>
+                <dt>{t("transactionDate")}</dt>
                 <dd>
-                  <time dateTime={draft.date}>{dateLabel(draft.date)}</time>
+                  <time dateTime={draft.date}>
+                    {dateLabel(draft.date, locale)}
+                  </time>
                 </dd>
                 {draft.transaction.category && (
                   <>
-                    <dt>Category</dt>
+                    <dt>{t("category")}</dt>
                     <dd>{draft.transaction.category.name}</dd>
                   </>
                 )}
-                <dt>Description / note</dt>
+                <dt>{t("note")}</dt>
                 <dd>{draft.note || "—"}</dd>
               </dl>
               <p className={styles.deleteImpact}>
                 {draft.type === "EXPENSE"
-                  ? `Deleting this expense will increase Current Balance by ${currency ? formatMoney(draft.amount, currency) : draft.amount}.`
-                  : `Deleting this balance addition will reduce Current Balance and Total Balance Added by ${currency ? formatMoney(draft.amount, currency) : draft.amount}. Current Balance may become negative.`}
+                  ? t("deleteExpenseImpact", {
+                      amount: currency
+                        ? formatMoney(draft.amount, currency, locale)
+                        : draft.amount,
+                    })
+                  : t("deleteBalanceImpact", {
+                      amount: currency
+                        ? formatMoney(draft.amount, currency, locale)
+                        : draft.amount,
+                    })}
               </p>
               <ErrorNotice message={formError} />
               {uncertain && (
-                <p className={styles.retryHelp}>
-                  Safe retry uses the same record and its original version. Keep
-                  this page open until the deletion is confirmed.
-                </p>
+                <p className={styles.retryHelp}>{t("safeDeleteHelp")}</p>
               )}
               <div className="form-actions">
                 <button
@@ -1051,10 +1086,10 @@ export function DailyExpensesWorkspace({
                   onClick={closeTransaction}
                 >
                   {conflict
-                    ? "Close and refresh"
+                    ? t("closeRefresh")
                     : uncertain
-                      ? "Keep pending"
-                      : "Cancel"}
+                      ? t("keepPending")
+                      : t("cancel")}
                 </button>
                 {!conflict && (
                   <button
@@ -1063,10 +1098,10 @@ export function DailyExpensesWorkspace({
                     disabled={busy}
                   >
                     {busy
-                      ? "Confirming…"
+                      ? t("confirming")
                       : uncertain
-                        ? "Safe retry"
-                        : "Retry deletion"}
+                        ? t("safeRetry")
+                        : t("retryDelete")}
                   </button>
                 )}
               </div>
@@ -1078,19 +1113,19 @@ export function DailyExpensesWorkspace({
           title={
             draft.transaction
               ? draft.type === "EXPENSE"
-                ? "Edit Expense"
-                : "Edit Balance"
+                ? t("editExpense")
+                : t("editBalance")
               : draft.type === "EXPENSE"
-                ? "Add Expense"
-                : "Add Balance"
+                ? t("addExpense")
+                : t("addBalance")
           }
           close={closeTransaction}
         >
           <form onSubmit={submit}>
             <p className={`muted ${styles.formIntro}`}>
               {draft.transaction
-                ? "Update this record. Its transaction type and original recorder stay the same. Balances update after the edit is confirmed."
-                : `${draft.type === "EXPENSE" ? "Record an expense, even if it takes the balance below zero." : "Record funds received into this ledger."} Only super admins can edit or delete saved transactions.`}
+                ? t("editDescription")
+                : t("newTransactionDescription", { type: draft.type })}
             </p>
             <ErrorNotice message={formError} />
             <fieldset
@@ -1098,7 +1133,9 @@ export function DailyExpensesWorkspace({
               disabled={locked || conflict}
             >
               <div className="field">
-                <label htmlFor="daily-amount">Amount ({currency})</label>
+                <label htmlFor="daily-amount">
+                  {t("amountCurrency", { currency: currency ?? "BDT" })}
+                </label>
                 <input
                   id="daily-amount"
                   name="amount"
@@ -1116,17 +1153,21 @@ export function DailyExpensesWorkspace({
                     setDraft({ ...draft, amount: event.target.value })
                   }
                 />
-                <small id="daily-amount-help">
-                  Positive amount, up to two decimal places. No commas.
-                </small>
+                <small id="daily-amount-help">{t("amountHelp")}</small>
                 {errors.amount && (
                   <span id="daily-amount-error" className={styles.fieldError}>
-                    {errors.amount.join(" ")}
+                    {errors.amount
+                      .map((message) =>
+                        typeof message === "string"
+                          ? localizeError(new Error(message), locale)
+                          : t(message.key, message.values),
+                      )
+                      .join(" ")}
                   </span>
                 )}
               </div>
               <div className="field">
-                <label htmlFor="daily-date">Transaction date</label>
+                <label htmlFor="daily-date">{t("transactionDate")}</label>
                 <input
                   id="daily-date"
                   name="date"
@@ -1145,17 +1186,27 @@ export function DailyExpensesWorkspace({
                   }
                 />
                 <small id="daily-date-help">
-                  Workspace timezone: {summary.data?.ledger.timezone}
+                  {t("workspaceTimezone", {
+                    timezone: summary.data?.ledger.timezone ?? "",
+                  })}
                 </small>
                 {errors.date && (
                   <span id="daily-date-error" className={styles.fieldError}>
-                    {errors.date.join(" ")}
+                    {errors.date
+                      .map((message) =>
+                        typeof message === "string"
+                          ? localizeError(new Error(message), locale)
+                          : t(message.key, message.values),
+                      )
+                      .join(" ")}
                   </span>
                 )}
               </div>
               {draft.type === "EXPENSE" && (
                 <div className="field full">
-                  <label htmlFor="daily-expense-category">Category</label>
+                  <label htmlFor="daily-expense-category">
+                    {t("category")}
+                  </label>
                   <select
                     id="daily-expense-category"
                     name="categoryId"
@@ -1169,13 +1220,13 @@ export function DailyExpensesWorkspace({
                       setDraft({ ...draft, categoryId: event.target.value })
                     }
                   >
-                    <option value="">Choose an active category</option>
+                    <option value="">{t("chooseActiveCategory")}</option>
                     {selectableCategories.map((category) => (
                       <option key={category.id} value={category.id}>
-                        {category.name}
-                        {category.archived
-                          ? " (archived, current category)"
-                          : ""}
+                        {t("currentCategoryLabel", {
+                          name: category.name,
+                          archived: category.archived ? "yes" : "no",
+                        })}
                       </option>
                     ))}
                   </select>
@@ -1184,30 +1235,33 @@ export function DailyExpensesWorkspace({
                       id="daily-category-error"
                       className={styles.fieldError}
                     >
-                      {errors.categoryId.join(" ")}
+                      {errors.categoryId
+                        .map((message) =>
+                          typeof message === "string"
+                            ? localizeError(new Error(message), locale)
+                            : t(message.key, message.values),
+                        )
+                        .join(" ")}
                     </span>
                   )}
                   {categoryError && <ErrorNotice message={categoryError} />}
                   {!categories.loading && selectableCategories.length === 0 && (
-                    <p>
-                      No active categories are available. Create or restore a
-                      category to record an expense.
-                    </p>
+                    <p>{t("noActiveCategories")}</p>
                   )}
                   <button
                     type="button"
                     className="button small secondary"
                     onClick={() => setCategoriesOpen(true)}
                   >
-                    Create or manage categories
+                    {t("manageCategories")}
                   </button>
                 </div>
               )}
               <div className="field full">
                 <label htmlFor="daily-note">
                   {draft.type === "EXPENSE"
-                    ? "Description / note (optional)"
-                    : "Note / source description (optional)"}
+                    ? t("optionalNote")
+                    : t("optionalSource")}
                 </label>
                 <textarea
                   id="daily-note"
@@ -1224,18 +1278,22 @@ export function DailyExpensesWorkspace({
                 />
                 {errors.note && (
                   <span id="daily-note-error" className={styles.fieldError}>
-                    {errors.note.join(" ")}
+                    {errors.note
+                      .map((message) =>
+                        typeof message === "string"
+                          ? localizeError(new Error(message), locale)
+                          : t(message.key, message.values),
+                      )
+                      .join(" ")}
                   </span>
                 )}
               </div>
             </fieldset>
             {uncertain && (
               <p className={styles.retryHelp}>
-                Safe retry uses the original amount, date, category, note, and
-                {draft.transaction
-                  ? " record version."
-                  : " submission key."}{" "}
-                Keep this page open until the save is confirmed.
+                {t("safeSaveHelp", {
+                  operation: draft.transaction ? "edit" : "create",
+                })}
               </p>
             )}
             <div className="form-actions">
@@ -1246,10 +1304,10 @@ export function DailyExpensesWorkspace({
                 onClick={closeTransaction}
               >
                 {conflict
-                  ? "Close and refresh"
+                  ? t("closeRefresh")
                   : uncertain
-                    ? "Keep pending"
-                    : "Cancel"}
+                    ? t("keepPending")
+                    : t("cancel")}
               </button>
               {!conflict && (
                 <button
@@ -1263,14 +1321,14 @@ export function DailyExpensesWorkspace({
                   }
                 >
                   {busy
-                    ? "Confirming…"
+                    ? t("confirming")
                     : uncertain
-                      ? "Safe retry"
+                      ? t("safeRetry")
                       : draft.transaction
-                        ? "Save changes"
+                        ? t("saveChanges")
                         : draft.type === "EXPENSE"
-                          ? "Save expense"
-                          : "Save balance addition"}
+                          ? t("saveExpense")
+                          : t("saveBalance")}
                 </button>
               )}
             </div>
@@ -1300,6 +1358,8 @@ function CategoryDialog({
   onCreated: (category: DailyExpenseCategoryDTO) => void;
   returningToExpense: boolean;
 }) {
+  const t = useTranslations("expenses");
+  const locale = useLocale();
   const query = useDailyExpensesCategoriesQuery(undefined, useFreshness());
   const categories = useQueryView(query);
   const [createCategory] = useCreateDailyExpenseCategoryMutation();
@@ -1310,8 +1370,8 @@ function CategoryDialog({
   );
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useExpenseFeedback();
+  const [message, setMessage] = useExpenseFeedback();
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1320,7 +1380,11 @@ function CategoryDialog({
       name: editing ? editing.name : name,
     });
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Enter a category name.");
+      setError(
+        parsed.error.issues[0]
+          ? { error: new Error(parsed.error.issues[0].message) }
+          : { key: "enterCategory" },
+      );
       return;
     }
     submitting.current = true;
@@ -1331,14 +1395,16 @@ function CategoryDialog({
       const category = editing
         ? await updateCategory({ id: editing.id, input: parsed.data }).unwrap()
         : await createCategory(parsed.data).unwrap();
-      setMessage(editing ? "Category renamed." : "Category created.");
+      setMessage(
+        editing ? { key: "categoryRenamed" } : { key: "categoryCreated" },
+      );
       if (!editing) {
         onCreated(category);
         setName("");
       }
       setEditing(null);
     } catch (error) {
-      setError(errorMessage(error));
+      setError({ error });
     } finally {
       submitting.current = false;
       setBusy(false);
@@ -1358,38 +1424,41 @@ function CategoryDialog({
       }).unwrap();
       setMessage(
         category.archived
-          ? "Category restored."
-          : "Category archived. Its transaction history is preserved.",
+          ? { key: "categoryRestored" }
+          : { key: "categoryArchived" },
       );
     } catch (error) {
-      setError(errorMessage(error));
+      setError({ error });
     } finally {
       submitting.current = false;
       setBusy(false);
     }
   }
 
-  const refreshError = readError(query.error, "categories", !!categories.data);
+  const refreshError = readError(
+    query.error,
+    t("categoriesSubject"),
+    !!categories.data,
+    t,
+    locale,
+  );
   return (
     <Modal
-      title="Categories"
+      title={t("categories")}
       close={() => {
         if (!busy) close();
       }}
     >
-      <p className={`muted ${styles.formIntro}`}>
-        Archived categories remain in history and filters. Only active
-        categories can be used for new expenses.
-      </p>
+      <p className={`muted ${styles.formIntro}`}>{t("categoryDescription")}</p>
       {message && <Notice notify>{message}</Notice>}
       {message && refreshError && (
-        <ErrorNotice message="Your category change was saved. Refresh the list to load the latest categories." />
+        <ErrorNotice message={t("categoryRefreshFailed")} />
       )}
       <ErrorNotice message={error || refreshError} />
       <form onSubmit={save} className={styles.categoryForm}>
         <div className="field">
           <label htmlFor="daily-category-name">
-            {editing ? "Rename category" : "New category"}
+            {editing ? t("renameCategory") : t("newCategory")}
           </label>
           <input
             id="daily-category-name"
@@ -1406,7 +1475,7 @@ function CategoryDialog({
           />
         </div>
         <button className="button" type="submit" disabled={busy}>
-          {busy ? "Saving…" : editing ? "Save name" : "Create category"}
+          {busy ? t("saving") : editing ? t("saveName") : t("createCategory")}
         </button>
         {editing && (
           <button
@@ -1415,19 +1484,20 @@ function CategoryDialog({
             disabled={busy}
             onClick={() => setEditing(null)}
           >
-            Cancel rename
+            {t("cancelRename")}
           </button>
         )}
       </form>
       <div className={styles.categoryHeading}>
-        <h3>All categories</h3>
+        <h3>{t("allCategories")}</h3>
         <button
           type="button"
           className="button small secondary"
           disabled={categories.isFetching}
           onClick={() => void categories.refresh()}
         >
-          <RefreshCw size={14} /> Refresh
+          <RefreshCw size={14} />
+          {t("refresh")}
         </button>
       </div>
       {categories.loading ? (
@@ -1439,14 +1509,14 @@ function CategoryDialog({
               <div className={styles.categoryName}>
                 <strong>{category.name}</strong>
                 <span className="muted">
-                  {category.archived ? "Archived" : "Active"}
+                  {category.archived ? t("archived") : t("active")}
                 </span>
               </div>
               <div className={`buttons ${styles.categoryButtons}`}>
                 <button
                   type="button"
                   className="button small secondary"
-                  aria-label={`Rename ${category.name}`}
+                  aria-label={t("renameCategoryLabel", { name: category.name })}
                   disabled={busy}
                   onClick={() => {
                     setEditing({ id: category.id, name: category.name });
@@ -1454,17 +1524,20 @@ function CategoryDialog({
                     document.getElementById("daily-category-name")?.focus();
                   }}
                 >
-                  Rename
+                  {t("rename")}
                 </button>
                 <button
                   type="button"
                   className="button small secondary"
-                  aria-label={`${category.archived ? "Restore" : "Archive"} ${category.name}`}
+                  aria-label={t("archiveCategoryLabel", {
+                    name: category.name,
+                    operation: category.archived ? "restore" : "archive",
+                  })}
                   disabled={busy}
                   onClick={() => void archive(category)}
                 >
                   <Archive size={13} />
-                  {category.archived ? "Restore" : "Archive"}
+                  {category.archived ? t("restore") : t("archive")}
                 </button>
               </div>
             </li>
@@ -1472,8 +1545,8 @@ function CategoryDialog({
         </ul>
       ) : categories.data ? (
         <Empty
-          title="No categories yet"
-          description="Create your first category above, then record an expense."
+          title={t("noCategories")}
+          description={t("noCategoriesDescription")}
         />
       ) : null}
       <div className="form-actions">
@@ -1483,7 +1556,7 @@ function CategoryDialog({
           disabled={busy}
           onClick={close}
         >
-          {returningToExpense ? "Back to expense" : "Done"}
+          {returningToExpense ? t("backToExpense") : t("done")}
         </button>
       </div>
     </Modal>

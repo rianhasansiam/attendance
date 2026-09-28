@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { AlertCircle } from "lucide-react";
 export default function ErrorPage({
   reset,
@@ -6,18 +7,19 @@ export default function ErrorPage({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations("common");
   return (
     <main className="login-page">
       <section className="login-card">
         <span className="login-mark">
           <AlertCircle size={36} />
         </span>
-        <h1>Something went wrong</h1>
+        <h1>{t("errorTitle")}</h1>
         <p className="muted" style={{ marginBottom: 25 }}>
-          We couldn’t load this page. Please try again in a moment.
+          {t("errorDescription")}
         </p>
         <button className="button" onClick={reset}>
-          Try again
+          {t("retry")}
         </button>
       </section>
     </main>

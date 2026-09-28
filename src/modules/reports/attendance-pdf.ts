@@ -1,42 +1,82 @@
-import { formatInTimeZone } from "date-fns-tz";
 import type { z } from "zod";
 import type { reportFilterSchema } from "@/modules/management/validation";
 import { addCalendarDays } from "@/modules/shifts/calculations";
 import type { ReportRecord } from "./service";
-import { DELETED_INFO } from "@/lib/deleted-info";
+import { resolveLocale } from "@/i18n/config";
+import { createReportTranslator } from "./translations";
 import { createReportPdf } from "./pdf";
-
-function duration(minutes: number) {
-  const magnitude = Math.abs(minutes);
-  return `${minutes < 0 ? "-" : ""}${Math.floor(magnitude / 60)}h ${magnitude % 60}m`;
-}
 
 export async function attendanceReportPdf(
   records: ReportRecord[],
   filters: z.infer<typeof reportFilterSchema>,
   now: Date,
+  selectedLocale = "en",
 ) {
+  const locale = resolveLocale(selectedLocale);
+  const t = createReportTranslator(locale);
+  const number = new Intl.NumberFormat(locale);
+  // Keep the existing ISO-shaped English export dates; date-only values always
+  // remain in UTC, while punches use each row's configured shift timezone.
+  const dateLocale = { en: "en-CA", "zh-CN": "zh-CN" }[locale];
+  const date = (value: Date, timeZone = "UTC") =>
+    new Intl.DateTimeFormat(dateLocale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone,
+    }).format(value);
+  const duration = (minutes: number) => {
+    const magnitude = Math.abs(minutes);
+    return t("attendance.duration", {
+      sign: minutes < 0 ? "-" : "",
+      hours: Math.floor(magnitude / 60),
+      minutes: magnitude % 60,
+    });
+  };
   const to = filters.to ?? now.toISOString().slice(0, 10);
   const from = filters.from ?? addCalendarDays(to, -29);
-  const subtitle = [`Date range: ${from} to ${to}`];
+  const subtitle = [
+    t("attendance.dateRange", {
+      from: date(new Date(`${from}T00:00:00Z`)),
+      to: date(new Date(`${to}T00:00:00Z`)),
+    }),
+  ];
   if (filters.employeeId) {
     const employee = records.find(
       (row) => row.employee?.id === filters.employeeId,
     )?.employee;
     subtitle.push(
-      `Employee: ${employee ? `${employee.user.name || employee.employeeCode} (${employee.employeeCode})` : "Selected employee"}`,
+      t("attendance.employee", {
+        name: employee
+          ? `${employee.user.name || employee.employeeCode} (${employee.employeeCode})`
+          : t("attendance.selectedEmployee"),
+      }),
     );
   }
   if (filters.departmentId)
     subtitle.push(
-      `Department: ${records[0]?.employee?.department?.name || "Selected department"}`,
+      t("attendance.department", {
+        name:
+          records[0]?.employee?.department?.name ||
+          t("attendance.selectedDepartment"),
+      }),
     );
   if (filters.officeId)
-    subtitle.push(`Office: ${records[0]?.office.name || "Selected office"}`);
+    subtitle.push(
+      t("attendance.office", {
+        name: records[0]?.office.name || t("attendance.selectedOffice"),
+      }),
+    );
   if (filters.shiftId)
-    subtitle.push(`Shift: ${records[0]?.shift.name || "Selected shift"}`);
+    subtitle.push(
+      t("attendance.shift", {
+        name: records[0]?.shift.name || t("attendance.selectedShift"),
+      }),
+    );
   if (filters.status)
-    subtitle.push(`Status: ${filters.status.replaceAll("_", " ")}`);
+    subtitle.push(
+      t("attendance.statusFilter", { status: t(`status.${filters.status}`) }),
+    );
 
   let worked = 0;
   let overtime = 0;
@@ -47,60 +87,68 @@ export async function attendanceReportPdf(
     else overtime += row.overtimeMinutes;
   }
   const bytes = await createReportPdf({
-    title: "Attendance report",
+    locale,
+    title: t("attendance.title"),
     subtitle,
     dateGroupColumn: 0,
     summary: [
-      { label: "Records", value: String(records.length) },
-      { label: "Total worked", value: duration(worked) },
+      { label: t("attendance.records"), value: number.format(records.length) },
+      { label: t("attendance.totalWorked"), value: duration(worked) },
       {
-        label: "Total overtime",
-        value: `${duration(overtime)} (${overtime} min)`,
+        label: t("attendance.totalOvertime"),
+        value: t("attendance.overtimeTotal", {
+          duration: duration(overtime),
+          minutes: overtime,
+        }),
       },
     ],
     columns: [
-      { label: "Date", width: 65 },
-      { label: "Employee / ID", width: 108 },
-      { label: "Office / Shift / Timezone", width: 106 },
-      { label: "Check in", width: 65 },
-      { label: "Check out", width: 65 },
-      { label: "Worked", width: 57 },
-      { label: "Overtime", width: 66 },
-      { label: "Actual late (min)", width: 40, align: "right" },
-      { label: "Status", width: 72 },
-      { label: "Late reason", width: 100 },
+      { label: t("attendance.date"), width: 65 },
+      { label: t("attendance.employeeId"), width: 108 },
+      { label: t("attendance.officeShiftTimezone"), width: 106 },
+      { label: t("attendance.checkIn"), width: 65 },
+      { label: t("attendance.checkOut"), width: 65 },
+      { label: t("attendance.worked"), width: 57 },
+      { label: t("attendance.overtime"), width: 66 },
+      { label: t("attendance.actualLate"), width: 40, align: "right" },
+      { label: t("attendance.status"), width: 72 },
+      { label: t("attendance.lateReason"), width: 100 },
     ],
     rows: records.map((row) => {
       const zone = row.shift.timezone;
       const approvalNote = row.isExcusedLate
-        ? "\nExcused late"
+        ? `\n${t("attendance.excusedLate")}`
         : row.lateApprovalStatus === "APPROVED"
-          ? "\nLate approval: approved\nApproval no longer matches attendance"
+          ? `\n${t("attendance.lateApproval", { status: t("approval.APPROVED") })}\n${t("attendance.approvalMismatch")}`
           : row.lateApprovalStatus
-            ? `\nLate approval: ${row.lateApprovalStatus.toLowerCase()}`
+            ? `\n${t("attendance.lateApproval", { status: t(`approval.${row.lateApprovalStatus}`) })}`
             : "";
       const punch = (value: Date | null) =>
         value
-          ? `${formatInTimeZone(value, zone, "yyyy-MM-dd")}\n${formatInTimeZone(value, zone, "HH:mm")}`
+          ? `${date(value, zone)}\n${new Intl.DateTimeFormat(locale, { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(value)}`
           : "-";
       return [
-        row.attendanceDate.toISOString().slice(0, 10),
+        date(row.attendanceDate),
         row.employee
           ? `${row.employee.user.name || row.employee.employeeCode}\n${row.employee.employeeCode}`
-          : DELETED_INFO,
+          : t("attendance.deleted"),
         `${row.office.name}\n${row.shift.name}\n${zone}`,
         punch(row.checkInAt),
         punch(row.checkOutAt),
         duration(row.workedMinutes),
         row.overtimeMinutes === null
-          ? "Unknown"
+          ? t("attendance.unknown")
           : duration(row.overtimeMinutes),
-        String(row.lateMinutes),
-        `${row.status.replaceAll("_", " ")}${approvalNote}${row.derived ? "\nScheduled day" : ""}`,
+        number.format(row.lateMinutes),
+        `${t(`status.${row.status}`)}${approvalNote}${row.derived ? `\n${t("attendance.scheduledDay")}` : ""}`,
         row.lateReason || "-",
       ];
     }),
-    footerNote: `Times use each row's shift timezone. Actual late minutes are retained; status reflects approved late requests. Positive overtime counts completed minutes after scheduled end, less actual late minutes. Negative overtime shows a work-hour shortfall.${unknown ? ` Total excludes ${unknown} record${unknown === 1 ? "" : "s"} with unknown overtime.` : ""}`,
+    footerNote:
+      t("attendance.footer") +
+      (unknown
+        ? ` ${t("attendance.unknownOvertime", { count: unknown })}`
+        : ""),
   });
   return new Response(new Uint8Array(bytes), {
     headers: {

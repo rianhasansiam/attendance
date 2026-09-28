@@ -1,10 +1,11 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { signOut } from "next-auth/react";
 import { api } from "@/lib/client/request";
 import { ErrorNotice } from "@/components/ui";
-import { errorMessage } from "@/store/api/errors";
+import { useErrorMessage } from "@/i18n/errors";
 import { useAppStore } from "@/store/hooks";
 import { clearWorkspaceData } from "@/store/make-store";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
@@ -15,6 +16,9 @@ import {
 } from "./password-fields";
 
 export function AccountPasswordForm() {
+  const t = useTranslations("auth");
+  const common = useTranslations("common");
+  const errorMessage = useErrorMessage();
   const store = useAppStore();
   const submitting = useRef(false);
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
@@ -35,7 +39,7 @@ export function AccountPasswordForm() {
         if (!controller.signal.aborted) setError(errorMessage(error));
       });
     return () => controller.abort();
-  }, [readAttempt]);
+  }, [readAttempt, errorMessage]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,7 +55,7 @@ export function AccountPasswordForm() {
       return;
     }
     if (hasPassword && !currentPassword) {
-      setError("Enter your current application password.");
+      setError(t("enterCurrentPassword"));
       return;
     }
     submitting.current = true;
@@ -98,12 +102,12 @@ export function AccountPasswordForm() {
                 setReadAttempt((attempt) => attempt + 1);
               }}
             >
-              Try again
+              {common("retry")}
             </button>
           </>
         ) : (
           <p className="muted" role="status">
-            Loading password settings…
+            {t("loadingPassword")}
           </p>
         )}
       </div>
@@ -115,35 +119,30 @@ export function AccountPasswordForm() {
       aria-labelledby="password-title"
     >
       <h2 id="password-title">
-        {hasPassword ? "Change password" : "Set password"}
+        {hasPassword ? t("changePassword") : t("setPassword")}
       </h2>
       <p className="auth-help">
-        {hasPassword
-          ? "You can sign in with Google or your application password."
-          : "Add an application password to sign in with email. Google sign-in will remain available."}{" "}
-        Use a separate password for XHYD, never your Google password.
+        {hasPassword ? t("hasPasswordHelp") : t("setPasswordHelp")}{" "}
+        {t("separatePassword")}
       </p>
       <form className="auth-form" onSubmit={submit} aria-busy={pending}>
         <ErrorNotice message={error} />
         {hasPassword && (
           <PasswordField
             name="currentPassword"
-            label="Current application password"
+            label={t("currentPassword")}
             autoComplete="current-password"
             disabled={pending}
           />
         )}
         <NewPasswordFields disabled={pending} />
-        <p className="auth-help">
-          Saving your password signs you out on all devices. Sign in again
-          afterward.
-        </p>
+        <p className="auth-help">{t("passwordSignOut")}</p>
         <button className="button" type="submit" disabled={pending}>
           {pending
-            ? "Saving…"
+            ? t("saving")
             : hasPassword
-              ? "Change password"
-              : "Set password"}
+              ? t("changePassword")
+              : t("setPassword")}
         </button>
       </form>
     </section>

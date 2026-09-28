@@ -1,3 +1,5 @@
+import { getLocale } from "next-intl/server";
+import { resolveLocale } from "@/i18n/config";
 import { api } from "@/lib/api";
 import { rateLimit } from "@/lib/security";
 import { authorizeDailyExpenseReport } from "@/modules/daily-expenses/permissions";
@@ -12,6 +14,7 @@ export function GET(request: Request) {
     return getDailyExpenseReport(
       actor,
       Object.fromEntries(new URL(request.url).searchParams),
+      resolveLocale(await getLocale()),
     );
   });
 }

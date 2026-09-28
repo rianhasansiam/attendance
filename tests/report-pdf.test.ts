@@ -29,6 +29,9 @@ async function readPdf(input: PdfReport) {
   const document = await loadingTask.promise;
   try {
     const pages: string[] = [];
+    const positionedText: Array<
+      Array<{ text: string; x: number; y: number; width: number }>
+    > = [];
     for (let number = 1; number <= document.numPages; number++) {
       const page = await document.getPage(number);
       const view = page.getViewport({ scale: 1 });
@@ -43,6 +46,14 @@ async function readPdf(input: PdfReport) {
         expect(item.transform[5]).toBeGreaterThan(10);
         expect(item.transform[5]).toBeLessThan(575);
       }
+      positionedText.push(
+        items.map((item) => ({
+          text: item.str,
+          x: item.transform[4],
+          y: item.transform[5],
+          width: item.width,
+        })),
+      );
       pages.push(
         items
           .map((item) => item.str)
@@ -50,7 +61,7 @@ async function readPdf(input: PdfReport) {
           .replace(/\s+/g, " "),
       );
     }
-    return { pages, metadata: await document.getMetadata() };
+    return { pages, positionedText, metadata: await document.getMetadata() };
   } finally {
     await loadingTask.destroy();
   }
@@ -66,7 +77,7 @@ describe("PDF report rendering", () => {
     expect(pages[0]).toContain("Total overtime");
     expect(pages[0].match(/0h 40m/g)).toHaveLength(2);
     expect(pages[0]).toContain("Traffic delay");
-    expect(pages[0]).toContain("1 records | Page 1 of 1");
+    expect(pages[0]).toContain("1 record | Page 1 of 1");
     expect(metadata.info).toMatchObject({ Title: "Attendance report" });
   });
 
@@ -115,5 +126,146 @@ describe("PDF report rendering", () => {
     expect(pages).toHaveLength(1);
     expect(pages[0]).toContain("No records match the selected filters.");
     expect(pages[0]).toContain("0 records | Page 1 of 1");
+  });
+});
+
+const chineseReport: PdfReport = {
+  locale: "zh-CN",
+  title: "考勤报表 / Attendance report",
+  subtitle: [
+    "日期范围：2026/09/01 至 2026/09/30",
+    "员工：张明 / Mohammed Rahim / মোহাম্মদ রহিম",
+    "办公室：达卡办公室 · Asia/Dhaka",
+  ],
+  summary: [
+    { label: "记录数", value: "2" },
+    { label: "总工作时长", value: "16 小时 40 分钟" },
+    { label: "总加班时长", value: "-1 小时 20 分钟（-80 分钟）" },
+  ],
+  columns: [
+    { label: "日期 / Date", width: 1 },
+    { label: "员工 / Employee", width: 2 },
+    { label: "迟到原因 / Reason", width: 3 },
+    { label: "加班 / Overtime", width: 1, align: "right" },
+  ],
+  rows: [
+    [
+      "2026/09/22",
+      "张明 / Zhang Ming",
+      "交通拥堵，公交车延误。Traffic delay.",
+      "0 小时 40 分钟",
+    ],
+    [
+      "2026/09/23",
+      "মোহাম্মদ রহিম",
+      "ঢাকা 办公室 / Dhaka office",
+      "-2 小时 0 分钟",
+    ],
+  ],
+  footerNote:
+    "时间按每条记录的班次时区显示。保留实际迟到分钟数，状态反映已批准的迟到申请。",
+};
+
+describe("multilingual PDF fonts and wrapping", () => {
+  it("embeds Chinese, English and Bengali glyphs with localized headers and page numbers", async () => {
+    const { pages, metadata } = await readPdf(chineseReport);
+    expect(pages).toHaveLength(1);
+    const text = pages[0].replace(/\s/g, "");
+    for (const value of [
+      "考勤报表/Attendancereport",
+      "张明/ZhangMing",
+      "ঢাকা办公室/Dhakaoffice",
+      "交通拥堵，公交车延误。Trafficdelay.",
+      "-2小时0分钟",
+      "XHYD考勤系统",
+      "共2条记录|第1页，共1页",
+    ])
+      expect(text).toContain(value);
+    expect(text).not.toMatch(/[\u0000\uFFFD]/);
+    // PDF text extraction returns Bengali shaped clusters in visual order. Its
+    // decomposed glyph inventory must still preserve every stored character.
+    const bengaliGlyphs = (value: string) =>
+      Array.from(value.normalize("NFD"))
+        .filter((char) => /\p{Script=Bengali}/u.test(char))
+        .sort();
+    expect(bengaliGlyphs(text)).toEqual(
+      bengaliGlyphs("মোহাম্মদ রহিম মোহাম্মদ রহিম ঢাকা"),
+    );
+    expect(metadata.info).toMatchObject({
+      Title: chineseReport.title,
+      Author: "XHYD 考勤系统",
+    });
+  });
+
+  it("wraps long unbroken Chinese rows across pages without losing glyphs or cell boundaries", async () => {
+    const marker = "因公共交通延误而迟到需要提交说明";
+    const { pages, positionedText } = await readPdf({
+      ...chineseReport,
+      rows: [
+        [
+          "2026/09/22",
+          "张明 / Zhang Ming",
+          marker.repeat(160) + "最后一项说明已完整保留",
+          "0 小时 40 分钟",
+        ],
+      ],
+    });
+    expect(pages.length).toBeGreaterThan(2);
+    const text = pages.join("").replace(/\s/g, "");
+    const contentWidth = 841.89 - 72;
+    const reasonStart = 36 + (contentWidth * 3) / 7 + 7;
+    const reasonEnd = 36 + (contentWidth * 6) / 7 - 7;
+    const reasonText = positionedText
+      .flat()
+      .filter(
+        (item) =>
+          Math.abs(item.x - reasonStart) < 0.1 &&
+          item.x < reasonEnd &&
+          item.y > 50 &&
+          item.text !== "迟到原因",
+      )
+      .map((item) => item.text)
+      .join("")
+      .replace(/[\sA-Za-z/]/g, "");
+    expect(reasonText).toBe(marker.repeat(160) + "最后一项说明已完整保留");
+    for (const item of positionedText
+      .flat()
+      .filter(
+        (item) =>
+          Math.abs(item.x - reasonStart) < 0.1 &&
+          item.x < reasonEnd &&
+          item.y > 50,
+      )) {
+      expect(item.x + item.width).toBeLessThanOrEqual(reasonEnd + 0.1);
+    }
+    expect(pages.at(-1)?.replace(/\s/g, "")).toContain(
+      "最后一项说明已完整保留",
+    );
+    expect(text).toContain("（续）");
+    pages.forEach((page, index) => {
+      const compact = page.replace(/\s/g, "");
+      expect(compact).toContain(
+        "日期/Date员工/Employee迟到原因/Reason加班/Overtime",
+      );
+      expect(compact).toContain(
+        `共1条记录|第${index + 1}页，共${pages.length}页`,
+      );
+    });
+  });
+
+  it("preserves Chinese user content in English exports and localizes empty Chinese reports", async () => {
+    const english = await readPdf({
+      ...report,
+      rows: [["2026-09-22", "张明", "交通延误 / ঢাকা", "0h 40m"]],
+    });
+    expect(english.pages[0].replace(/\s/g, "")).toContain("交通延误/ঢাকা");
+    expect(english.pages[0]).toContain("1 record | Page 1 of 1");
+    const chinese = await readPdf({ ...chineseReport, rows: [], summary: [] });
+    expect(chinese.pages[0].replace(/\s/g, "")).toContain(
+      "没有符合所选筛选条件的记录。",
+    );
+    expect(chinese.pages[0].replace(/\s/g, "")).toContain(
+      "共0条记录|第1页，共1页",
+    );
   });
 });

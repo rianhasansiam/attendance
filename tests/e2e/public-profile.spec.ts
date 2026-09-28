@@ -140,7 +140,7 @@ test("an anonymous visitor sees the public employee details without private data
     "Blood group": publicDetails.bloodGroup,
     Department: publicDetails.publicDepartment,
     "Home address": publicDetails.homeAddress,
-    "Date of birth": "15 January 1995",
+    "Date of birth": "January 15, 1995",
   });
   await expect(page.locator("dt")).toHaveCount(6);
   await expect(
@@ -191,13 +191,14 @@ test("an anonymous visitor sees the public employee details without private data
 test("a legacy ID link redirects to the name-based profile URL", async ({
   page,
 }) => {
-  const { user } = await profileFixture({ name: "Rian Hasan Siam " });
-  expect(user.profileSlug).toBe("rian_hasan_siam");
+  const suffix = randomUUID().replaceAll("-", "");
+  const name = `Rian Hasan Siam ${suffix}`;
+  const slug = `rian_hasan_siam_${suffix}`;
+  const { user } = await profileFixture({ name: `${name} ` });
+  expect(user.profileSlug).toBe(slug);
   await page.goto(`/profile/${user.id}`);
-  await expect(page).toHaveURL(`${origin}/profile/rian_hasan_siam`);
-  await expect(
-    page.getByRole("heading", { name: "Rian Hasan Siam", exact: true }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(`${origin}/profile/${slug}`);
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
 });
 
 test("an anonymous visitor can view an administrator without an employee record", async ({
@@ -389,7 +390,7 @@ test("Super Admin edits every public detail and anonymous visitors see the saved
       "Blood group": changes.bloodGroup,
       Department: changes.publicDepartment,
       "Home address": changes.homeAddress,
-      "Date of birth": "29 February 1992",
+      "Date of birth": "February 29, 1992",
     });
     const publicHtml = await anonymousContext.request
       .get(`${origin}${path}`)

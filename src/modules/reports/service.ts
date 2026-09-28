@@ -555,7 +555,7 @@ export async function getAdminDashboard(actor: Actor, now = new Date()) {
   };
 }
 
-export async function getReport(actor: Actor, filters: Filters) {
+export async function getReport(actor: Actor, filters: Filters, locale = "en") {
   authorizeRole(actor.role, "ADMIN");
   const now = new Date();
   const entries = await reportEntries(filters, now);
@@ -588,5 +588,5 @@ export async function getReport(actor: Actor, filters: Filters) {
     );
   const records = await hydrateEntries(entries);
   const { attendanceReportPdf } = await import("./attendance-pdf");
-  return attendanceReportPdf(records, filters, now);
+  return attendanceReportPdf(records, filters, now, locale);
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations, useLocale } from "next-intl";
 import { useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
@@ -29,7 +30,7 @@ import {
   type DataRow,
 } from "./ui";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
-import { errorMessage } from "@/store/api/errors";
+import { useErrorMessage } from "@/i18n/errors";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
 import { useFreshness } from "@/store/freshness";
 import { useQueryView } from "@/store/use-query-view";
@@ -48,24 +49,27 @@ import type {
   CorrectionInput,
   ReportFilters,
 } from "@/store/features/reports/contracts";
+import { adminOptionLabel, type AdminTranslator } from "./resource-config";
 import { FormField, Modal } from "./resource-workspace";
 import { PdfDownloadButton } from "./pdf-download-button";
 
 export function AdminDashboard() {
+  const t = useTranslations("admin");
+  const locale = useLocale();
   const result = useGetAdminDashboardQuery(undefined, useFreshness(true));
   const { data, error, loading, refresh, isFetching } = useQueryView(result);
   return (
     <>
       <PageHeader
-        eyebrow="YOUR WORKPLACE, AT A GLANCE"
-        title="A good day starts here."
-        description="A little clarity on your people and their workday."
+        eyebrow={t("dashboard.eyebrow")}
+        title={t("dashboard.title")}
+        description={t("dashboard.description")}
         action={
           <div className="buttons">
             <Refresh onClick={refresh} />
             <Link className="button" href="/admin/reports">
               <Download size={15} />
-              View reports
+              {t("dashboard.viewReports")}
             </Link>
           </div>
         }
@@ -78,27 +82,27 @@ export function AdminDashboard() {
           <div className="stats-grid">
             <Metric
               featured
-              title="Total employees"
-              value={data.totalEmployees}
-              note="Active people in your workspace"
+              title={t("dashboard.totalEmployees")}
+              value={new Intl.NumberFormat(locale).format(data.totalEmployees)}
+              note={t("dashboard.activePeople")}
               icon={<Users size={18} />}
             />
             <Metric
-              title="Present today"
-              value={data.presentToday}
-              note="People with recorded attendance"
+              title={t("dashboard.presentToday")}
+              value={new Intl.NumberFormat(locale).format(data.presentToday)}
+              note={t("dashboard.recordedPeople")}
               icon={<CalendarCheck2 size={18} />}
             />
             <Metric
-              title="Late arrivals"
-              value={data.lateToday}
-              note="Unexcused arrivals beyond shift grace time"
+              title={t("dashboard.lateArrivals")}
+              value={new Intl.NumberFormat(locale).format(data.lateToday)}
+              note={t("dashboard.lateNote")}
               icon={<Clock3 size={18} />}
             />
             <Metric
-              title="Absent today"
-              value={data.absentToday}
-              note="Scheduled, with no attendance recorded"
+              title={t("dashboard.absentToday")}
+              value={new Intl.NumberFormat(locale).format(data.absentToday)}
+              note={t("dashboard.absentNote")}
               icon={<Users size={18} />}
             />
           </div>
@@ -106,18 +110,18 @@ export function AdminDashboard() {
             <section className="card">
               <div className="card-header">
                 <div>
-                  <h2>Today’s attendance</h2>
-                  <p>Refreshes periodically while this view is active.</p>
+                  <h2>{t("dashboard.todayAttendance")}</h2>
+                  <p>{t("dashboard.refreshNote")}</p>
                 </div>
                 <span
                   className={`badge ${error ? "amber" : "green"}`}
                   role="status"
                 >
                   {isFetching
-                    ? "Refreshing…"
+                    ? t("common.refreshing")
                     : error
-                      ? "Refresh needed"
-                      : "Latest loaded overview"}
+                      ? t("dashboard.refreshNeeded")
+                      : t("dashboard.latestOverview")}
                 </span>
               </div>
               <div className="card-body">
@@ -130,28 +134,36 @@ export function AdminDashboard() {
                 >
                   <div>
                     <span className="muted" style={{ fontSize: 12 }}>
-                      Currently checked in
+                      {t("dashboard.currentlyCheckedIn")}
                     </span>
-                    <div className="stat-value">{data.currentlyCheckedIn}</div>
-                    <p className="stat-note">Workdays in progress</p>
+                    <div className="stat-value">
+                      {new Intl.NumberFormat(locale).format(
+                        data.currentlyCheckedIn,
+                      )}
+                    </div>
+                    <p className="stat-note">{t("dashboard.inProgress")}</p>
                   </div>
                   <div>
                     <span className="muted" style={{ fontSize: 12 }}>
-                      Checked out
+                      {t("dashboard.checkedOut")}
                     </span>
-                    <div className="stat-value">{data.checkedOut}</div>
-                    <p className="stat-note">Workdays completed</p>
+                    <div className="stat-value">
+                      {new Intl.NumberFormat(locale).format(data.checkedOut)}
+                    </div>
+                    <p className="stat-note">{t("dashboard.completed")}</p>
                   </div>
                 </div>
                 <div className="progress-row">
-                  <span>Attendance recorded</span>
+                  <span>{t("dashboard.attendanceRecorded")}</span>
                   <strong>
-                    {data.totalEmployees
-                      ? Math.round(
-                          (data.presentToday / data.totalEmployees) * 100,
-                        )
-                      : 0}
-                    %
+                    {new Intl.NumberFormat(locale, {
+                      style: "percent",
+                      maximumFractionDigits: 0,
+                    }).format(
+                      data.totalEmployees
+                        ? data.presentToday / data.totalEmployees
+                        : 0,
+                    )}
                   </strong>
                 </div>
                 <div className="progress-track">
@@ -162,41 +174,40 @@ export function AdminDashboard() {
                   />
                 </div>
                 <p className="muted" style={{ fontSize: 10, marginTop: 15 }}>
-                  Each employee’s day follows their office timezone and assigned
-                  schedule.
+                  {t("dashboard.timezoneNote")}
                 </p>
               </div>
             </section>
             <section className="card">
               <div className="card-header">
-                <h2>A few useful shortcuts</h2>
+                <h2>{t("dashboard.shortcuts")}</h2>
                 <ArrowUpRight size={17} color="#88987f" />
               </div>
               <div className="card-body">
                 <div className="quick-links">
                   <Link className="quick-link" href="/admin/employees">
                     <Users size={17} />
-                    Employees
+                    {t("labels.employees")}
                     <ArrowUpRight size={12} />
                   </Link>
                   <Link className="quick-link" href="/admin/devices">
                     <Fingerprint size={17} />
-                    Devices
+                    {t("labels.devices")}
                     <ArrowUpRight size={12} />
                   </Link>
                   <Link className="quick-link" href="/admin/leaves">
                     <CalendarCheck2 size={17} />
-                    Leave requests
+                    {t("labels.leaveRequests")}
                     <ArrowUpRight size={12} />
                   </Link>
                   <Link className="quick-link" href="/admin/late-approvals">
                     <Clock3 size={17} />
-                    Late approvals
+                    {t("labels.lateApprovals")}
                     <ArrowUpRight size={12} />
                   </Link>
                   <Link className="quick-link" href="/admin/shifts">
                     <Clock3 size={17} />
-                    Shifts
+                    {t("labels.shifts")}
                     <ArrowUpRight size={12} />
                   </Link>
                 </div>
@@ -206,28 +217,44 @@ export function AdminDashboard() {
           <section className="card">
             <div className="card-header">
               <div>
-                <h2>Recent check-ins</h2>
-                <p>The latest attendance activity across your offices.</p>
+                <h2>{t("dashboard.recentCheckIns")}</h2>
+                <p>{t("dashboard.recentNote")}</p>
               </div>
               <Link href="/admin/attendance" className="button-link">
-                View all
+                {t("common.viewAll")}
                 <ArrowUpRight size={15} />
               </Link>
             </div>
             <Table
               rows={data.recentAttendance}
               columns={[
-                { key: "employee.user.name", label: "Employee" },
-                { key: "office.name", label: "Office" },
-                { key: "checkInAt", label: "Check in", format: "time" },
-                { key: "checkOutAt", label: "Check out", format: "time" },
+                { key: "employee.user.name", label: t("labels.employee") },
+                { key: "office.name", label: t("labels.office") },
+                {
+                  key: "checkInAt",
+                  label: t("labels.checkIn"),
+                  format: "time",
+                },
+                {
+                  key: "checkOutAt",
+                  label: t("labels.checkOut"),
+                  format: "time",
+                },
                 {
                   key: "overtimeMinutes",
-                  label: "Overtime",
+                  label: t("labels.overtime"),
                   format: "nullable-duration",
                 },
-                { key: "status", label: "Status", format: "attendance-status" },
-                { key: "lateReason", label: "Late reason", format: "text" },
+                {
+                  key: "status",
+                  label: t("labels.status"),
+                  format: "attendance-status",
+                },
+                {
+                  key: "lateReason",
+                  label: t("labels.lateReason"),
+                  format: "text",
+                },
               ]}
             />
           </section>
@@ -238,22 +265,30 @@ export function AdminDashboard() {
     </>
   );
 }
-const reportColumns = [
-  { key: "employee.user.name", label: "Employee" },
-  { key: "attendanceDate", label: "Date", format: "date" as const },
-  { key: "office.name", label: "Office" },
-  { key: "shift.name", label: "Shift" },
-  { key: "checkInAt", label: "Check in", format: "time" as const },
-  { key: "checkOutAt", label: "Check out", format: "time" as const },
-  { key: "workedMinutes", label: "Worked", format: "duration" as const },
+const getReportColumns = (t: AdminTranslator) => [
+  { key: "employee.user.name", label: t("labels.employee") },
+  { key: "attendanceDate", label: t("labels.date"), format: "date" as const },
+  { key: "office.name", label: t("labels.office") },
+  { key: "shift.name", label: t("labels.shift") },
+  { key: "checkInAt", label: t("labels.checkIn"), format: "time" as const },
+  { key: "checkOutAt", label: t("labels.checkOut"), format: "time" as const },
+  {
+    key: "workedMinutes",
+    label: t("labels.worked"),
+    format: "duration" as const,
+  },
   {
     key: "overtimeMinutes",
-    label: "Overtime",
+    label: t("labels.overtime"),
     format: "nullable-duration" as const,
   },
-  { key: "lateMinutes", label: "Actual late (min)" },
-  { key: "status", label: "Status", format: "attendance-status" as const },
-  { key: "lateReason", label: "Late reason", format: "text" as const },
+  { key: "lateMinutes", label: t("labels.actualLate") },
+  {
+    key: "status",
+    label: t("labels.status"),
+    format: "attendance-status" as const,
+  },
+  { key: "lateReason", label: t("labels.lateReason"), format: "text" as const },
 ];
 export function AdminReports({
   attendance = false,
@@ -263,6 +298,10 @@ export function AdminReports({
   employeeId?: string;
   canCorrectAttendance?: boolean;
 }) {
+  const t = useTranslations("admin");
+  const locale = useLocale();
+  const reportColumns = getReportColumns(t);
+  const errorMessage = useErrorMessage();
   const { params, update } = useUrlFilters();
   const filterKeys = [
     "employeeId",
@@ -286,7 +325,9 @@ export function AdminReports({
   const submitting = useRef(false);
   const [needsReconcile, setNeedsReconcile] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<
+    "" | "reports.corrected" | "settings.saved"
+  >("");
   const result = useGetAdminReportQuery(
     { ...filters, page, pageSize: 25 },
     useFreshness(attendance),
@@ -351,9 +392,7 @@ export function AdminReports({
           : { id: String(editing.id), body: payload },
       ).unwrap();
       setEditing(null);
-      setMessage(
-        "Attendance updated. The correction has been added to the audit log.",
-      );
+      setMessage("reports.corrected");
     } catch (error) {
       setActionError(errorMessage(error));
       if (isAmbiguousWrite(error)) {
@@ -375,12 +414,14 @@ export function AdminReports({
   return (
     <>
       <PageHeader
-        eyebrow={attendance ? "DAILY RECORDS" : "INSIGHTS & EXPORTS"}
-        title={attendance ? "Attendance" : "Attendance reports"}
+        eyebrow={
+          attendance ? t("reports.dailyRecords") : t("reports.insightsExports")
+        }
+        title={attendance ? t("reports.attendance") : t("reports.title")}
         description={
           attendance
-            ? "Every workday, accounted for."
-            : "Turn everyday records into a clearer picture."
+            ? t("reports.attendanceDescription")
+            : t("reports.description")
         }
         action={
           <div className="buttons">
@@ -395,16 +436,14 @@ export function AdminReports({
       />
       <ErrorNotice message={error || (!editing ? actionError : "")} />
       {needsReconcile && !editing && (
-        <Notice>
-          Refresh attendance successfully before another correction.
-        </Notice>
+        <Notice>{t("reports.refreshBeforeCorrection")}</Notice>
       )}
-      {message && <Notice notify>{message}</Notice>}
+      {message && <Notice notify>{t(message)}</Notice>}
       <section className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <div>
-            <h2>Find the right perspective</h2>
-            <p>Filter up to 93 days. The last 30 days are shown by default.</p>
+            <h2>{t("reports.filtersTitle")}</h2>
+            <p>{t("reports.filtersDescription")}</p>
           </div>
         </div>
         <form
@@ -425,7 +464,7 @@ export function AdminReports({
               row={filters}
               field={{
                 name: "employeeId",
-                label: "Employee",
+                label: t("labels.employee"),
                 resource: "employees",
               }}
             />
@@ -433,34 +472,46 @@ export function AdminReports({
               row={filters}
               field={{
                 name: "departmentId",
-                label: "Department",
+                label: t("labels.department"),
                 resource: "departments",
               }}
             />
             <FormField
               row={filters}
-              field={{ name: "officeId", label: "Office", resource: "offices" }}
+              field={{
+                name: "officeId",
+                label: t("labels.office"),
+                resource: "offices",
+              }}
             />
             <FormField
               row={filters}
-              field={{ name: "shiftId", label: "Shift", resource: "shifts" }}
+              field={{
+                name: "shiftId",
+                label: t("labels.shift"),
+                resource: "shifts",
+              }}
             />
             <FormField
               row={filters}
-              field={{ name: "from", label: "From date", type: "date" }}
+              field={{
+                name: "from",
+                label: t("labels.fromDate"),
+                type: "date",
+              }}
             />
             <FormField
               row={filters}
-              field={{ name: "to", label: "To date", type: "date" }}
+              field={{ name: "to", label: t("labels.toDate"), type: "date" }}
             />
             <div className="field">
-              <label htmlFor="status-filter">Status</label>
+              <label htmlFor="status-filter">{t("labels.status")}</label>
               <select
                 id="status-filter"
                 name="status"
                 defaultValue={filters.status || ""}
               >
-                <option value="">All statuses</option>
+                <option value="">{t("reports.allStatuses")}</option>
                 {[
                   "PRESENT",
                   "LATE",
@@ -470,40 +521,48 @@ export function AdminReports({
                   "HOLIDAY",
                   "WEEKEND",
                 ].map((status) => (
-                  <option key={status}>{status}</option>
+                  <option key={status} value={status}>
+                    {adminOptionLabel(t, status)}
+                  </option>
                 ))}
               </select>
             </div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
               <button className="button" type="submit">
-                Apply filters
+                {t("reports.applyFilters")}
               </button>
               <button type="reset" className="button secondary">
-                Reset
+                {t("common.reset")}
               </button>
             </div>
           </div>
         </form>
       </section>
       {data && (
-        <section aria-label="Overtime summary" style={{ marginBottom: 24 }}>
+        <section
+          aria-label={t("reports.overtimeSummary")}
+          style={{ marginBottom: 24 }}
+        >
           <Metric
-            title="Total overtime"
-            value={duration(data.summary.overtimeMinutes)}
-            note={`Across all ${data.total} matching records in the selected date range. Positive values show overtime; negative values show a work-hour shortfall.${
-              data.summary.unknownOvertimeRecords > 0
-                ? ` Excludes ${data.summary.unknownOvertimeRecords} ${data.summary.unknownOvertimeRecords === 1 ? "record" : "records"} with unknown overtime.`
-                : ""
-            }`}
+            title={t("reports.totalOvertime")}
+            value={duration(data.summary.overtimeMinutes, locale)}
+            note={t("reports.overtimeNote", {
+              count: data.total,
+              unknown: data.summary.unknownOvertimeRecords,
+            })}
             icon={<Clock3 size={18} />}
           />
         </section>
       )}
       <section className="card">
         <div className="card-header">
-          <h2>{attendance ? "Attendance records" : "Report results"}</h2>
+          <h2>
+            {attendance ? t("reports.attendanceRecords") : t("reports.results")}
+          </h2>
           <span className="muted" role="status" style={{ fontSize: 12 }}>
-            {isFetching && data ? "Refreshing…" : `${data?.total || 0} records`}
+            {isFetching && data
+              ? t("common.refreshing")
+              : t("common.records", { count: data?.total || 0 })}
           </span>
         </div>
         {loading ? (
@@ -518,7 +577,7 @@ export function AdminReports({
                 ? (row) =>
                     row.employee ? (
                       <button
-                        aria-label="Correct attendance"
+                        aria-label={t("reports.correctAttendance")}
                         disabled={busy || needsReconcile || isFetching}
                         className="icon-button"
                         onClick={() => {
@@ -534,7 +593,7 @@ export function AdminReports({
           />
         )}
         <div className="pagination">
-          <span>Page {page} · Times shown in your browser timezone</span>
+          <span>{t("reports.page", { page })}</span>
           <div className="buttons">
             <button
               className="button small secondary"
@@ -542,14 +601,14 @@ export function AdminReports({
               onClick={() => setPage(page - 1)}
             >
               <ArrowLeft size={13} />
-              Previous
+              {t("common.previous")}
             </button>
             <button
               className="button small secondary"
               disabled={page * 25 >= (data?.total || 0) || loading}
               onClick={() => setPage(page + 1)}
             >
-              Next
+              {t("common.next")}
               <ArrowRight size={13} />
             </button>
           </div>
@@ -557,7 +616,7 @@ export function AdminReports({
       </section>
       {canCorrectAttendance && editing && (
         <Modal
-          title="Correct attendance"
+          title={t("reports.correctAttendance")}
           close={() => {
             if (!busy) setEditing(null);
           }}
@@ -566,29 +625,25 @@ export function AdminReports({
             <ErrorNotice message={actionError} />
             {needsReconcile && (
               <>
-                <Notice>
-                  The result is uncertain. Refresh attendance before another
-                  correction.
-                </Notice>
+                <Notice>{t("reports.uncertainCorrection")}</Notice>
                 <button
                   type="button"
                   className="button secondary"
                   onClick={() => void refreshReport()}
                 >
-                  Refresh attendance
+                  {t("reports.refreshAttendance")}
                 </button>
               </>
             )}
             <p className="muted" style={{ fontSize: 12, marginBottom: 22 }}>
-              Corrections are recorded in the audit log. Enter times in your
-              browser’s local timezone.
+              {t("reports.correctionHint")}
             </p>
             <div className="form-grid">
               <FormField
                 row={{ checkInAt: localDate(editing.checkInAt) }}
                 field={{
                   name: "checkInAt",
-                  label: "Check in",
+                  label: t("labels.checkIn"),
                   type: "datetime-local",
                 }}
               />
@@ -596,7 +651,7 @@ export function AdminReports({
                 row={{ checkOutAt: localDate(editing.checkOutAt) }}
                 field={{
                   name: "checkOutAt",
-                  label: "Check out",
+                  label: t("labels.checkOut"),
                   type: "datetime-local",
                 }}
               />
@@ -607,7 +662,7 @@ export function AdminReports({
                 }}
                 field={{
                   name: "status",
-                  label: "Attendance status",
+                  label: t("labels.attendanceStatus"),
                   type: "select",
                   options: [
                     "PRESENT",
@@ -621,7 +676,9 @@ export function AdminReports({
                 }}
               />
               <div className="field full">
-                <label htmlFor="correction-reason">Reason for correction</label>
+                <label htmlFor="correction-reason">
+                  {t("reports.correctionReason")}
+                </label>
                 <textarea
                   required
                   minLength={10}
@@ -638,14 +695,14 @@ export function AdminReports({
                 className="button secondary"
                 onClick={() => setEditing(null)}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 disabled={busy || needsReconcile || isFetching}
                 type="submit"
                 className="button"
               >
-                {busy ? "Saving…" : "Save correction"}
+                {busy ? t("common.saving") : t("reports.saveCorrection")}
               </button>
             </div>
           </form>
@@ -655,6 +712,8 @@ export function AdminReports({
   );
 }
 export function AdminSettings() {
+  const t = useTranslations("admin");
+  const errorMessage = useErrorMessage();
   const result = useGetManagementQuery(
     { resource: "settings", params: { page: 1, pageSize: 100 } },
     useFreshness(),
@@ -673,7 +732,9 @@ export function AdminSettings() {
     }
   }
   const [actionError, setActionError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<
+    "" | "reports.corrected" | "settings.saved"
+  >("");
   const settings = items(data);
   const organization = (settings.find((row) => row.key === "organization")
     ?.value || {}) as DataRow;
@@ -708,7 +769,7 @@ export function AdminSettings() {
         method: "POST",
         body: { key, value },
       }).unwrap();
-      setMessage("Workspace settings saved.");
+      setMessage("settings.saved");
     } catch (error) {
       setActionError(errorMessage(error));
       if (isAmbiguousWrite(error)) {
@@ -723,24 +784,22 @@ export function AdminSettings() {
   return (
     <>
       <PageHeader
-        eyebrow="SUPER ADMIN"
-        title="Workspace settings"
-        description="A secure foundation for your organization."
+        eyebrow={t("settings.superAdmin")}
+        title={t("settings.title")}
+        description={t("settings.description")}
         action={<Refresh onClick={() => void refreshSettings()} />}
       />
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing…
+          {t("common.refreshing")}
         </p>
       )}
       <ErrorNotice message={error || actionError} />
-      {needsReconcile && (
-        <Notice>Refresh settings successfully before another change.</Notice>
-      )}
+      {needsReconcile && <Notice>{t("settings.refreshBeforeChange")}</Notice>}
       {message && (
         <Notice notify>
           <Check size={16} />
-          {message}
+          {t(message)}
         </Notice>
       )}
       {loading ? (
@@ -750,8 +809,8 @@ export function AdminSettings() {
           <section className="card">
             <div className="card-header">
               <div>
-                <h2>Organization</h2>
-                <p>The basics of your workspace.</p>
+                <h2>{t("settings.organization")}</h2>
+                <p>{t("settings.organizationDescription")}</p>
               </div>
               <Settings2 size={19} color="#8c9b85" />
             </div>
@@ -764,7 +823,7 @@ export function AdminSettings() {
                   row={organization}
                   field={{
                     name: "name",
-                    label: "Organization name",
+                    label: t("settings.organizationName"),
                     required: true,
                   }}
                 />
@@ -772,10 +831,10 @@ export function AdminSettings() {
                   row={organization}
                   field={{
                     name: "timezone",
-                    label: "Default timezone",
+                    label: t("settings.defaultTimezone"),
                     default: "UTC",
                     required: true,
-                    hint: "Use an IANA timezone such as Asia/Dhaka.",
+                    hint: t("settings.timezoneHint"),
                   }}
                 />
               </div>
@@ -785,7 +844,9 @@ export function AdminSettings() {
                   disabled={!!busy || needsReconcile || isFetching}
                   type="submit"
                 >
-                  {busy === "organization" ? "Saving…" : "Save organization"}
+                  {busy === "organization"
+                    ? t("common.saving")
+                    : t("settings.saveOrganization")}
                 </button>
               </div>
             </form>
@@ -793,11 +854,8 @@ export function AdminSettings() {
           <section className="card">
             <div className="card-header">
               <div>
-                <h2>Default attendance policy</h2>
-                <p>
-                  Applies to newly created offices. Manage existing policies
-                  from Offices.
-                </p>
+                <h2>{t("settings.defaultPolicy")}</h2>
+                <p>{t("settings.policyDescription")}</p>
               </div>
               <ShieldCheck size={19} color="#8c9b85" />
             </div>
@@ -809,16 +867,19 @@ export function AdminSettings() {
                 {[
                   {
                     name: "requireWebAuthn",
-                    label: "Require passkey verification",
+                    label: t("labels.requirePasskey"),
                   },
-                  { name: "requireGeofence", label: "Require office location" },
+                  {
+                    name: "requireGeofence",
+                    label: t("labels.requireLocation"),
+                  },
                   {
                     name: "requireOfficeNetwork",
-                    label: "Require office network",
+                    label: t("labels.requireNetwork"),
                   },
                   {
                     name: "requireApprovedDevice",
-                    label: "Require approved device",
+                    label: t("labels.requireDevice"),
                   },
                 ].map((field) => (
                   <FormField
@@ -831,7 +892,7 @@ export function AdminSettings() {
                   row={policy}
                   field={{
                     name: "maximumGpsAccuracyMeters",
-                    label: "Maximum GPS uncertainty (meters)",
+                    label: t("labels.maximumGpsUncertainty"),
                     type: "number",
                     min: 1,
                     max: 1000,
@@ -847,8 +908,8 @@ export function AdminSettings() {
                   type="submit"
                 >
                   {busy === "attendance.defaultPolicy"
-                    ? "Saving…"
-                    : "Save attendance policy"}
+                    ? t("common.saving")
+                    : t("settings.savePolicy")}
                 </button>
               </div>
             </form>

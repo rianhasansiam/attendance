@@ -1,3 +1,4 @@
+import { FeatureMessages } from "@/i18n/feature-messages";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
@@ -29,28 +30,30 @@ async function AuthorizedWorkspace() {
   await connection();
   const user = await requireWorkspaceUser();
   return (
-    <StoreProvider
-      identity={{ id: user.id, role: user.role, sessionId: user.sessionId }}
-    >
-      <AppShell
-        mode="admin"
-        user={{
-          id: user.id,
-          profileSlug: user.profileSlug,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          image: user.image,
-        }}
+    <FeatureMessages namespaces={["expenses"]}>
+      <StoreProvider
+        identity={{ id: user.id, role: user.role, sessionId: user.sessionId }}
       >
-        <DailyExpensesWorkspace
-          canWrite={canWriteDailyExpenses(user.role)}
-          canEditTransactions={canEditDailyExpenseTransactions(user.role)}
-          canDeleteTransactions={canDeleteDailyExpenseTransactions(user.role)}
-          canDownloadReport={canDownloadDailyExpenseReport(user.role)}
-        />
-      </AppShell>
-    </StoreProvider>
+        <AppShell
+          mode="admin"
+          user={{
+            id: user.id,
+            profileSlug: user.profileSlug,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            image: user.image,
+          }}
+        >
+          <DailyExpensesWorkspace
+            canWrite={canWriteDailyExpenses(user.role)}
+            canEditTransactions={canEditDailyExpenseTransactions(user.role)}
+            canDeleteTransactions={canDeleteDailyExpenseTransactions(user.role)}
+            canDownloadReport={canDownloadDailyExpenseReport(user.role)}
+          />
+        </AppShell>
+      </StoreProvider>
+    </FeatureMessages>
   );
 }
 

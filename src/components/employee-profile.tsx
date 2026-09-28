@@ -1,3 +1,4 @@
+import { useLocale, useTranslations } from "next-intl";
 import Image from "next/image";
 import { Badge, date, label, PageHeader } from "./ui";
 
@@ -19,12 +20,15 @@ export function EmployeeProfile({
     role: string;
   };
 }) {
+  const t = useTranslations("employee");
+  const statuses = useTranslations("common.status");
+  const locale = useLocale();
   return (
     <>
       <PageHeader
-        eyebrow="YOUR WORKSPACE"
-        title="My profile"
-        description="Your details, connected to your Google account."
+        eyebrow={t("profile.eyebrow")}
+        title={t("profile.title")}
+        description={t("profile.description")}
       />
       <section className="card">
         <div className="card-body">
@@ -33,7 +37,7 @@ export function EmployeeProfile({
               <Image
                 unoptimized
                 src={user.image}
-                alt="Google profile"
+                alt={t("profile.googlePhoto")}
                 width={64}
                 height={64}
                 style={{ borderRadius: "50%" }}
@@ -51,12 +55,23 @@ export function EmployeeProfile({
           </div>
           <dl className="detail-list">
             {[
-              ["Employee ID", employee.employeeCode],
-              ["Department", employee.department?.name],
-              ["Office", employee.office.name],
-              ["Office timezone", employee.office.timezone],
-              ["Joined", date(employee.joinedAt)],
-              ["Account role", user.role],
+              [t("columns.employeeId"), employee.employeeCode],
+              [t("profile.department"), employee.department?.name],
+              [t("profile.office"), employee.office.name],
+              [t("profile.timezone"), employee.office.timezone],
+              [t("profile.joined"), date(employee.joinedAt, locale)],
+              [
+                t("profile.role"),
+                user.role === "EMPLOYEE"
+                  ? statuses("EMPLOYEE")
+                  : user.role === "ADMIN"
+                    ? statuses("ADMIN")
+                    : user.role === "SUPER_ADMIN"
+                      ? statuses("SUPER_ADMIN")
+                      : user.role === "MANAGE_DRIVER"
+                        ? statuses("MANAGE_DRIVER")
+                        : user.role,
+              ],
             ].map(([key, value]) => (
               <div className="detail-item" key={key}>
                 <dt>{key}</dt>
@@ -65,7 +80,7 @@ export function EmployeeProfile({
             ))}
           </dl>
           <p className="muted" style={{ marginTop: 35, fontSize: 12 }}>
-            Need to update your information? Contact your administrator.
+            {t("profile.updateHelp")}
           </p>
         </div>
       </section>

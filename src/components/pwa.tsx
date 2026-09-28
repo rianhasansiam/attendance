@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { Download, WifiOff } from "lucide-react";
 interface InstallPrompt extends Event {
@@ -6,6 +7,7 @@ interface InstallPrompt extends Event {
   userChoice: Promise<{ outcome: string }>;
 }
 export function PwaStatus() {
+  const t = useTranslations("common");
   const [online, setOnline] = useState(true);
   const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
   useEffect(() => {
@@ -33,7 +35,7 @@ export function PwaStatus() {
       {!online && (
         <div className="offline-banner" role="alert">
           <WifiOff size={17} />
-          You’re offline. Connect to the internet to record attendance.
+          {t("offline")}
         </div>
       )}
       {prompt && (
@@ -46,7 +48,7 @@ export function PwaStatus() {
           }}
         >
           <Download size={16} />
-          Install app
+          {t("install")}
         </button>
       )}
     </>

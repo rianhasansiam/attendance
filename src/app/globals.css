@@ -1449,8 +1449,14 @@ tbody tr.date-group-1:hover {
   animation: fadeIn 0.2s ease-out;
 }
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .calc-date-label {
   font-size: 12px;
@@ -1704,8 +1710,58 @@ tbody tr.date-group-1:hover {
   box-shadow: 0 8px 32px #202d281f;
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-alert, .app-alert-container, .app-alert * {
+  .app-alert,
+  .app-alert-container,
+  .app-alert * {
     animation-duration: 0s !important;
     transition-duration: 0s !important;
+  }
+}
+
+/* System CJK fallbacks keep language switching lightweight. */
+:root {
+  --font-cjk: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+html:lang(zh-CN) body {
+  font-family: Arial, var(--font-cjk);
+}
+.language-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.language-switcher select {
+  width: auto;
+  max-width: 100%;
+  min-width: 7.5rem;
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+}
+.language-switcher small {
+  max-width: 18rem;
+}
+.login-card > .language-switcher {
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+.topbar-user {
+  flex-wrap: wrap;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 600px) {
+  .topbar {
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 }

@@ -876,3 +876,57 @@ describe("live dashboard", () => {
     expect(second.presentToday).toBe(1);
   });
 });
+
+describe("localized attendance exports", () => {
+  it("translates Chinese report labels while retaining timezone, notes and calculations", async () => {
+    const record = {
+      ...attendance(),
+      shift: { ...shift, timezone: "Asia/Dhaka" },
+      overtimeMinutes: -90,
+      lateReason: "Train delay / 用户填写",
+    };
+    mocks.attendances.mockResolvedValue([record]);
+    const selected = {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      format: "pdf" as const,
+    };
+    const result = await getReport(admin, selected, "zh-CN");
+    expect(result).toBeInstanceOf(Response);
+    const document = mocks.pdf.mock.calls[0][0];
+    expect(document.locale).toBe("zh-CN");
+    expect(document.title).toBe("考勤报表");
+    expect(document.columns[3].label).toBe("签到");
+    expect(document.rows[0][1]).toBe("Employee\nE001");
+    expect(document.rows[0][2]).toBe("HQ\nDay\nAsia/Dhaka");
+    expect(document.rows[0][3]).toBe("2025/01/06\n15:30");
+    expect(document.rows[0][4]).toBe("2025/01/06\n23:00");
+    expect(document.rows[0][6]).toBe("-1 小时 30 分钟");
+    expect(document.rows[0][7]).toBe("30");
+    expect(document.rows[0][8]).toBe("迟到");
+    expect(document.rows[0][9]).toBe(record.lateReason);
+    expect(document.summary).toContainEqual({
+      label: "总加班时长",
+      value: "-1 小时 30 分钟（-90 分钟）",
+    });
+    if (result instanceof Response)
+      expect(result.headers.get("Content-Disposition")).toContain(
+        "attendance-2025-01-06-to-2025-01-06.pdf",
+      );
+  });
+
+  it("leaves JSON enums, timestamps and summary amounts unchanged between locales", async () => {
+    const english = await getReport(admin, filters, "en");
+    const chinese = await getReport(admin, filters, "zh-CN");
+    expect(chinese).toEqual(english);
+    expect(mocks.pdf).not.toHaveBeenCalled();
+  });
+
+  it("retains role authorization for Chinese reports", async () => {
+    await expect(
+      getReport({ id: "employee", role: "EMPLOYEE" }, filters, "zh-CN"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(mocks.attendances).not.toHaveBeenCalled();
+  });
+});

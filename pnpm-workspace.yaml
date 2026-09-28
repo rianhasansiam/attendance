@@ -5,6 +5,8 @@ allowBuilds:
   sharp: true
   unrs-resolver: false
   argon2: true
+  '@parcel/watcher': false
+  '@swc/core': false
 # Security fixes for transitive dependencies; exercised by Prisma and export tests.
 overrides:
   lodash: 4.18.1

@@ -1,12 +1,11 @@
+import { useLocale, useTranslations, createTranslator } from "next-intl";
+import { localizeKnownMessage } from "@/i18n/errors";
+import enCommon from "../../messages/en/common.json";
+import zhCommon from "../../messages/zh-CN/common.json";
 import { Children, isValidElement, type ReactNode } from "react";
 import { AlertNotification } from "@/components/alert-notification";
 import { DELETED_INFO } from "@/lib/deleted-info";
-import {
-  AlertCircle,
-  ArrowUpRight,
-  LoaderCircle,
-  RefreshCw,
-} from "lucide-react";
+import { AlertCircle, ArrowUpRight, RefreshCw } from "lucide-react";
 
 export type DataRow = Record<string, unknown>;
 export function PageHeader({
@@ -38,11 +37,13 @@ export function ErrorNotice({
   message?: string;
   notify?: boolean;
 }) {
+  const locale = useLocale();
+  const localized = message ? localizeKnownMessage(message, locale) : "";
   return message ? (
     <div className="notice error" role="alert">
       <AlertCircle size={18} />
-      <span>{message}</span>
-      {notify && <AlertNotification message={message} kind="error" />}
+      <span>{localized}</span>
+      {notify && <AlertNotification message={localized} kind="error" />}
     </div>
   ) : null;
 }
@@ -77,49 +78,54 @@ export function Notice({
     </div>
   );
 }
-export function Loading() {
-  return (
-    <div className="loading" role="status">
-      <LoaderCircle className="spin" size={22} /> Loading your workspace…
-    </div>
-  );
-}
+export { LoadingIndicator as Loading } from "./loading-indicator";
+
 export function Empty({
-  title = "Nothing here yet",
-  description = "New records will appear here when they’re added.",
+  title,
+  description,
 }: {
   title?: string;
   description?: string;
 }) {
+  const t = useTranslations("common");
   return (
     <div className="empty">
       <div className="empty-icon">
         <ArrowUpRight size={24} />
       </div>
-      <h3>{title}</h3>
-      <p className="muted">{description}</p>
+      <h3>{title || t("emptyTitle")}</h3>
+      <p className="muted">{description || t("emptyDescription")}</p>
     </div>
   );
 }
 export function Refresh({ onClick }: { onClick: () => void }) {
+  const t = useTranslations("common");
   return (
     <button className="button secondary" onClick={onClick}>
       <RefreshCw size={15} />
-      Refresh
+      {t("refresh")}
     </button>
   );
 }
 export function Badge({ value }: { value: unknown }) {
+  const t = useTranslations("common");
   const text = String(value ?? "Pending");
   return (
     <span
       className={`badge ${["ACTIVE", "PRESENT", "APPROVED", "Verified"].includes(text) ? "green" : ["LATE", "PENDING", "HALF_DAY"].includes(text) ? "amber" : ["ABSENT", "REJECTED", "SUSPENDED", "REVOKED"].includes(text) ? "red" : ""}`}
     >
-      {text.replaceAll("_", " ").toLowerCase()}
+      {t.has(
+        `status.${text.toUpperCase().replaceAll(" ", "_") as keyof typeof enCommon.status}`,
+      )
+        ? t(
+            `status.${text.toUpperCase().replaceAll(" ", "_") as keyof typeof enCommon.status}`,
+          )
+        : text.replaceAll("_", " ").toLowerCase()}
     </span>
   );
 }
 export function AttendanceStatus({ record }: { record: DataRow }) {
+  const t = useTranslations("common");
   return (
     <div
       className="stack"
@@ -135,23 +141,33 @@ export function AttendanceStatus({ record }: { record: DataRow }) {
       <Badge value={record.status} />
       {record.actualStatus != null && record.actualStatus !== record.status && (
         <small className="muted">
-          Actual status:{" "}
-          {String(record.actualStatus).replaceAll("_", " ").toLowerCase()}
+          {t("actualStatus", {
+            status: t.has(
+              `status.${record.actualStatus as keyof typeof enCommon.status}`,
+            )
+              ? t(
+                  `status.${record.actualStatus as keyof typeof enCommon.status}`,
+                )
+              : String(record.actualStatus),
+          })}
         </small>
       )}
       {record.lateApprovalStatus != null && (
         <small>
-          Late approval: <Badge value={record.lateApprovalStatus} />
+          {t("lateApproval")} <Badge value={record.lateApprovalStatus} />
         </small>
       )}
       {record.isExcusedLate === true && (
-        <small className="muted">Excused late · not counted</small>
+        <small className="muted">{t("excusedLate")}</small>
       )}
       {record.lateApprovalStatus === "APPROVED" &&
         record.isExcusedLate === false && (
           <small className="muted">
-            Approval no longer matches attendance
-            {Number(record.lateMinutes) > 0 ? " · late still counted" : ""}
+            {t(
+              Number(record.lateMinutes) > 0
+                ? "lateStillCounted"
+                : "approvalMismatch",
+            )}
           </small>
         )}
     </div>
@@ -168,18 +184,22 @@ export function nested(row: DataRow, key: string): unknown {
       row,
     );
 }
-export function label(value: unknown): string {
+export function label(value: unknown, locale = "en"): string {
+  const t = createTranslator({
+    locale,
+    messages: locale === "zh-CN" ? zhCommon : enCommon,
+  });
   if (value == null || value === "") return "—";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return t(value ? "yes" : "no");
   if (typeof value === "object") {
     const row = value as DataRow;
     return String(row.name || row.email || row.id || "—");
   }
   return String(value);
 }
-export function date(value: unknown) {
+export function date(value: unknown, locale = "en") {
   return value
-    ? new Date(String(value)).toLocaleDateString(undefined, {
+    ? new Date(String(value)).toLocaleDateString(locale, {
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -187,19 +207,27 @@ export function date(value: unknown) {
       })
     : "—";
 }
-export function time(value: unknown, timeZone?: string) {
+export function time(value: unknown, timeZone?: string, locale = "en") {
   return value
-    ? new Date(String(value)).toLocaleTimeString(undefined, {
+    ? new Date(String(value)).toLocaleTimeString(locale, {
         hour: "2-digit",
         minute: "2-digit",
-        ...(timeZone ? { timeZone } : {}),
+        timeZone: timeZone || "Asia/Dhaka",
       })
     : "—";
 }
-export function duration(value: unknown) {
+export function duration(value: unknown, locale = "en") {
+  const t = createTranslator({
+    locale,
+    messages: locale === "zh-CN" ? zhCommon : enCommon,
+  });
   const minutes = Number(value || 0);
   const magnitude = Math.abs(minutes);
-  return `${minutes < 0 ? "-" : ""}${Math.floor(magnitude / 60)}h ${magnitude % 60}m`;
+  return t("duration", {
+    sign: minutes < 0 ? "-" : "",
+    hours: Math.floor(magnitude / 60),
+    minutes: magnitude % 60,
+  });
 }
 export function Table({
   rows,
@@ -211,6 +239,7 @@ export function Table({
   columns: {
     key: string;
     label: string;
+    render?: (value: unknown, row: DataRow) => ReactNode;
     format?:
       | "date"
       | "time"
@@ -223,11 +252,13 @@ export function Table({
   actions?: (row: DataRow) => ReactNode;
   dateGroupKey?: string;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("common");
   if (!rows.length) return <Empty />;
   const dateGroups = new Map<string, number>();
   const rowClasses = dateGroupKey
     ? rows.map((row) => {
-        const groupDate = date(nested(row, dateGroupKey));
+        const groupDate = date(nested(row, dateGroupKey), locale);
         if (!dateGroups.has(groupDate)) {
           dateGroups.set(groupDate, dateGroups.size % 2);
         }
@@ -242,7 +273,7 @@ export function Table({
             {columns.map((column) => (
               <th key={column.key}>{column.label}</th>
             ))}
-            {actions && <th className="align-right">Actions</th>}
+            {actions && <th className="align-right">{t("actions")}</th>}
           </tr>
         </thead>
         <tbody>
@@ -264,20 +295,24 @@ export function Table({
                   : nested(row, column.key);
                 return (
                   <td key={column.key}>
-                    {column.format === "attendance-status" ? (
+                    {missingIdentity ? (
+                      t("deleted")
+                    ) : column.render ? (
+                      column.render(value, row)
+                    ) : column.format === "attendance-status" ? (
                       <AttendanceStatus record={row} />
                     ) : column.format === "badge" ? (
                       <Badge value={value} />
                     ) : column.format === "date" ? (
-                      date(value)
+                      date(value, locale)
                     ) : column.format === "time" ? (
-                      time(value)
+                      time(value, undefined, locale)
                     ) : column.format === "duration" ||
                       column.format === "nullable-duration" ? (
                       column.format === "nullable-duration" && value == null ? (
                         "—"
                       ) : (
-                        duration(value)
+                        duration(value, locale)
                       )
                     ) : column.format === "text" ? (
                       <span
@@ -289,10 +324,10 @@ export function Table({
                           overflowWrap: "anywhere",
                         }}
                       >
-                        {label(value)}
+                        {label(value, locale)}
                       </span>
                     ) : (
-                      label(value)
+                      label(value, locale)
                     )}
                   </td>
                 );
@@ -326,25 +361,24 @@ export function Pagination({
   loading: boolean;
   onPage: (page: number) => void;
 }) {
+  const t = useTranslations("common");
   return (
     <div className="pagination">
-      <span>
-        Page {page} · {total} records
-      </span>
+      <span>{t("pagination", { page, total })}</span>
       <div className="buttons">
         <button
           className="button small secondary"
           disabled={loading || page <= 1}
           onClick={() => onPage(page - 1)}
         >
-          Previous
+          {t("previous")}
         </button>
         <button
           className="button small secondary"
           disabled={loading || page * pageSize >= total}
           onClick={() => onPage(page + 1)}
         >
-          Next
+          {t("next")}
         </button>
       </div>
     </div>

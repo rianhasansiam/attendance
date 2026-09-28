@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { act, createElement as h } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, type Root, testMessages } from "./i18n-root";
+import { NextIntlClientProvider } from "next-intl";
+import chineseCommon from "../messages/zh-CN/common.json";
+import chineseEmployee from "../messages/zh-CN/employee.json";
 import { Provider } from "react-redux";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PublicProfileEditor } from "@/components/public-profile-editor";
@@ -51,12 +54,24 @@ beforeEach(async () => {
   await render();
 });
 
-async function render() {
+async function render(locale = "en") {
   await act(async () => {
     root.render(
-      h(Provider, {
-        store,
-        children: h(PublicProfileEditor, { profile }),
+      h(NextIntlClientProvider, {
+        locale,
+        timeZone: "Asia/Dhaka",
+        messages:
+          locale === "zh-CN"
+            ? {
+                ...testMessages,
+                common: chineseCommon,
+                employee: chineseEmployee,
+              }
+            : testMessages,
+        children: h(Provider, {
+          store,
+          children: h(PublicProfileEditor, { profile }),
+        }),
       }),
     );
   });
@@ -186,6 +201,9 @@ it("keeps submitted values and displays a rejected server save", async () => {
   input("designation").value = "Updated designation";
   await submit();
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "You do not have access to this resource.",
+  );
+  expect(container.textContent).not.toContain(
     "Only Super Admin can edit public profiles.",
   );
   expect(input("designation").value).toBe("Updated designation");
@@ -216,4 +234,71 @@ it("requires a fresh read after an uncertain save before allowing another save",
   expect(input("name").disabled).toBe(false);
   await submit();
   expect(api).toHaveBeenCalledTimes(3);
+});
+
+it("switches profile labels while preserving unsaved fields, dates and the current URL", async () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/admin/users/test-user/public-profile?from=users&page=3",
+  );
+  const originalForm = form();
+  input("designation").value = "用户输入 / Engineer";
+  input("homeAddress").value = "123 Home Street\nDhaka";
+  await render("zh-CN");
+  expect(form()).toBe(originalForm);
+  expect(container.textContent).toContain("编辑公开资料");
+  expect(container.textContent).toContain("保存公开资料");
+  expect(input("designation").value).toBe("用户输入 / Engineer");
+  expect(input("homeAddress").value).toBe("123 Home Street\nDhaka");
+  expect(input("dateOfBirth").value).toBe("1993-07-21");
+  expect(input("bloodGroup").value).toBe("AB+");
+  expect(window.location.pathname + window.location.search).toBe(
+    "/admin/users/test-user/public-profile?from=users&page=3",
+  );
+  expect(api).not.toHaveBeenCalled();
+  await render("en");
+  expect(form()).toBe(originalForm);
+  expect(container.textContent).toContain("Edit public profile");
+  expect(input("designation").value).toBe("用户输入 / Engineer");
+});
+
+it("retranslates visible success and permission errors without changing submitted data", async () => {
+  await submit();
+  expect(container.textContent).toContain("Public profile saved.");
+  await render("zh-CN");
+  expect(container.textContent).toContain("公开资料已保存。");
+  vi.mocked(api).mockRejectedValueOnce(
+    new ClientRequestError({
+      status: 403,
+      code: "FORBIDDEN",
+      message: "Private server diagnostics",
+    }),
+  );
+  input("designation").value = "Unsaved change";
+  await submit();
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    chineseCommon.errors.FORBIDDEN,
+  );
+  expect(container.textContent).not.toContain("Private server diagnostics");
+  await render("en");
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    testMessages.common.errors.FORBIDDEN,
+  );
+  expect(input("designation").value).toBe("Unsaved change");
+});
+
+it("shows translated client validation while preserving an invalid date input", async () => {
+  await render("zh-CN");
+  input("dateOfBirth").value = "2999-12-31";
+  await submit();
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    "出生日期不能晚于今天。",
+  );
+  expect(api).not.toHaveBeenCalled();
+  await render("en");
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    "Date of birth cannot be in the future.",
+  );
+  expect(input("dateOfBirth").value).toBe("2999-12-31");
 });

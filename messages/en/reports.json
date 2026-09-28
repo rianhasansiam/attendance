@@ -1,0 +1,59 @@
+{
+  "pdf": {
+    "brand": "XHYD Attendance System",
+    "brandHeading": "XHYD ATTENDANCE SYSTEM",
+    "continued": "(continued)",
+    "empty": "No records match the selected filters.",
+    "pageSummary": "{count, plural, one {# record} other {# records}}  |  Page {page, number} of {pages, number}"
+  },
+  "attendance": {
+    "title": "Attendance report",
+    "dateRange": "Date range: {from} to {to}",
+    "employee": "Employee: {name}",
+    "selectedEmployee": "Selected employee",
+    "department": "Department: {name}",
+    "selectedDepartment": "Selected department",
+    "office": "Office: {name}",
+    "selectedOffice": "Selected office",
+    "shift": "Shift: {name}",
+    "selectedShift": "Selected shift",
+    "statusFilter": "Status: {status}",
+    "records": "Records",
+    "totalWorked": "Total worked",
+    "totalOvertime": "Total overtime",
+    "duration": "{sign}{hours, number}h {minutes, number}m",
+    "overtimeTotal": "{duration} ({minutes, number} min)",
+    "date": "Date",
+    "employeeId": "Employee / ID",
+    "officeShiftTimezone": "Office / Shift / Timezone",
+    "checkIn": "Check in",
+    "checkOut": "Check out",
+    "worked": "Worked",
+    "overtime": "Overtime",
+    "actualLate": "Actual late (min)",
+    "status": "Status",
+    "lateReason": "Late reason",
+    "excusedLate": "Excused late",
+    "lateApproval": "Late approval: {status}",
+    "approvalMismatch": "Approval no longer matches attendance",
+    "unknown": "Unknown",
+    "scheduledDay": "Scheduled day",
+    "footer": "Times use each row's shift timezone. Actual late minutes are retained; status reflects approved late requests. Positive overtime counts completed minutes after scheduled end, less actual late minutes. Negative overtime shows a work-hour shortfall.",
+    "unknownOvertime": "Total excludes {count, plural, one {# record} other {# records}} with unknown overtime.",
+    "deleted": "Deleted Info"
+  },
+  "status": {
+    "PRESENT": "PRESENT",
+    "LATE": "LATE",
+    "ABSENT": "ABSENT",
+    "HALF_DAY": "HALF DAY",
+    "LEAVE": "LEAVE",
+    "HOLIDAY": "HOLIDAY",
+    "WEEKEND": "WEEKEND"
+  },
+  "approval": {
+    "PENDING": "pending",
+    "APPROVED": "approved",
+    "REJECTED": "rejected"
+  }
+}

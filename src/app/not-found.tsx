@@ -1,15 +1,25 @@
+import { Suspense } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 export default function NotFound() {
   return (
+    <Suspense fallback={null}>
+      <NotFoundContent />
+    </Suspense>
+  );
+}
+function NotFoundContent() {
+  const t = useTranslations("common");
+  return (
     <main className="login-page">
       <section className="login-card">
-        <p className="eyebrow">404 · PAGE NOT FOUND</p>
-        <h1>A little off the path.</h1>
+        <p className="eyebrow">{t("notFoundEyebrow")}</p>
+        <h1>{t("notFoundTitle")}</h1>
         <p className="muted" style={{ marginBottom: 25 }}>
-          This page isn’t part of your workspace.
+          {t("notFoundDescription")}
         </p>
         <Link href="/" className="button">
-          Back to your workspace
+          {t("back")}
         </Link>
       </section>
     </main>

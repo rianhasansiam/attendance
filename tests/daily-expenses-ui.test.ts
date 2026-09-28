@@ -2,6 +2,9 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Provider } from "react-redux";
+import { NextIntlClientProvider } from "next-intl";
+import { loadMessages } from "@/i18n/messages";
+import type { Locale } from "@/i18n/config";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DailyExpensesWorkspace } from "@/components/daily-expenses-workspace";
 import {
@@ -127,16 +130,22 @@ function button(text: string) {
   );
 }
 
-async function render(role: string) {
+async function render(role: string, locale: Locale = "en") {
+  const messages = await loadMessages(locale);
   await act(async () => {
     root.render(
-      h(Provider, {
-        store,
-        children: h(DailyExpensesWorkspace, {
-          canWrite: canWriteDailyExpenses(role),
-          canEditTransactions: canEditDailyExpenseTransactions(role),
-          canDeleteTransactions: canDeleteDailyExpenseTransactions(role),
-          canDownloadReport: canDownloadDailyExpenseReport(role),
+      h(NextIntlClientProvider, {
+        locale,
+        timeZone: "Asia/Dhaka",
+        messages,
+        children: h(Provider, {
+          store,
+          children: h(DailyExpensesWorkspace, {
+            canWrite: canWriteDailyExpenses(role),
+            canEditTransactions: canEditDailyExpenseTransactions(role),
+            canDeleteTransactions: canDeleteDailyExpenseTransactions(role),
+            canDownloadReport: canDownloadDailyExpenseReport(role),
+          }),
         }),
       }),
     );
@@ -222,11 +231,12 @@ it("reviews the exact transaction and balance impact in SweetAlert and cancels w
     title: "Delete Expense",
     text: expect.stringContaining("Amount: BDT 20.00"),
     confirmText: "Delete record",
+    cancelText: "Cancel",
     danger: true,
   });
   const review = confirmAction.mock.calls[0][0].text as string;
   for (const detail of [
-    "1 Jan 2026",
+    "Jan 1, 2026",
     "Office supplies",
     "Printer paper",
     "increase Current Balance by BDT 20.00",
@@ -287,4 +297,162 @@ it("retains an uncertain deletion for Safe retry without another confirmation", 
     await Promise.all(deletions.map((request) => request.clone().json())),
   ).toEqual([{ expectedVersion: 1 }, { expectedVersion: 1 }]);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("translates the read-only ledger in Chinese while preserving amounts and user content", async () => {
+  await render("ADMIN", "zh-CN");
+  expect(container.textContent).toContain("当前余额");
+  expect(container.textContent).toContain("交易记录");
+  expect(container.textContent).toContain("BDT 80.00");
+  expect(container.textContent).toContain("Office supplies");
+  expect(container.textContent).toContain("Printer paper");
+  expect(button("新增支出")).toBeUndefined();
+  expect(button("编辑")).toBeUndefined();
+  expect(button("删除")).toBeUndefined();
+});
+
+it("keeps the route, filters and unsaved expense fields when the locale changes", async () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/daily-expenses?search=Printer&page=2",
+  );
+  await render("SUPER_ADMIN");
+  await act(async () => button("Add Expense")!.click());
+  const amount = document.querySelector<HTMLInputElement>("#daily-amount")!;
+  const note = document.querySelector<HTMLTextAreaElement>("#daily-note")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(amount, "123.45");
+    amount.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!.call(note, "Printer paper 纸张");
+    note.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await render("SUPER_ADMIN", "zh-CN");
+  expect(window.location.pathname + window.location.search).toBe(
+    "/daily-expenses?search=Printer&page=2",
+  );
+  expect(document.querySelector<HTMLInputElement>("#daily-amount")!.value).toBe(
+    "123.45",
+  );
+  expect(
+    document.querySelector<HTMLTextAreaElement>("#daily-note")!.value,
+  ).toBe("Printer paper 纸张");
+  expect(document.querySelector<HTMLInputElement>("#daily-search")!.value).toBe(
+    "Printer",
+  );
+  expect(document.body.textContent).toContain("保存支出");
+  await render("SUPER_ADMIN", "en");
+  expect(document.querySelector<HTMLInputElement>("#daily-amount")!.value).toBe(
+    "123.45",
+  );
+  expect(document.body.textContent).toContain("Save expense");
+});
+
+async function fillInput(selector: string, value: string) {
+  const element = document.querySelector<HTMLInputElement>(selector)!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+async function submitForm(selector: string) {
+  await act(async () => {
+    document
+      .querySelector(selector)!
+      .closest("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+}
+
+it("retranslates dynamic transaction success feedback in both directions", async () => {
+  confirmAction.mockResolvedValue(true);
+  await render("SUPER_ADMIN");
+  await act(async () => button("Delete")!.click());
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain(
+        "Expense deleted. Balances and history are being refreshed.",
+      ),
+    );
+  });
+  await render("SUPER_ADMIN", "zh-CN");
+  expect(container.textContent).toContain(
+    "支出已删除。正在刷新余额和交易记录。",
+  );
+  expect(container.textContent).not.toContain("Expense deleted.");
+  await render("SUPER_ADMIN");
+  expect(container.textContent).toContain(
+    "Expense deleted. Balances and history are being refreshed.",
+  );
+});
+
+it("retranslates persisted form and custom field errors without resubmitting", async () => {
+  await render("SUPER_ADMIN");
+  await act(async () => button("Add Expense")!.click());
+  await fillInput("#daily-amount", "12.30");
+  await submitForm("#daily-amount");
+  expect(document.body.textContent).toContain("Choose a category.");
+  expect(document.body.textContent).toContain(
+    "Check the highlighted fields before saving.",
+  );
+  await render("SUPER_ADMIN", "zh-CN");
+  expect(document.body.textContent).toContain("请选择一个类别。");
+  expect(document.body.textContent).toContain(
+    "请先检查标出的字段，然后再保存。",
+  );
+  expect(document.querySelector<HTMLInputElement>("#daily-amount")!.value).toBe(
+    "12.30",
+  );
+  await render("SUPER_ADMIN");
+  expect(document.body.textContent).toContain("Choose a category.");
+  expect(requests.every((request) => request.method === "GET")).toBe(true);
+});
+
+it("retranslates persisted filter errors while retaining the invalid draft dates", async () => {
+  await render("ADMIN");
+  await fillInput("#daily-from", "2026-01-02");
+  await fillInput("#daily-to", "2026-01-01");
+  await submitForm("#daily-from");
+  expect(container.textContent).toContain(
+    "The start date must be on or before the end date.",
+  );
+  await render("ADMIN", "zh-CN");
+  expect(container.textContent).toContain("开始日期不能晚于结束日期。");
+  expect(document.querySelector<HTMLInputElement>("#daily-from")!.value).toBe(
+    "2026-01-02",
+  );
+  expect(document.querySelector<HTMLInputElement>("#daily-to")!.value).toBe(
+    "2026-01-01",
+  );
+  await render("ADMIN");
+  expect(container.textContent).toContain(
+    "The start date must be on or before the end date.",
+  );
+});
+
+it("retranslates persisted category validation without changing the category draft", async () => {
+  await render("SUPER_ADMIN");
+  await act(async () => button("Categories")!.click());
+  await fillInput("#daily-category-name", "   ");
+  await submitForm("#daily-category-name");
+  expect(document.body.textContent).toContain("Enter a category name.");
+  await render("SUPER_ADMIN", "zh-CN");
+  expect(document.body.textContent).toContain("请输入类别名称。");
+  expect(
+    document.querySelector<HTMLInputElement>("#daily-category-name")!.value,
+  ).toBe("   ");
+  await render("SUPER_ADMIN");
+  expect(document.body.textContent).toContain("Enter a category name.");
 });

@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useEffect, useEffectEvent, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
@@ -13,6 +14,7 @@ export function Modal({
   close: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useTranslations("common");
   const onClose = useEffectEvent(close);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -69,7 +71,7 @@ export function Modal({
           <button
             type="button"
             className="icon-button"
-            aria-label="Close dialog"
+            aria-label={t("close")}
             onClick={close}
           >
             <X size={19} />

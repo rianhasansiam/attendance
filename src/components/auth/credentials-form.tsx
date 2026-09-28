@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -7,6 +8,7 @@ import { ErrorNotice } from "@/components/ui";
 import { PasswordField } from "./password-fields";
 
 export function CredentialsForm() {
+  const t = useTranslations("auth");
   const router = useRouter();
   const submitting = useRef(false);
   const [pending, setPending] = useState(false);
@@ -22,7 +24,7 @@ export function CredentialsForm() {
       .toLowerCase();
     const password = String(values.get("password") || "");
     if (!email || !password || password.length > 128) {
-      setError("Invalid email or password.");
+      setError(t("invalidCredentials"));
       return;
     }
     submitting.current = true;
@@ -37,14 +39,14 @@ export function CredentialsForm() {
       });
       // Never expose provider errors or use an untrusted callback URL.
       if (!result?.ok || result.error) {
-        setError("Invalid email or password.");
+        setError(t("invalidCredentials"));
       } else {
         form.reset();
         router.replace("/");
         router.refresh();
       }
     } catch {
-      setError("Sign-in could not be completed. Please try again.");
+      setError(t("signInFailed"));
     } finally {
       const passwordInput = form.elements.namedItem("password");
       if (passwordInput instanceof HTMLInputElement) passwordInput.value = "";
@@ -57,7 +59,7 @@ export function CredentialsForm() {
     <form className="auth-form" onSubmit={submit} aria-busy={pending}>
       <ErrorNotice message={error} />
       <div className="field">
-        <label htmlFor="login-email">Email</label>
+        <label htmlFor="login-email">{t("email")}</label>
         <input
           id="login-email"
           name="email"
@@ -71,13 +73,13 @@ export function CredentialsForm() {
       </div>
       <PasswordField
         name="password"
-        label="Application password"
+        label={t("password")}
         autoComplete="current-password"
         disabled={pending}
-        hint="Use your XHYD application password, never your Google password."
+        hint={t("passwordHint")}
       />
       <button className="button full-width" type="submit" disabled={pending}>
-        {pending ? "Signing in…" : "Sign in"}
+        {pending ? t("signingIn") : t("signIn")}
       </button>
     </form>
   );

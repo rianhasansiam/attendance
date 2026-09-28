@@ -227,7 +227,7 @@ test("late check-in asks for a reason and preserves the draft when saving fails"
   });
   await dialog.getByRole("button", { name: "Submit reason" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
-    "Unable to save right now",
+    "Unable to complete the request. Please try again.",
   );
   await expect(dialog.getByLabel("Reason", { exact: true })).toHaveValue(
     "Train service was delayed.",
@@ -371,7 +371,20 @@ test("super administrator manages departments and downloads a PDF report", async
   page,
   context,
 }) => {
-  await session(context, "SUPER_ADMIN");
+  const fixture = await session(context, "SUPER_ADMIN");
+  const reportDay = new Date().toISOString().slice(0, 10);
+  await db.attendance.create({
+    data: {
+      employeeId: fixture.user.employee!.id,
+      officeId: fixture.office.id,
+      shiftId: fixture.shift.id,
+      attendanceDate: new Date(`${reportDay}T00:00:00Z`),
+      checkInAt: new Date(`${reportDay}T09:00:00Z`),
+      checkOutAt: new Date(`${reportDay}T17:00:00Z`),
+      status: "PRESENT",
+      workedMinutes: 480,
+    },
+  });
   await page.goto("/admin/dashboard");
   await expect(page.locator("h1")).toBeVisible();
   await expect(
@@ -397,7 +410,15 @@ test("super administrator manages departments and downloads a PDF report", async
   ).toBeVisible();
   await page.getByLabel("Search departments").fill(name);
   await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
-  const response = await context.request.get("/api/admin/reports?format=pdf");
+  const reportQuery = new URLSearchParams({
+    format: "pdf",
+    employeeId: fixture.user.employee!.id,
+    from: reportDay,
+    to: reportDay,
+  });
+  const response = await context.request.get(
+    `/api/admin/reports?${reportQuery}`,
+  );
   expect(response.ok()).toBe(true);
   expect(response.headers()["content-type"]).toBe("application/pdf");
   expect(response.headers()["content-disposition"]).toContain(".pdf");

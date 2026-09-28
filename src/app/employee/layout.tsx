@@ -1,3 +1,4 @@
+import { FeatureMessages } from "@/i18n/feature-messages";
 import { requirePageEmployee } from "@/lib/auth";
 import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
@@ -24,27 +25,29 @@ async function AuthenticatedEmployeeLayout({
   await connection();
   const user = await requirePageEmployee();
   return (
-    <StoreProvider
-      identity={{
-        id: user.id,
-        role: user.role,
-        sessionId: user.sessionId,
-        expires: user.sessionExpires,
-      }}
-    >
-      <AppShell
-        mode="employee"
-        user={{
+    <FeatureMessages namespaces={["employee", "expenses"]}>
+      <StoreProvider
+        identity={{
           id: user.id,
-          profileSlug: user.profileSlug,
-          name: user.name,
-          email: user.email,
           role: user.role,
-          image: user.image,
+          sessionId: user.sessionId,
+          expires: user.sessionExpires,
         }}
       >
-        {children}
-      </AppShell>
-    </StoreProvider>
+        <AppShell
+          mode="employee"
+          user={{
+            id: user.id,
+            profileSlug: user.profileSlug,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            image: user.image,
+          }}
+        >
+          {children}
+        </AppShell>
+      </StoreProvider>
+    </FeatureMessages>
   );
 }

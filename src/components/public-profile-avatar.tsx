@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import styles from "@/app/profile/profile.module.css";
 
@@ -11,6 +12,7 @@ export function PublicProfileAvatar({
   name: string;
   image: string | null;
 }) {
+  const t = useTranslations("employee");
   const [failedImage, setFailedImage] = useState<string | null>(null);
   const initials = name
     .split(/\s+/)
@@ -23,7 +25,7 @@ export function PublicProfileAvatar({
       {image && failedImage !== image ? (
         <Image
           src={image}
-          alt={`${name}’s profile photo`}
+          alt={t("publicProfile.photo", { name })}
           width={112}
           height={112}
           unoptimized
@@ -31,7 +33,9 @@ export function PublicProfileAvatar({
           onError={() => setFailedImage(image)}
         />
       ) : (
-        <span aria-label={`${name}’s initials`}>{initials}</span>
+        <span aria-label={t("publicProfile.initials", { name })}>
+          {initials}
+        </span>
       )}
     </div>
   );

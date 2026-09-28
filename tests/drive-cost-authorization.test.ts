@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   rateLimit: vi.fn(),
 }));
 
+vi.mock("next-intl/server", () => ({ getLocale: async () => "en" }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/db", () => ({
   db: {

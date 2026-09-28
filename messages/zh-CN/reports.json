@@ -1,0 +1,59 @@
+{
+  "pdf": {
+    "brand": "XHYD 考勤系统",
+    "brandHeading": "XHYD 考勤系统",
+    "continued": "（续）",
+    "empty": "没有符合所选筛选条件的记录。",
+    "pageSummary": "共 {count, number} 条记录  |  第 {page, number} 页，共 {pages, number} 页"
+  },
+  "attendance": {
+    "title": "考勤报表",
+    "dateRange": "日期范围：{from} 至 {to}",
+    "employee": "员工：{name}",
+    "selectedEmployee": "所选员工",
+    "department": "部门：{name}",
+    "selectedDepartment": "所选部门",
+    "office": "办公室：{name}",
+    "selectedOffice": "所选办公室",
+    "shift": "班次：{name}",
+    "selectedShift": "所选班次",
+    "statusFilter": "状态：{status}",
+    "records": "记录数",
+    "totalWorked": "总工作时长",
+    "totalOvertime": "总加班时长",
+    "duration": "{sign}{hours, number} 小时 {minutes, number} 分钟",
+    "overtimeTotal": "{duration}（{minutes, number} 分钟）",
+    "date": "日期",
+    "employeeId": "员工 / 编号",
+    "officeShiftTimezone": "办公室 / 班次 / 时区",
+    "checkIn": "签到",
+    "checkOut": "签退",
+    "worked": "工作时长",
+    "overtime": "加班",
+    "actualLate": "实际迟到（分钟）",
+    "status": "状态",
+    "lateReason": "迟到原因",
+    "excusedLate": "迟到已获批准",
+    "lateApproval": "迟到审批：{status}",
+    "approvalMismatch": "审批已与考勤记录不符",
+    "unknown": "未知",
+    "scheduledDay": "排班日期",
+    "footer": "时间按每条记录的班次时区显示。保留实际迟到分钟数，状态反映已批准的迟到申请。正加班时长为计划下班时间后的完整工作分钟数减去实际迟到分钟数，负加班时长表示工作时长不足。",
+    "unknownOvertime": "总计不包含 {count, number} 条加班时长未知的记录。",
+    "deleted": "已删除的信息"
+  },
+  "status": {
+    "PRESENT": "出勤",
+    "LATE": "迟到",
+    "ABSENT": "缺勤",
+    "HALF_DAY": "半天",
+    "LEAVE": "请假",
+    "HOLIDAY": "节假日",
+    "WEEKEND": "周末"
+  },
+  "approval": {
+    "PENDING": "待审批",
+    "APPROVED": "已批准",
+    "REJECTED": "已拒绝"
+  }
+}

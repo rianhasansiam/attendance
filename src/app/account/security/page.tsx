@@ -1,5 +1,5 @@
+import { getTranslations } from "next-intl/server";
 import { Suspense } from "react";
-import type { Metadata } from "next";
 import { connection } from "next/server";
 import LoadingWorkspace from "@/app/loading";
 import { AppShell } from "@/components/app-shell";
@@ -9,10 +9,9 @@ import { requirePageUser } from "@/lib/auth";
 import { isEmployeeRole } from "@/modules/auth/authorization";
 import { StoreProvider } from "@/store/provider";
 
-export const metadata: Metadata = { title: "Account security" };
-
 async function AccountSecurityContent() {
   await connection();
+  const t = await getTranslations("auth");
   const user = await requirePageUser();
   return (
     <StoreProvider
@@ -35,9 +34,9 @@ async function AccountSecurityContent() {
         }}
       >
         <PageHeader
-          eyebrow="Your account"
-          title="Account security"
-          description={`Manage the application password for ${user.email}.`}
+          eyebrow={t("yourAccount")}
+          title={t("security")}
+          description={t("securityDescription", { email: user.email })}
         />
         <AccountPasswordForm />
       </AppShell>

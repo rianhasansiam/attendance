@@ -1,4 +1,9 @@
 import "server-only";
+import { createTranslator } from "next-intl";
+import { resolveLocale, type Locale } from "@/i18n/config";
+import { withEnglishFallback } from "@/i18n/messages";
+import en from "../../../messages/en/expenses.json";
+import zh from "../../../messages/zh-CN/expenses.json";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { authorizeRole } from "@/modules/auth/authorization";
@@ -22,8 +27,14 @@ const reportSelect = {
 export async function getDriveCostReport(
   actor: Actor,
   filters: DriveCostFilters,
+  requestedLocale: Locale = "en",
 ) {
   authorizeRole(actor.role, "MANAGE_DRIVER");
+  const locale = resolveLocale(requestedLocale);
+  const t = createTranslator({
+    locale,
+    messages: locale === "en" ? en : withEnglishFallback(en, zh),
+  });
   // Fetch the complete filtered set in one bounded query. Summing these same
   // rows keeps the PDF detail and totals consistent during concurrent edits.
   const records = await db.driveCost.findMany({
@@ -56,52 +67,55 @@ export async function getDriveCostReport(
   const period =
     from && to
       ? from === to
-        ? `Date: ${from}`
-        : `Period: ${from} to ${to} (inclusive)`
+        ? t("reportDate", { date: from })
+        : t("reportPeriod", { from, to })
       : from
-        ? `From: ${from} onward`
+        ? t("reportFrom", { from })
         : to
-          ? `Through: ${to} (inclusive)`
-          : "Period: All dates";
+          ? t("reportThrough", { to })
+          : t("reportAllDates");
   const bytes = await createReportPdf({
-    title: "Drive cost report",
+    title: t("driveReportTitle"),
+    locale,
     subtitle: [
       period,
-      ...(q ? [`Destination search: ${q}`] : []),
+      ...(q ? [t("reportDestinationSearch", { search: q })] : []),
       ...(paymentStatus
-        ? [`Payment status: ${paymentStatus === "PAID" ? "Paid" : "Unpaid"}`]
+        ? [t("reportPaymentStatus", { status: paymentStatus })]
         : []),
     ],
     dateGroupColumn: 0,
     summary: [
-      { label: "Total trips", value: records.length.toLocaleString("en-US") },
-      { label: "Total kilometers", value: kilometers.toFixed(2) },
-      { label: "Total cost (BDT)", value: totalCost.toFixed(2) },
-      { label: "In-time cost (BDT)", value: inTimeCost.toFixed(2) },
-      { label: "Overtime cost (BDT)", value: overTimeCost.toFixed(2) },
+      {
+        label: t("reportTotalTrips"),
+        value: records.length.toLocaleString(locale),
+      },
+      { label: t("reportTotalKilometers"), value: kilometers.toFixed(2) },
+      { label: t("reportTotalCost"), value: totalCost.toFixed(2) },
+      { label: t("reportInTimeCost"), value: inTimeCost.toFixed(2) },
+      { label: t("reportOverTimeCost"), value: overTimeCost.toFixed(2) },
     ],
     columns: [
-      { label: "Date", width: 78 },
-      { label: "From", width: 120 },
-      { label: "To", width: 120 },
-      { label: "Trip type", width: 99 },
-      { label: "Rate type", width: 65 },
-      { label: "Total km", width: 66, align: "right" },
-      { label: "Rate (BDT/km)", width: 85, align: "right" },
-      { label: "Total (BDT)", width: 89, align: "right" },
+      { label: t("date"), width: 78 },
+      { label: t("from"), width: 120 },
+      { label: t("to"), width: 120 },
+      { label: t("tripType"), width: 99 },
+      { label: t("rateType"), width: 65 },
+      { label: t("totalKm"), width: 66, align: "right" },
+      { label: t("reportRate"), width: 85, align: "right" },
+      { label: t("reportTotalBdt"), width: 89, align: "right" },
     ],
     rows: records.map((record) => [
       record.date.toISOString().slice(0, 10),
       record.destinationFrom,
       record.destinationTo,
-      record.isRoundTrip ? "Round trip (×2)" : "One way",
-      record.rateType === "IN_TIME" ? "In-time" : "Overtime",
+      record.isRoundTrip ? t("roundTrip") : t("oneWay"),
+      record.rateType === "IN_TIME" ? t("reportInTime") : t("reportOvertime"),
       record.kilometers.mul(record.isRoundTrip ? 2 : 1).toFixed(2),
       record.ratePerKilometer.toFixed(2),
       record.totalCost.toFixed(2),
     ]),
-    footerNote:
-      "All matching trips are included. Round-trip kilometers include the return journey (×2). Amounts use each trip's saved rate and are shown in Bangladeshi taka (BDT).",
+    footerNote: t("driveReportFooter"),
   });
   const filenamePeriod =
     from && to

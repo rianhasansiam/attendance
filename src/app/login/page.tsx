@@ -1,3 +1,5 @@
+import { getTranslations } from "next-intl/server";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { auth, signIn } from "@/auth";
 import { redirect } from "next/navigation";
 import { CheckCheck } from "lucide-react";
@@ -22,6 +24,7 @@ async function LoginContent({
   searchParams: Promise<{ error?: string }>;
 }) {
   await connection();
+  const t = await getTranslations("auth");
   const session =
     process.env.DATABASE_URL && process.env.AUTH_SECRET ? await auth() : null;
   if (session?.user?.id)
@@ -34,14 +37,11 @@ async function LoginContent({
   return (
     <main className="login-page">
       <div className="login-card">
+        <LanguageSwitcher />
         <span className="login-mark">
           <CheckCheck size={40} />
         </span>
-        <h1>
-          XHYD Attendance
-          <br />
-          System
-        </h1>
+        <h1>{t("title")}</h1>
         <form
           action={async () => {
             "use server";
@@ -67,20 +67,18 @@ async function LoginContent({
                 d="M12 5.95c1.47 0 2.79.5 3.82 1.49l2.86-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.96 5.49l3.34 2.59C7.17 7.71 9.39 5.95 12 5.95Z"
               />
             </svg>
-            Continue with Google
+            {t("google")}
           </button>
         </form>
         {error && (
           <ErrorNotice
             message={
-              error === "AccessDenied"
-                ? "Your account is not authorized. Contact your administrator."
-                : "Sign-in could not be completed. Please try again."
+              error === "AccessDenied" ? t("unauthorized") : t("signInFailed")
             }
           />
         )}
         <div className="auth-divider">
-          <span>or</span>
+          <span>{t("or")}</span>
         </div>
         <CredentialsForm />
       </div>

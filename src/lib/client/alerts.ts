@@ -1,5 +1,19 @@
 "use client";
 
+import { createTranslator } from "next-intl";
+import en from "../../../messages/en/common.json";
+import zh from "../../../messages/zh-CN/common.json";
+import { resolveLocale } from "@/i18n/config";
+function t(key: keyof typeof en, values?: Record<string, string | number>) {
+  const locale = resolveLocale(
+    typeof document === "undefined" ? "en" : document.documentElement.lang,
+  );
+  return createTranslator({ locale, messages: locale === "zh-CN" ? zh : en })(
+    key as "cancel",
+    values,
+  );
+}
+
 import type Swal from "sweetalert2";
 import type { SweetAlertOptions, SweetAlertResult } from "sweetalert2";
 
@@ -36,12 +50,11 @@ function showUnavailable() {
   notice.id = "alert-unavailable";
   notice.className = "notice error alert-unavailable";
   notice.setAttribute("role", "alert");
-  notice.textContent =
-    "The confirmation could not be opened. Reload the page and try again.";
+  notice.textContent = t("confirmUnavailable");
   const reload = document.createElement("button");
   reload.type = "button";
   reload.className = "button secondary";
-  reload.textContent = "Reload";
+  reload.textContent = t("reload");
   reload.onclick = () => window.location.reload();
   notice.append(reload);
   document.body.append(notice);
@@ -51,7 +64,7 @@ const popupOptions = {
   heightAuto: false,
   buttonsStyling: false,
   showCancelButton: true,
-  cancelButtonText: "Cancel",
+
   focusCancel: true,
   allowOutsideClick: false,
   keydownListenerCapture: true,
@@ -88,6 +101,7 @@ async function openDialog(
     if (openedGeneration !== generation) return null;
     const result = await alert.fire<string>({
       ...popupOptions,
+      cancelButtonText: t("cancel"),
       ...options,
       didClose: () => {
         if (
@@ -115,8 +129,8 @@ async function openDialog(
 export async function confirmAction({
   title,
   text,
-  confirmText = "Confirm",
-  cancelText = "Cancel",
+  confirmText = t("confirm"),
+  cancelText = t("cancel"),
   danger = false,
 }: {
   title: string;
@@ -145,7 +159,7 @@ export async function promptAction({
   inputLabel,
   initialValue = "",
   placeholder = "",
-  confirmText = "Save",
+  confirmText = t("save"),
   maxLength = 1000,
   required = false,
 }: {
@@ -168,9 +182,9 @@ export async function promptAction({
     inputAttributes: { maxlength: String(maxLength) },
     confirmButtonText: confirmText,
     inputValidator: (value) => {
-      if (required && !value.trim()) return "Enter a note before continuing.";
+      if (required && !value.trim()) return t("enterNote");
       if (value.length > maxLength)
-        return `Use ${maxLength} characters or fewer.`;
+        return t("maxCharacters", { max: maxLength });
     },
   });
   return result?.isConfirmed ? (result.value ?? "") : null;
@@ -215,14 +229,14 @@ async function drainNotifications() {
         icon: entry.kind,
         titleText:
           entry.kind === "success"
-            ? "Success"
+            ? t("success")
             : entry.kind === "error"
-              ? "Unable to complete the action"
-              : "Notice",
+              ? t("actionFailed")
+              : t("notice"),
         text: entry.message,
         showConfirmButton: false,
         showCloseButton: true,
-        closeButtonAriaLabel: "Dismiss notification",
+        closeButtonAriaLabel: t("dismiss"),
         timer: entry.kind === "error" ? 8000 : 5000,
         timerProgressBar: true,
         customClass: {

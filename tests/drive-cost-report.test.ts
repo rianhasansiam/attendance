@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  locale: vi.fn(),
   findMany: vi.fn(),
   requireDriveCostManager: vi.fn(),
   rateLimit: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   db: { driveCost: { findMany: mocks.findMany } },
 }));
+vi.mock("next-intl/server", () => ({ getLocale: mocks.locale }));
 vi.mock("@/lib/auth", () => ({
   requireDriveCostManager: mocks.requireDriveCostManager,
 }));
@@ -54,6 +56,7 @@ function report(query = "") {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.locale.mockResolvedValue("en");
   mocks.requireDriveCostManager.mockResolvedValue({
     id: "admin",
     role: "ADMIN",
@@ -379,5 +382,31 @@ describe("drive cost PDF reports", () => {
       error: { code: "REPORT_TOO_LARGE" },
     });
     expect(mocks.createPdf).not.toHaveBeenCalled();
+  });
+});
+
+it("uses the server locale for report labels without changing stored journey data or BDT rates", async () => {
+  mocks.locale.mockResolvedValue("zh-CN");
+  mocks.findMany.mockResolvedValue([trip({ destinationTo: "Warehouse 仓库" })]);
+  expect((await report("?from=2026-09-21&paymentStatus=PAID")).status).toBe(
+    200,
+  );
+  const content = mocks.createPdf.mock.calls[0][0];
+  expect(content.locale).toBe("zh-CN");
+  expect(content.title).toBe("行车费用报表");
+  expect(content.columns[0].label).toBe("日期");
+  expect(content.rows[0]).toEqual([
+    "2026-09-21",
+    "Dhaka office",
+    "Warehouse 仓库",
+    "单程",
+    "工作时间",
+    "12.34",
+    "5.00",
+    "61.70",
+  ]);
+  expect(content.summary).toContainEqual({
+    label: "总费用（BDT）",
+    value: "61.70",
   });
 });

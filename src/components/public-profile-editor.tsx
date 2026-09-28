@@ -1,5 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+import { useEmployeeError, useEmployeeMessage } from "./employee-feedback";
+
 import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ExternalLink } from "lucide-react";
@@ -11,7 +14,7 @@ import {
   publicProfileUpdateSchema,
 } from "@/modules/public-profile/validation";
 import type { ManagedPublicProfile } from "@/modules/public-profile/management";
-import { errorMessage, normalizeError } from "@/store/api/errors";
+import { normalizeError } from "@/store/api/errors";
 import { baseApi } from "@/store/api/base-api";
 import { managementInvalidation } from "@/store/features/management/api";
 import { useAppDispatch } from "@/store/hooks";
@@ -21,12 +24,13 @@ export function PublicProfileEditor({
 }: {
   profile: ManagedPublicProfile;
 }) {
+  const t = useTranslations("employee");
   const [savedProfile, setSavedProfile] = useState(profile);
   const [revision, setRevision] = useState(0);
   const [pending, setPending] = useState(false);
   const [needsRefresh, setNeedsRefresh] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useEmployeeError();
+  const [message, setMessage] = useEmployeeMessage();
   const submitting = useRef(false);
   const dispatch = useAppDispatch();
   const endpoint = `/api/admin/users/${encodeURIComponent(profile.id)}/public-profile`;
@@ -57,11 +61,9 @@ export function PublicProfileEditor({
       setSavedProfile(current);
       setRevision((value) => value + 1);
       setNeedsRefresh(false);
-      setMessage(
-        "Current public profile loaded. You can review and save changes.",
-      );
+      setMessage("publicProfile.loaded");
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     } finally {
       submitting.current = false;
       setPending(false);
@@ -83,7 +85,38 @@ export function PublicProfileEditor({
     });
     setMessage("");
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message || "Check the profile details.");
+      const issue = parsed.error.issues[0];
+      const field = issue?.path[0];
+      const fields = {
+        name: "publicProfile.name",
+        designation: "publicProfile.designation",
+        phone: "publicProfile.phone",
+        bloodGroup: "publicProfile.bloodGroup",
+        publicDepartment: "profile.department",
+        homeAddress: "publicProfile.address",
+        dateOfBirth: "publicProfile.birthday",
+      } as const;
+      setError(
+        issue?.message === "Enter a valid date of birth."
+          ? { key: "publicProfile.invalidBirthday" }
+          : issue?.message === "Date of birth cannot be in the future."
+            ? { key: "publicProfile.futureBirthday" }
+            : issue?.code === "too_small" && field === "name"
+              ? { key: "publicProfile.requiredName" }
+              : issue?.code === "too_big" &&
+                  typeof field === "string" &&
+                  field in fields
+                ? {
+                    key: "publicProfile.tooLong",
+                    values: {
+                      maximum: Number(issue.maximum),
+                    },
+                    translatedValues: {
+                      field: fields[field as keyof typeof fields],
+                    },
+                  }
+                : { key: "publicProfile.invalid" },
+      );
       return;
     }
     submitting.current = true;
@@ -101,9 +134,9 @@ export function PublicProfileEditor({
           managementInvalidation({ resource: "users", id: profile.id }),
         ),
       );
-      setMessage("Public profile saved.");
+      setMessage("publicProfile.saved");
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
       if (isAmbiguousWrite(error)) setNeedsRefresh(true);
     } finally {
       submitting.current = false;
@@ -114,9 +147,11 @@ export function PublicProfileEditor({
   return (
     <>
       <PageHeader
-        eyebrow="PUBLIC PROFILE"
-        title="Edit public profile"
-        description={`Manage the public information for ${savedProfile.name || "this user"}. These details are visible to anyone visiting their public profile.`}
+        eyebrow={t("publicProfile.eyebrow")}
+        title={t("publicProfile.editTitle")}
+        description={t("publicProfile.editDescription", {
+          name: savedProfile.name || t("publicProfile.thisUser"),
+        })}
         action={
           <Link
             className="button secondary"
@@ -125,7 +160,7 @@ export function PublicProfileEditor({
             target="_blank"
             rel="noopener noreferrer"
           >
-            <ExternalLink size={16} /> View public profile
+            <ExternalLink size={16} /> {t("publicProfile.view")}
           </Link>
         }
       />
@@ -133,20 +168,15 @@ export function PublicProfileEditor({
         <form
           key={revision}
           onSubmit={submit}
-          aria-label="Edit public profile"
+          aria-label={t("publicProfile.editTitle")}
           aria-busy={pending}
         >
           <ErrorNotice message={error} />
           {message && <Notice notify>{message}</Notice>}
-          {needsRefresh && (
-            <Notice>
-              The save result is uncertain. Reload the current profile before
-              making another change.
-            </Notice>
-          )}
+          {needsRefresh && <Notice>{t("publicProfile.reconcile")}</Notice>}
           <div className="form-grid">
             <div className="field">
-              <label htmlFor="profile-name">Name *</label>
+              <label htmlFor="profile-name">{t("publicProfile.name")}</label>
               <input
                 id="profile-name"
                 name="name"
@@ -158,7 +188,9 @@ export function PublicProfileEditor({
               />
             </div>
             <div className="field">
-              <label htmlFor="profile-designation">Designation</label>
+              <label htmlFor="profile-designation">
+                {t("publicProfile.designation")}
+              </label>
               <input
                 id="profile-designation"
                 name="designation"
@@ -168,7 +200,7 @@ export function PublicProfileEditor({
               />
             </div>
             <div className="field">
-              <label htmlFor="profile-phone">Phone</label>
+              <label htmlFor="profile-phone">{t("publicProfile.phone")}</label>
               <input
                 id="profile-phone"
                 name="phone"
@@ -180,14 +212,16 @@ export function PublicProfileEditor({
               />
             </div>
             <div className="field">
-              <label htmlFor="profile-blood-group">Blood group</label>
+              <label htmlFor="profile-blood-group">
+                {t("publicProfile.bloodGroup")}
+              </label>
               <select
                 id="profile-blood-group"
                 name="bloodGroup"
                 defaultValue={savedProfile.bloodGroup ?? ""}
                 disabled={pending || needsRefresh}
               >
-                <option value="">Not provided</option>
+                <option value="">{t("publicProfile.notProvided")}</option>
                 {bloodGroups.map((group) => (
                   <option key={group} value={group}>
                     {group}
@@ -196,7 +230,9 @@ export function PublicProfileEditor({
               </select>
             </div>
             <div className="field">
-              <label htmlFor="profile-department">Department</label>
+              <label htmlFor="profile-department">
+                {t("profile.department")}
+              </label>
               <input
                 id="profile-department"
                 name="publicDepartment"
@@ -204,10 +240,12 @@ export function PublicProfileEditor({
                 maxLength={160}
                 disabled={pending || needsRefresh}
               />
-              <small>Department displayed on this public profile.</small>
+              <small>{t("publicProfile.departmentHelp")}</small>
             </div>
             <div className="field">
-              <label htmlFor="profile-birthday">Date of birth</label>
+              <label htmlFor="profile-birthday">
+                {t("publicProfile.birthday")}
+              </label>
               <input
                 id="profile-birthday"
                 name="dateOfBirth"
@@ -219,7 +257,9 @@ export function PublicProfileEditor({
               />
             </div>
             <div className="field full">
-              <label htmlFor="profile-home-address">Home address</label>
+              <label htmlFor="profile-home-address">
+                {t("publicProfile.address")}
+              </label>
               <textarea
                 id="profile-home-address"
                 name="homeAddress"
@@ -232,7 +272,7 @@ export function PublicProfileEditor({
           </div>
           <div className="form-actions">
             <Link className="button secondary" href="/admin/users">
-              <ArrowLeft size={16} /> All users
+              <ArrowLeft size={16} /> {t("publicProfile.allUsers")}
             </Link>
             {needsRefresh && (
               <button
@@ -241,7 +281,7 @@ export function PublicProfileEditor({
                 disabled={pending}
                 onClick={() => void refreshProfile()}
               >
-                {pending ? "Loading…" : "Reload current profile"}
+                {pending ? t("common.loading") : t("publicProfile.reload")}
               </button>
             )}
             <button
@@ -249,7 +289,7 @@ export function PublicProfileEditor({
               type="submit"
               disabled={pending || needsRefresh}
             >
-              {pending ? "Saving…" : "Save public profile"}
+              {pending ? t("common.saving") : t("publicProfile.save")}
             </button>
           </div>
         </form>

@@ -1,3 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
+import commonMessages from "../messages/en/common.json";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   makeStore,
@@ -8,6 +12,28 @@ import { managementApi } from "@/store/features/management/api";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
 import { normalizeError } from "@/store/api/errors";
 import { useQueryView } from "@/store/use-query-view";
+
+function renderQueryView<T, R>(
+  query: Parameters<typeof useQueryView<T, R>>[0],
+) {
+  let value!: ReturnType<typeof useQueryView<T, R>>;
+  function Probe() {
+    value = useQueryView(query);
+    return null;
+  }
+  renderToStaticMarkup(
+    createElement(
+      NextIntlClientProvider,
+      {
+        locale: "en",
+        timeZone: "Asia/Dhaka",
+        messages: { common: commonMessages },
+      } as Parameters<typeof NextIntlClientProvider>[0],
+      createElement(Probe),
+    ),
+  );
+  return value;
+}
 
 const NativeRequest = globalThis.Request;
 const stores: AppStore[] = [];
@@ -161,7 +187,7 @@ describe("request-safe RTK Query store", () => {
     );
     expect(result.error).toMatchObject({ status: 403, code: "FORBIDDEN" });
     expect(current.getState().workspaceUi.status).toBe("active");
-    const view = useQueryView({
+    const view = renderQueryView({
       currentData: { private: true },
       isLoading: false,
       isFetching: false,
@@ -169,7 +195,7 @@ describe("request-safe RTK Query store", () => {
       refetch: vi.fn(),
     });
     expect(view.data).toBeUndefined();
-    expect(view.error).toBe("Denied");
+    expect(view.error).toBe(commonMessages.errors.FORBIDDEN);
   });
 
   it("never retries a failed write or a rate-limited read and preserves safe field errors", async () => {
@@ -227,7 +253,7 @@ describe("request-safe RTK Query store", () => {
   });
 
   it("distinguishes filter loading and background refresh failure without showing old-filter data", () => {
-    const current = useQueryView({
+    const current = renderQueryView({
       currentData: undefined,
       isFetching: true,
       isLoading: false,
@@ -235,7 +261,7 @@ describe("request-safe RTK Query store", () => {
     });
     expect(current.data).toBeUndefined();
     expect(current.loading).toBe(true);
-    const cached = useQueryView({
+    const cached = renderQueryView({
       currentData: { total: 4 },
       isFetching: false,
       isLoading: false,

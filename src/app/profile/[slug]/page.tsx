@@ -1,3 +1,5 @@
+import { ProfileLoadingIndicator } from "@/components/loading-indicator";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound, redirect } from "next/navigation";
@@ -17,13 +19,7 @@ type Props = { params: Promise<{ slug: string }> };
 
 export default function PublicProfilePage(props: Props) {
   return (
-    <Suspense
-      fallback={
-        <section className={styles.loading} role="status">
-          Loading profile…
-        </section>
-      }
-    >
+    <Suspense fallback={<ProfileLoadingIndicator className={styles.loading} />}>
       <Profile {...props} />
     </Suspense>
   );
@@ -32,8 +28,10 @@ export default function PublicProfilePage(props: Props) {
 async function Profile({ params }: Props) {
   // Read on each visit so deactivation or deletion removes the public profile.
   await connection();
+  const t = await getTranslations("employee");
+  const locale = await getLocale();
   const { slug } = await params;
-  const profile = await getPublicProfile(slug);
+  const profile = await getPublicProfile(slug, t("publicProfile.teamMember"));
   if (!profile) notFound();
   if (slug !== profile.slug)
     redirect(`/profile/${encodeURIComponent(profile.slug)}`);
@@ -45,26 +43,42 @@ async function Profile({ params }: Props) {
       </div>
       <div className={styles.content}>
         <PublicProfileAvatar name={profile.name} image={profile.image} />
-        <p className={styles.eyebrow}>OUR PEOPLE</p>
+        <p className={styles.eyebrow}>{t("publicProfile.people")}</p>
         <h1 id="profile-name" className={styles.name}>
           {profile.name}
         </h1>
-        <p className={styles.intro}>Part of the XHYD team.</p>
+        <p className={styles.intro}>{t("publicProfile.intro")}</p>
         <dl className={styles.details}>
           {[
             {
-              label: "Designation",
+              label: t("publicProfile.designation"),
               value: profile.designation,
               Icon: BriefcaseBusiness,
             },
-            { label: "Phone", value: profile.phone, Icon: Phone },
-            { label: "Blood group", value: profile.bloodGroup, Icon: Droplet },
-            { label: "Department", value: profile.department, Icon: Layers3 },
-            { label: "Home address", value: profile.homeAddress, Icon: House },
             {
-              label: "Date of birth",
+              label: t("publicProfile.phone"),
+              value: profile.phone,
+              Icon: Phone,
+            },
+            {
+              label: t("publicProfile.bloodGroup"),
+              value: profile.bloodGroup,
+              Icon: Droplet,
+            },
+            {
+              label: t("profile.department"),
+              value: profile.department,
+              Icon: Layers3,
+            },
+            {
+              label: t("publicProfile.address"),
+              value: profile.homeAddress,
+              Icon: House,
+            },
+            {
+              label: t("publicProfile.birthday"),
               value: profile.dateOfBirth
-                ? new Intl.DateTimeFormat("en-GB", {
+                ? new Intl.DateTimeFormat(locale, {
                     day: "numeric",
                     month: "long",
                     year: "numeric",
@@ -81,11 +95,11 @@ async function Profile({ params }: Props) {
                 </span>
                 {label}
               </dt>
-              <dd>{value || "Not listed"}</dd>
+              <dd>{value || t("publicProfile.notListed")}</dd>
             </div>
           ))}
         </dl>
-        <p className={styles.caption}>Public profile · XHYD</p>
+        <p className={styles.caption}>{t("publicProfile.caption")}</p>
       </div>
     </article>
   );

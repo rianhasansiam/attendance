@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { Activity, act, createElement as h } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, type Root } from "./i18n-root";
 import { Provider } from "react-redux";
 import { configureStore, type Middleware } from "@reduxjs/toolkit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

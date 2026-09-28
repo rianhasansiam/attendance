@@ -1,9 +1,13 @@
+import { getLocale, getTranslations } from "next-intl/server";
 import type { MetadataRoute } from "next";
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const t = await getTranslations("auth");
+  const locale = await getLocale();
   return {
-    name: "XHYD Attendance System",
+    name: t("title"),
     short_name: "Attend",
-    description: "Secure attendance for your workday.",
+    description: t("description"),
+    lang: locale,
     start_url: "/employee/dashboard",
     scope: "/",
     display: "standalone",

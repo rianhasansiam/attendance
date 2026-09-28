@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, createElement as h } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, type Root } from "./i18n-root";
 import { Provider } from "react-redux";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminResource } from "@/components/resource-workspace";
@@ -316,9 +316,9 @@ it("keeps a confirmed deletion out of a stale list and corrects its count when r
     ).toHaveLength(1);
     expect(
       container.querySelector('.toolbar [role="status"]')?.textContent,
-    ).toBe("1 records");
+    ).toBe("1 record");
     expect(container.querySelector(".pagination")?.textContent).toContain(
-      "1 total records",
+      "1 total record",
     );
   });
   rejectReads = false;
@@ -331,7 +331,7 @@ it("keeps a confirmed deletion out of a stale list and corrects its count when r
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(
       container.querySelector('.toolbar [role="status"]')?.textContent,
-    ).toBe("1 records");
+    ).toBe("1 record");
     expect(deleteButtons()).toHaveLength(1);
   });
   expect(writes).toHaveLength(1);

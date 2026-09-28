@@ -28,11 +28,22 @@ export function isAmbiguousWrite(error: unknown) {
 }
 
 export class UncertainCeremonyError extends Error {
+  readonly code = "CEREMONY_UNCERTAIN";
   constructor() {
     super(
       "The server response was interrupted. Checking the latest state before another attempt.",
     );
     this.name = "UncertainCeremonyError";
+  }
+}
+
+class AttendanceCeremonyError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AttendanceCeremonyError";
   }
 }
 
@@ -48,7 +59,8 @@ function getLocation(signal?: AbortSignal): Promise<LocationFix> {
     signal?.throwIfAborted();
     if (!navigator.geolocation)
       return reject(
-        new Error(
+        new AttendanceCeremonyError(
+          "GEOLOCATION_UNSUPPORTED",
           "Location is unavailable in this browser. Use a supported browser with location enabled.",
         ),
       );
@@ -78,7 +90,8 @@ function getLocation(signal?: AbortSignal): Promise<LocationFix> {
         cleanup();
         if (signal?.aborted) return;
         reject(
-          new Error(
+          new AttendanceCeremonyError(
+            error.code === 1 ? "GEOLOCATION_DENIED" : "GEOLOCATION_FAILED",
             error.code === 1
               ? "Location permission is required. Allow location access in your browser and try again."
               : "Your location could not be determined. Move near a window and try again.",
@@ -158,7 +171,15 @@ export async function recordAttendance({
   timing = beginAttendanceTiming(action),
 }: {
   action: "CHECK_IN" | "CHECK_OUT";
-  progress: (message: string) => void;
+  progress: (
+    message:
+      | "ceremony.preparing"
+      | "ceremony.deviceAndLocation"
+      | "ceremony.device"
+      | "ceremony.location"
+      | "ceremony.refreshLocation"
+      | "ceremony.recording",
+  ) => void;
   signal?: AbortSignal;
   timing?: AttendanceTimingTrace;
 }): Promise<AttendanceRecord> {
@@ -168,7 +189,7 @@ export async function recordAttendance({
   signal?.addEventListener("abort", abort, { once: true });
   const attemptSignal = attempt.signal;
   try {
-    progress("Preparing verification…");
+    progress("ceremony.preparing");
     const challenge = await timing.measure("options", () =>
       api<{
         required: boolean;
@@ -188,7 +209,8 @@ export async function recordAttendance({
       typeof challenge.requireGeofence !== "boolean" ||
       (challenge.required && (!challenge.options || !challenge.challengeId))
     )
-      throw new Error(
+      throw new AttendanceCeremonyError(
+        "VERIFICATION_UNAVAILABLE",
         "Verification requirements are unavailable. Please try again.",
       );
 
@@ -215,32 +237,33 @@ export async function recordAttendance({
       (await canOverlapLocation(attemptSignal));
     attemptSignal.throwIfAborted();
     if (overlap) {
-      progress("Verify your device while your location is acquired…");
+      progress("ceremony.deviceAndLocation");
       // Promise.all attaches rejection handlers to both branches immediately.
       // The outer catch aborts the sibling and ignores its later completion.
       [response, fix] = await Promise.all([authenticate(), locate()]);
     } else {
-      if (challenge.required) progress("Verify with your registered device…");
+      if (challenge.required) progress("ceremony.device");
       response = await authenticate();
       attemptSignal.throwIfAborted();
       if (challenge.requireGeofence) {
-        progress("Getting your location…");
+        progress("ceremony.location");
         fix = await locate();
       }
     }
     attemptSignal.throwIfAborted();
     if (fix && !locationIsFresh(fix)) {
-      progress("Refreshing your location…");
+      progress("ceremony.refreshLocation");
       fix = await timing.measure("gps-refresh", () =>
         getLocation(attemptSignal),
       );
       attemptSignal.throwIfAborted();
       if (!locationIsFresh(fix))
-        throw new Error(
+        throw new AttendanceCeremonyError(
+          "GEOLOCATION_STALE",
           "A fresh location could not be obtained. Please try again.",
         );
     }
-    progress("Recording your attendance…");
+    progress("ceremony.recording");
     try {
       const record = await timing.measure("post", () =>
         api<AttendanceRecord>(

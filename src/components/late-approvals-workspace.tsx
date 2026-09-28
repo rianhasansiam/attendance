@@ -1,9 +1,10 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
+import { useEmployeeError, useEmployeeMessage } from "./employee-feedback";
+
 import { useRef, useState } from "react";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
-import { errorMessage } from "@/store/api/errors";
-import { DELETED_INFO } from "@/lib/deleted-info";
 import { useFreshness } from "@/store/freshness";
 import { useAppDispatch } from "@/store/hooks";
 import { useQueryView } from "@/store/use-query-view";
@@ -30,11 +31,13 @@ import {
   time,
 } from "./ui";
 
-function timestamp(value: string | null, timeZone: string) {
-  return value ? new Date(value).toLocaleString(undefined, { timeZone }) : "—";
+function timestamp(value: string | null, timeZone: string, locale: string) {
+  return value ? new Date(value).toLocaleString(locale, { timeZone }) : "—";
 }
 
 export function LateApprovalsWorkspace() {
+  const t = useTranslations("employee");
+  const locale = useLocale();
   const { params, update } = useUrlFilters();
   const page = pageFromSearch(params.get("page"));
   const filter = params.get("status") || "PENDING";
@@ -51,8 +54,8 @@ export function LateApprovalsWorkspace() {
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
   const [needsReconcile, setNeedsReconcile] = useState(false);
-  const [actionError, setActionError] = useState("");
-  const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useEmployeeError();
+  const [message, setMessage] = useEmployeeMessage();
 
   async function refreshRequests() {
     try {
@@ -81,7 +84,7 @@ export function LateApprovalsWorkspace() {
       return;
     const current = data?.items.find((item) => item.id === reviewing.id);
     if (current?.status !== "PENDING") {
-      setActionError("This request has changed. Refresh before reviewing it.");
+      setActionError({ key: "approvals.changed" });
       setNeedsReconcile(true);
       return;
     }
@@ -96,9 +99,11 @@ export function LateApprovalsWorkspace() {
         ...(reviewNote.trim() ? { reviewNote: reviewNote.trim() } : {}),
       }).unwrap();
       setReviewing(null);
-      setMessage(`Late approval request ${status.toLowerCase()}.`);
+      setMessage(
+        status === "APPROVED" ? "approvals.approved" : "approvals.rejected",
+      );
     } catch (error) {
-      setActionError(errorMessage(error));
+      setActionError(error);
       setNeedsReconcile(true);
       await refreshRequests();
     } finally {
@@ -116,22 +121,20 @@ export function LateApprovalsWorkspace() {
   return (
     <>
       <PageHeader
-        eyebrow="ATTENDANCE REVIEW"
-        title="Late approvals"
-        description="Review requests to excuse late arrivals. Approval preserves actual arrival times and does not increase overtime."
+        eyebrow={t("approvals.eyebrow")}
+        title={t("approvals.title")}
+        description={t("approvals.description")}
         action={<Refresh onClick={() => void refreshRequests()} />}
       />
       <ErrorNotice message={error || (!reviewing ? actionError : "")} />
-      {needsReconcile && (
-        <Notice>
-          Refresh these requests successfully before another decision.
-        </Notice>
-      )}
+      {needsReconcile && <Notice>{t("approvals.reconcile")}</Notice>}
       {message && <Notice notify>{message}</Notice>}
       <section className="card">
         <div className="toolbar">
           <div className="field" style={{ marginBottom: 0 }}>
-            <label htmlFor="late-approval-status">Request status</label>
+            <label htmlFor="late-approval-status">
+              {t("approvals.requestStatus")}
+            </label>
             <select
               id="late-approval-status"
               value={filter}
@@ -140,15 +143,15 @@ export function LateApprovalsWorkspace() {
                 update({ status: event.target.value, page: null })
               }
             >
-              <option value="PENDING">Pending</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-              <option value="all">All requests</option>
+              <option value="PENDING">{t("common.pending")}</option>
+              <option value="APPROVED">{t("common.approved")}</option>
+              <option value="REJECTED">{t("common.rejected")}</option>
+              <option value="all">{t("approvals.all")}</option>
             </select>
           </div>
           {isFetching && data && (
             <span className="muted" role="status">
-              Refreshing…
+              {t("common.refreshing")}
             </span>
           )}
         </div>
@@ -166,40 +169,54 @@ export function LateApprovalsWorkspace() {
                   employeeName:
                     request.attendance.employee?.user.name ||
                     request.attendance.employee?.user.email ||
-                    DELETED_INFO,
+                    t("common.deleted"),
                   scheduledStart: request.scheduledStartAt
                     ? time(
                         request.scheduledStartAt,
                         request.attendance.shift.timezone,
+                        locale,
                       )
-                    : "Unknown",
+                    : t("common.unknown"),
                   arrival: time(
                     request.checkInAt,
                     request.attendance.shift.timezone,
+                    locale,
                   ),
                   submitted: timestamp(
                     request.requestedAt,
                     request.attendance.shift.timezone,
+                    locale,
                   ),
                 }))}
                 columns={[
-                  { key: "employeeName", label: "Employee" },
+                  { key: "employeeName", label: t("columns.employee") },
                   {
                     key: "attendance.employee.employeeCode",
-                    label: "Employee ID",
+                    label: t("columns.employeeId"),
                   },
                   {
                     key: "attendance.attendanceDate",
-                    label: "Date",
+                    label: t("columns.date"),
                     format: "date",
                   },
-                  { key: "scheduledStart", label: "Scheduled start" },
-                  { key: "arrival", label: "Actual check-in" },
-                  { key: "attendance.shift.timezone", label: "Timezone" },
-                  { key: "lateMinutes", label: "Actual late (min)" },
-                  { key: "reason", label: "Submitted reason", format: "text" },
-                  { key: "status", label: "Status", format: "badge" },
-                  { key: "submitted", label: "Submitted at" },
+                  { key: "scheduledStart", label: t("columns.scheduledStart") },
+                  { key: "arrival", label: t("columns.actualCheckIn") },
+                  {
+                    key: "attendance.shift.timezone",
+                    label: t("columns.timezone"),
+                  },
+                  { key: "lateMinutes", label: t("columns.lateMinutes") },
+                  {
+                    key: "reason",
+                    label: t("columns.submittedReason"),
+                    format: "text",
+                  },
+                  {
+                    key: "status",
+                    label: t("columns.status"),
+                    format: "badge",
+                  },
+                  { key: "submitted", label: t("columns.submittedAt") },
                 ]}
                 actions={(row) => (
                   <button
@@ -216,7 +233,7 @@ export function LateApprovalsWorkspace() {
                       setActionError("");
                     }}
                   >
-                    {row.canReview ? "Review" : "View"}
+                    {row.canReview ? t("common.review") : t("common.view")}
                   </button>
                 )}
               />
@@ -233,7 +250,7 @@ export function LateApprovalsWorkspace() {
       </section>
       {reviewing && (
         <Modal
-          title="Review late approval"
+          title={t("approvals.reviewTitle")}
           close={() => {
             if (!busy) setReviewing(null);
           }}
@@ -244,21 +261,26 @@ export function LateApprovalsWorkspace() {
               <strong>
                 {reviewing.attendance.employee?.user.name ||
                   reviewing.attendance.employee?.user.email ||
-                  DELETED_INFO}
+                  t("common.deleted")}
               </strong>{" "}
-              · {date(reviewing.attendance.attendanceDate)}
+              · {date(reviewing.attendance.attendanceDate, locale)}
             </p>
             <p className="muted">
-              Scheduled start:{" "}
-              {reviewing.scheduledStartAt
-                ? time(reviewing.scheduledStartAt, timezone)
-                : "Unknown (historical record)"}
+              {t("approvals.scheduledStart", {
+                time: reviewing.scheduledStartAt
+                  ? time(reviewing.scheduledStartAt, timezone, locale)
+                  : t("approvals.unknownHistorical"),
+              })}
               <br />
-              Actual check-in: {time(reviewing.checkInAt, timezone)} ·{" "}
-              {reviewing.lateMinutes} minutes late
+              {t("approvals.actualArrival", {
+                time: time(reviewing.checkInAt, timezone, locale),
+                count: reviewing.lateMinutes,
+              })}
               <br />
-              Submitted: {timestamp(reviewing.requestedAt, timezone)} ·{" "}
-              {timezone}
+              {t("approvals.submittedDetails", {
+                time: timestamp(reviewing.requestedAt, timezone, locale),
+                timezone,
+              })}
             </p>
             <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
               {reviewing.reason}
@@ -266,23 +288,20 @@ export function LateApprovalsWorkspace() {
             <Badge value={reviewing.status} />
             {attendanceChanged && (
               <p className="notice">
-                Attendance changed after this request. Current check-in:{" "}
-                {time(reviewing.attendance.checkInAt, timezone)}; current late
-                duration: {reviewing.attendance.lateMinutes} minutes. This
-                request cannot be approved.
+                {t("approvals.attendanceChanged", {
+                  time: time(reviewing.attendance.checkInAt, timezone, locale),
+                  count: reviewing.attendance.lateMinutes,
+                })}
               </p>
             )}
             {reviewing.status === "PENDING" &&
             !reviewing.attendance.employee ? (
-              <p className="notice">
-                This employee was deleted. This request is retained as history
-                and cannot be reviewed.
-              </p>
+              <p className="notice">{t("approvals.deletedEmployee")}</p>
             ) : reviewing.status === "PENDING" ? (
               <>
                 <div className="field">
                   <label htmlFor="late-approval-review-note">
-                    Review note (optional)
+                    {t("approvals.reviewNote")}
                   </label>
                   <textarea
                     id="late-approval-review-note"
@@ -300,7 +319,7 @@ export function LateApprovalsWorkspace() {
                     disabled={busy}
                     onClick={() => void refreshRequests()}
                   >
-                    Refresh requests
+                    {t("approvals.refresh")}
                   </button>
                 )}
                 <div className="form-actions">
@@ -310,7 +329,7 @@ export function LateApprovalsWorkspace() {
                     disabled={disabled}
                     onClick={() => void decide("REJECTED")}
                   >
-                    Reject
+                    {t("common.reject")}
                   </button>
                   <button
                     type="button"
@@ -318,18 +337,20 @@ export function LateApprovalsWorkspace() {
                     disabled={disabled || attendanceChanged}
                     onClick={() => void decide("APPROVED")}
                   >
-                    {busy ? "Saving…" : "Approve"}
+                    {busy ? t("common.saving") : t("common.approve")}
                   </button>
                 </div>
               </>
             ) : (
               <>
                 <p className="muted">
-                  Reviewed by{" "}
-                  {reviewing.reviewedBy?.name ||
-                    reviewing.reviewedBy?.email ||
-                    DELETED_INFO}{" "}
-                  · {timestamp(reviewing.reviewedAt, timezone)}
+                  {t("approvals.reviewedBy", {
+                    name:
+                      reviewing.reviewedBy?.name ||
+                      reviewing.reviewedBy?.email ||
+                      t("common.deleted"),
+                    time: timestamp(reviewing.reviewedAt, timezone, locale),
+                  })}
                 </p>
                 {reviewing.reviewNote && (
                   <p

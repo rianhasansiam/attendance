@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useAppStore } from "@/store/hooks";
@@ -35,37 +37,37 @@ import {
 } from "lucide-react";
 
 const adminNavigation = [
-  { label: "Overview", href: "dashboard", icon: House },
-  { label: "Employees", href: "employees", icon: Users },
-  { label: "Attendance", href: "attendance", icon: CalendarCheck2 },
-  { label: "Late approvals", href: "late-approvals", icon: Clock3 },
-  { label: "Reports", href: "reports", icon: ChartNoAxesCombined },
-  { label: "Drive Cost", href: "drive-cost", icon: CarFront },
+  { label: "overview", href: "dashboard", icon: House },
+  { label: "employees", href: "employees", icon: Users },
+  { label: "attendance", href: "attendance", icon: CalendarCheck2 },
+  { label: "lateApprovals", href: "late-approvals", icon: Clock3 },
+  { label: "reports", href: "reports", icon: ChartNoAxesCombined },
+  { label: "driveCost", href: "drive-cost", icon: CarFront },
   {
-    label: "Daily Expenses",
+    label: "dailyExpenses",
     href: "/daily-expenses",
     icon: Wallet,
     canAccess: canManageDailyExpenses,
   },
-  { label: "Leave requests", href: "leaves", icon: CalendarDays },
-  { label: "Devices", href: "devices", icon: Fingerprint },
-  { label: "Departments", href: "departments", icon: Layers3 },
-  { label: "Offices", href: "offices", icon: Building2 },
-  { label: "Office networks", href: "networks", icon: Network },
-  { label: "Shifts", href: "shifts", icon: Clock3 },
-  { label: "Shift assignments", href: "assignments", icon: ClipboardList },
-  { label: "Holidays", href: "holidays", icon: CalendarDays },
-  { label: "Audit log", href: "audit", icon: ShieldCheck },
-  { label: "Security events", href: "events", icon: ShieldCheck },
-  { label: "Account security", href: "/account/security", icon: ShieldCheck },
+  { label: "leaves", href: "leaves", icon: CalendarDays },
+  { label: "devices", href: "devices", icon: Fingerprint },
+  { label: "departments", href: "departments", icon: Layers3 },
+  { label: "offices", href: "offices", icon: Building2 },
+  { label: "networks", href: "networks", icon: Network },
+  { label: "shifts", href: "shifts", icon: Clock3 },
+  { label: "assignments", href: "assignments", icon: ClipboardList },
+  { label: "holidays", href: "holidays", icon: CalendarDays },
+  { label: "audit", href: "audit", icon: ShieldCheck },
+  { label: "events", href: "events", icon: ShieldCheck },
+  { label: "security", href: "/account/security", icon: ShieldCheck },
 ];
 const employeeNavigation = [
-  { label: "My day", href: "dashboard", icon: House },
-  { label: "Attendance history", href: "history", icon: CalendarCheck2 },
-  { label: "Leave requests", href: "leaves", icon: CalendarDays },
-  { label: "My devices", href: "devices", icon: Fingerprint },
-  { label: "My profile", href: "profile", icon: UserRound },
-  { label: "Account security", href: "/account/security", icon: ShieldCheck },
+  { label: "myDay", href: "dashboard", icon: House },
+  { label: "history", href: "history", icon: CalendarCheck2 },
+  { label: "leaves", href: "leaves", icon: CalendarDays },
+  { label: "myDevices", href: "devices", icon: Fingerprint },
+  { label: "profile", href: "profile", icon: UserRound },
+  { label: "security", href: "/account/security", icon: ShieldCheck },
 ];
 export function Brand() {
   return (
@@ -94,6 +96,9 @@ export function AppShell({
   };
   mode: "admin" | "employee";
 }) {
+  const t = useTranslations("navigation");
+  const common = useTranslations("common");
+  const auth = useTranslations("auth");
   const store = useAppStore();
   const pathname = usePathname();
   async function signOutAction() {
@@ -110,19 +115,19 @@ export function AppShell({
           ),
           ...(user.role === "SUPER_ADMIN"
             ? [
-                { label: "All Users", href: "users", icon: Users },
-                { label: "Settings", href: "settings", icon: Settings2 },
+                { label: "users", href: "users", icon: Users },
+                { label: "settings", href: "settings", icon: Settings2 },
               ]
             : []),
         ]
       : [
           ...employeeNavigation,
           ...(user.role === "MANAGE_DRIVER"
-            ? [{ label: "Drive Cost", href: "drive-cost", icon: CarFront }]
+            ? [{ label: "driveCost", href: "drive-cost", icon: CarFront }]
             : []),
         ]),
     {
-      label: "Public profile",
+      label: "publicProfile",
       href: `/profile/${encodeURIComponent(user.profileSlug)}`,
       icon: Globe,
     },
@@ -135,23 +140,23 @@ export function AppShell({
   return (
     <div className="workspace">
       <a href="#main-content" className="skip-link">
-        Skip to content
+        {t("skip")}
       </a>
       {open && (
         <button
-          aria-label="Close navigation"
+          aria-label={t("closeNavigation")}
           className="sidebar-backdrop"
           onClick={() => setOpen(false)}
         />
       )}
       <aside className={`sidebar ${open ? "is-open" : ""}`}>
-        <Link href={`/${mode}/dashboard`} aria-label="Attendance home">
+        <Link href={`/${mode}/dashboard`} aria-label={t("home")}>
           <Brand />
         </Link>
         <div className="workspace-label">
-          {mode === "admin" ? "WORKSPACE" : "PERSONAL WORKSPACE"}
+          {mode === "admin" ? t("workspace") : t("personalWorkspace")}
         </div>
-        <nav aria-label="Main navigation">
+        <nav aria-label={t("mainNavigation")}>
           {navigation.map(({ label, href, icon: Icon }) => (
             <Link
               onClick={() => setOpen(false)}
@@ -164,7 +169,11 @@ export function AppShell({
               }
             >
               <Icon size={18} />
-              <span>{label}</span>
+              <span>
+                {t(
+                  label as keyof typeof import("../../messages/en/navigation.json"),
+                )}
+              </span>
             </Link>
           ))}
         </nav>
@@ -172,15 +181,15 @@ export function AppShell({
           <div className="secure-workspace">
             <ShieldCheck size={17} />
             <span>
-              Secure attendance
+              {t("secure")}
               <br />
-              <small>Verified. Every workday.</small>
+              <small>{t("verified")}</small>
             </span>
           </div>
           <form action={signOutAction}>
             <button className="nav-item signout" type="submit">
               <LogOut size={18} />
-              Sign out
+              {t("signOut")}
             </button>
           </form>
         </div>
@@ -190,24 +199,38 @@ export function AppShell({
           <div className="breadcrumb">
             <button
               className="icon-button mobile-menu"
-              aria-label={open ? "Close menu" : "Open menu"}
+              aria-label={open ? t("closeMenu") : t("openMenu")}
               onClick={() => setOpen(!open)}
             >
               {open ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <span>{mode === "admin" ? "Workspace" : "My workspace"}</span>
+            <span>{mode === "admin" ? t("workspace") : t("myWorkspace")}</span>
             <ChevronRight size={14} />
-            <strong>{current?.label || "Overview"}</strong>
+            <strong>
+              {t(
+                (current?.label ||
+                  "overview") as keyof typeof import("../../messages/en/navigation.json"),
+              )}
+            </strong>
           </div>
           <div className="topbar-user">
-            <span className="role-label">{user.role.replaceAll("_", " ")}</span>
+            <LanguageSwitcher />
+            <span className="role-label">
+              {common.has(
+                `status.${user.role as keyof typeof import("../../messages/en/common.json").status}`,
+              )
+                ? common(
+                    `status.${user.role as keyof typeof import("../../messages/en/common.json").status}`,
+                  )
+                : user.role}
+            </span>
             {user.image ? (
               <Image
                 unoptimized
                 src={user.image}
                 width={35}
                 height={35}
-                alt="Google profile"
+                alt={t("googleProfile")}
                 className="avatar"
               />
             ) : (
@@ -221,8 +244,8 @@ export function AppShell({
           {children}
         </main>
         <footer className="workspace-footer">
-          <span>XHYD Attendance System</span>
-          <span>A little more clarity in every workday.</span>
+          <span>{auth("title")}</span>
+          <span>{t("footer")}</span>
         </footer>
       </div>
     </div>

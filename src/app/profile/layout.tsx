@@ -1,12 +1,11 @@
-import type { Metadata } from "next";
+import { FeatureMessages } from "@/i18n/feature-messages";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { Suspense } from "react";
+import { connection } from "next/server";
+import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { CheckCheck } from "lucide-react";
 import styles from "./profile.module.css";
-
-export const metadata: Metadata = {
-  title: "Public profile",
-  description: "Meet the people at XHYD.",
-};
 
 export default function PublicProfileLayout({
   children,
@@ -14,20 +13,37 @@ export default function PublicProfileLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark}>
-            <CheckCheck size={24} aria-hidden="true" />
-          </span>
-          <span>XHYD</span>
-        </div>
-        <Link href="/login" className="button secondary" prefetch={false}>
-          Sign in
-        </Link>
-      </header>
-      <main className={styles.main}>{children}</main>
-      <footer className={styles.footer}>XHYD · Our people</footer>
-    </div>
+    <Suspense fallback={null}>
+      <PublicProfileLayoutContent>{children}</PublicProfileLayoutContent>
+    </Suspense>
+  );
+}
+
+async function PublicProfileLayoutContent({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  await connection();
+  const t = await getTranslations("admin");
+  return (
+    <FeatureMessages namespaces={["employee"]}>
+      <div className={styles.page}>
+        <header className={styles.header}>
+          <div className={styles.brand}>
+            <span className={styles.brandMark}>
+              <CheckCheck size={24} aria-hidden="true" />
+            </span>
+            <span>XHYD</span>
+          </div>
+          <LanguageSwitcher />
+          <Link href="/login" className="button secondary" prefetch={false}>
+            {t("publicProfile.signIn")}
+          </Link>
+        </header>
+        <main className={styles.main}>{children}</main>
+        <footer className={styles.footer}>{t("publicProfile.footer")}</footer>
+      </div>
+    </FeatureMessages>
   );
 }

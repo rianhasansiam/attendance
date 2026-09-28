@@ -100,6 +100,15 @@ async function driveFixture(page: Page, error?: string) {
       }
       if (request.method() !== "GET")
         throw new Error(`Unexpected method: ${request.method()}`);
+      if (new URL(request.url()).pathname.endsWith("/balance")) {
+        await route.fulfill({
+          json: {
+            success: true,
+            data: { balance: "0.00", totalAdded: "0.00", totalPaid: "0.00" },
+          },
+        });
+        return;
+      }
       await route.fulfill({
         json: {
           success: true,
@@ -191,6 +200,8 @@ test("mobile confirmation fits the screen and failed actions keep an inline erro
     exact: true,
   });
   await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(destinationFrom);
+  await expect(dialog.locator("[data-alert-markup]")).toHaveCount(0);
   await capture(page, testInfo, "sweet-alert-mobile");
   const box = await dialog.boundingBox();
   expect(box).not.toBeNull();
@@ -204,13 +215,16 @@ test("mobile confirmation fits the screen and failed actions keep an inline erro
     .getByRole("button", { name: "Delete drive cost", exact: true })
     .click();
   await expect.poll(() => writes.length).toBe(1);
-  await expect(page.locator(".notice.error")).toContainText(message);
+  const safeMessage = "Another request updated this record. Please try again.";
+  await expect(page.locator(".notice.error")).toContainText(safeMessage);
+  await expect(page.locator(".notice.error")).not.toContainText(message);
   const toast = page.locator(".swal2-popup.app-alert-toast");
-  await expect(toast).toContainText(message);
+  await expect(toast).toContainText(safeMessage);
+  await expect(toast).not.toContainText(message);
   await expect(toast.locator("[data-alert-markup]")).toHaveCount(0);
   await toast.getByRole("button", { name: "Dismiss notification" }).click();
   await expect(toast).toBeHidden();
-  await expect(page.locator(".notice.error")).toContainText(message);
+  await expect(page.locator(".notice.error")).toContainText(safeMessage);
   await expect(remove).toBeEnabled();
   expect(writes).toHaveLength(1);
 });

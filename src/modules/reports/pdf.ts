@@ -1,9 +1,12 @@
 import "server-only";
 
+import type { Locale } from "@/i18n/config";
+import { createReportTranslator } from "./translations";
 import path from "node:path";
 import PDFDocument from "pdfkit";
 
 export type PdfReport = {
+  locale?: Locale;
   title: string;
   subtitle: string[];
   summary: Array<{ label: string; value: string }>;
@@ -38,7 +41,12 @@ const colors = {
  * Wrap before painting so all columns share row boundaries. Grapheme segmentation
  * keeps Bengali vowel signs and conjuncts together when a long word must wrap.
  */
-function wrapText(doc: PDFKit.PDFDocument, value: string, width: number) {
+function wrapText(
+  doc: PDFKit.PDFDocument,
+  value: string,
+  width: number,
+  measure = (text: string) => doc.widthOfString(text),
+) {
   const lines: string[] = [];
   const graphemes = new Intl.Segmenter("bn", { granularity: "grapheme" });
   const text = value
@@ -50,7 +58,7 @@ function wrapText(doc: PDFKit.PDFDocument, value: string, width: number) {
     for (const word of paragraph.trim().split(/\s+/u)) {
       if (!word) continue;
       const candidate = line ? `${line} ${word}` : word;
-      if (doc.widthOfString(candidate) <= width) {
+      if (measure(candidate) <= width) {
         line = candidate;
         continue;
       }
@@ -58,12 +66,12 @@ function wrapText(doc: PDFKit.PDFDocument, value: string, width: number) {
         lines.push(line);
         line = "";
       }
-      if (doc.widthOfString(word) <= width) {
+      if (measure(word) <= width) {
         line = word;
         continue;
       }
       for (const { segment } of graphemes.segment(word)) {
-        if (line && doc.widthOfString(line + segment) > width) {
+        if (line && measure(line + segment) > width) {
           lines.push(line);
           line = "";
         }
@@ -84,6 +92,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     throw new Error("PDF columns must have positive width weights.");
   }
 
+  const t = createReportTranslator(report.locale || "en");
   const doc = new PDFDocument({
     size: "A4",
     layout: "landscape",
@@ -92,12 +101,37 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     bufferPages: true,
     info: {
       Title: report.title,
-      Author: "XHYD Attendance System",
+      Author: t("pdf.brand"),
       Subject: report.subtitle.join(" | "),
     },
   });
   doc.registerFont("Regular", regularFont);
   doc.registerFont("Bold", boldFont);
+  doc.registerFont(
+    "CJK",
+    path.join(process.cwd(), "src/assets/fonts/NotoSansCJKsc-Regular.otf"),
+  );
+  let activeFont = "Regular";
+  function font(name: string) {
+    activeFont = name;
+    return doc.font(name);
+  }
+  const cjk = /([\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]+)/u;
+  function runs(text: string) {
+    return text.split(cjk).filter(Boolean);
+  }
+  function measure(text: string) {
+    let width = 0;
+    for (const run of runs(text)) {
+      doc.font(cjk.test(run) ? "CJK" : activeFont);
+      width += doc.widthOfString(run);
+    }
+    doc.font(activeFont);
+    return width;
+  }
+  function wrap(value: string, width: number) {
+    return wrapText(doc, value, width, measure);
+  }
   const chunks: Buffer[] = [];
   const result = new Promise<Uint8Array>((resolve, reject) => {
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -129,24 +163,29 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     width: number,
     align: "left" | "right" = "left",
   ) {
-    const left = align === "right" ? x + width - doc.widthOfString(text) : x;
+    let left = align === "right" ? x + width - measure(text) : x;
     // Each line was measured above; disabling automatic flow avoids accidental
     // page creation when painting a cell or footer near the bottom margin.
-    doc.text(text, left, top, { lineBreak: false });
+    for (const run of runs(text)) {
+      doc.font(cjk.test(run) ? "CJK" : activeFont);
+      doc.text(run, left, top, { lineBreak: false });
+      left += doc.widthOfString(run);
+    }
+    doc.font(activeFont);
   }
 
   function pageHeading(continued: boolean) {
     doc.rect(margin, margin, 3, 24).fill(colors.green);
-    doc.font("Bold").fontSize(9).fillColor(colors.green);
+    font("Bold").fontSize(9).fillColor(colors.green);
     paintLine(
-      "XHYD ATTENDANCE SYSTEM",
+      t("pdf.brandHeading"),
       margin + 12,
       margin - 1,
       contentWidth - 12,
     );
     doc.fontSize(continued ? 16 : 23).fillColor(colors.dark);
     y = margin + 17;
-    const headingLines = wrapText(doc, report.title, contentWidth - 12);
+    const headingLines = wrap(report.title, contentWidth - 12);
     for (const line of headingLines) {
       paintLine(line, margin + 12, y, contentWidth - 12);
       y += lineHeight();
@@ -160,13 +199,13 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
   }
 
   pageHeading(false);
-  doc.font("Regular").fontSize(9).fillColor(colors.muted);
+  font("Regular").fontSize(9).fillColor(colors.muted);
   for (const subtitle of report.subtitle) {
-    const lines = wrapText(doc, subtitle, contentWidth);
+    const lines = wrap(subtitle, contentWidth);
     for (const line of lines) {
       if (y + lineHeight() > contentBottom) {
         newPage();
-        doc.font("Regular").fontSize(9).fillColor(colors.muted);
+        font("Regular").fontSize(9).fillColor(colors.muted);
       }
       paintLine(line, margin, y, contentWidth);
       y += lineHeight();
@@ -182,11 +221,11 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     const cards = report.summary
       .slice(start, start + cardsPerRow)
       .map((card) => {
-        doc.font("Regular").fontSize(8.5);
-        const labels = wrapText(doc, card.label, cardWidth - 24);
+        font("Regular").fontSize(8.5);
+        const labels = wrap(card.label, cardWidth - 24);
         const labelHeight = lineHeight();
-        doc.font("Bold").fontSize(13);
-        const values = wrapText(doc, card.value, cardWidth - 24);
+        font("Bold").fontSize(13);
+        const values = wrap(card.value, cardWidth - 24);
         const valueHeight = lineHeight();
         return { labels, labelHeight, values, valueHeight };
       });
@@ -203,12 +242,12 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       const x = margin + index * (cardWidth + cardGap);
       doc.roundedRect(x, y, cardWidth, height, 5).fill(colors.summary);
       let top = y + 8;
-      doc.font("Regular").fontSize(8.5).fillColor(colors.muted);
+      font("Regular").fontSize(8.5).fillColor(colors.muted);
       for (const line of card.labels) {
         paintLine(line, x + 12, top, cardWidth - 24);
         top += card.labelHeight;
       }
-      doc.font("Bold").fontSize(13).fillColor(colors.green);
+      font("Bold").fontSize(13).fillColor(colors.green);
       for (const line of card.values) {
         paintLine(line, x + 12, top, cardWidth - 24);
         top += card.valueHeight;
@@ -219,12 +258,12 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
   y += 7;
 
   if (report.footerNote) {
-    doc.font("Regular").fontSize(8).fillColor(colors.muted);
-    const notes = wrapText(doc, report.footerNote, contentWidth);
+    font("Regular").fontSize(8).fillColor(colors.muted);
+    const notes = wrap(report.footerNote, contentWidth);
     for (const note of notes) {
       if (y + lineHeight() > contentBottom) {
         newPage();
-        doc.font("Regular").fontSize(8).fillColor(colors.muted);
+        font("Regular").fontSize(8).fillColor(colors.muted);
       }
       paintLine(note, margin, y, contentWidth);
       y += lineHeight();
@@ -232,9 +271,9 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     y += 12;
   }
 
-  doc.font("Bold").fontSize(bodySize);
+  font("Bold").fontSize(bodySize);
   const headings = report.columns.map((column, index) =>
-    wrapText(doc, column.label, widths[index] - cellPadding * 2),
+    wrap(column.label, widths[index] - cellPadding * 2),
   );
   const headingLineHeight = lineHeight();
   const headingHeight =
@@ -243,7 +282,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
 
   function tableHeading() {
     doc.rect(margin, y, contentWidth, headingHeight).fill(colors.green);
-    doc.font("Bold").fontSize(bodySize).fillColor("#FFFFFF");
+    font("Bold").fontSize(bodySize).fillColor("#FFFFFF");
     let x = margin;
     headings.forEach((lines, index) => {
       lines.forEach((line, lineIndex) =>
@@ -258,7 +297,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       x += widths[index];
     });
     y += headingHeight;
-    doc.font("Regular").fontSize(bodySize).fillColor(colors.dark);
+    font("Regular").fontSize(bodySize).fillColor(colors.dark);
   }
 
   function tablePage() {
@@ -266,7 +305,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
     tableHeading();
   }
 
-  doc.font("Regular").fontSize(bodySize);
+  font("Regular").fontSize(bodySize);
   const bodyLineHeight = lineHeight();
   if (y + headingHeight + bodyLineHeight + cellPadding * 2 > contentBottom)
     newPage();
@@ -286,7 +325,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       background = groupColor;
     }
     const cells = report.columns.map((_, index) =>
-      wrapText(doc, row[index] ?? "", widths[index] - cellPadding * 2),
+      wrap(row[index] ?? "", widths[index] - cellPadding * 2),
     );
     const lines = Math.max(...cells.map((cell) => cell.length));
     const rowHeight = lines * bodyLineHeight + cellPadding * 2;
@@ -303,7 +342,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       );
       const continuation =
         offset > 0 && cells[0].length <= offset
-          ? [...cells[0].slice(0, 2), "(continued)"]
+          ? [...cells[0].slice(0, 2), t("pdf.continued")]
           : null;
       const minimumLines = Math.max(
         Math.min(3, lines - offset),
@@ -322,7 +361,7 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
         Math.max(count, continuation?.length ?? 0) * bodyLineHeight +
         cellPadding * 2;
       doc.rect(margin, y, contentWidth, height).fill(background);
-      doc.font("Regular").fontSize(bodySize).fillColor(colors.dark);
+      font("Regular").fontSize(bodySize).fillColor(colors.dark);
       let x = margin;
       cells.forEach((cell, index) => {
         const visibleLines =
@@ -353,9 +392,9 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
   });
 
   if (report.rows.length === 0) {
-    doc.font("Regular").fontSize(10).fillColor(colors.muted);
+    font("Regular").fontSize(10).fillColor(colors.muted);
     paintLine(
-      "No records match the selected filters.",
+      t("pdf.empty"),
       margin + cellPadding,
       y + 16,
       contentWidth - cellPadding * 2,
@@ -372,15 +411,14 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       .strokeColor(colors.line)
       .lineWidth(0.5)
       .stroke();
-    doc.font("Regular").fontSize(8).fillColor(colors.muted);
+    font("Regular").fontSize(8).fillColor(colors.muted);
+    paintLine(t("pdf.brand"), margin, pageHeight - 28, contentWidth / 2);
     paintLine(
-      "XHYD Attendance System",
-      margin,
-      pageHeight - 28,
-      contentWidth / 2,
-    );
-    paintLine(
-      `${report.rows.length} records  |  Page ${page + 1} of ${pageCount}`,
+      t("pdf.pageSummary", {
+        count: report.rows.length,
+        page: page + 1,
+        pages: pageCount,
+      }),
       margin,
       pageHeight - 28,
       contentWidth,

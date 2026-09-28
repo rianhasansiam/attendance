@@ -1,5 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+import { useEmployeeError } from "./employee-feedback";
+
 import {
   useCallback,
   useEffect,
@@ -14,7 +17,6 @@ import {
   useSaveLateReasonMutation,
   useLazyEmployeeDayQuery,
 } from "@/store/features/attendance/api";
-import { errorMessage } from "@/store/api/errors";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
 import { useAppDispatch } from "@/store/hooks";
 
@@ -27,6 +29,7 @@ export function LateReasonDialog({
   onClose: () => void;
   onSaved: (attendance: DataRow) => void;
 }) {
+  const t = useTranslations("employee");
   const [reason, setReason] = useState("");
   const [requestApproval, setRequestApproval] = useState(false);
   const [saveReason, { isLoading: writing }] = useSaveLateReasonMutation();
@@ -36,7 +39,7 @@ export function LateReasonDialog({
   const [reconciling, setReconciling] = useState(false);
   const saving = writing || checking || reconciling;
   const submitting = useRef(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useEmployeeError();
   const input = useRef<HTMLTextAreaElement>(null);
   const close = useCallback(() => {
     if (!saving) onClose();
@@ -68,7 +71,7 @@ export function LateReasonDialog({
       )
         onSaved(current);
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     } finally {
       setReconciling(false);
     }
@@ -79,7 +82,7 @@ export function LateReasonDialog({
     if (submitting.current || needsReconcile) return;
     const trimmed = reason.trim();
     if (!trimmed) {
-      setError("Please enter a reason for your late attendance.");
+      setError({ key: "lateReason.required" });
       input.current?.focus();
       return;
     }
@@ -93,7 +96,7 @@ export function LateReasonDialog({
       }).unwrap();
       onSaved(saved);
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
       if (isAmbiguousWrite(error)) {
         setNeedsReconcile(true);
         await reconcile();
@@ -104,21 +107,20 @@ export function LateReasonDialog({
   }
 
   return (
-    <Modal title="Reason for late attendance" close={close}>
+    <Modal title={t("lateReason.title")} close={close}>
       <form onSubmit={submit} aria-busy={saving}>
         <p
           id="late-reason-description"
           className="muted"
           style={{ marginBottom: 20 }}
         >
-          Your check-in has been recorded. You arrived{" "}
-          {Number(attendance.lateMinutes)}{" "}
-          {Number(attendance.lateMinutes) === 1 ? "minute" : "minutes"} late.
-          Please tell us the reason for your late attendance.
+          {t("lateReason.description", {
+            count: Number(attendance.lateMinutes),
+          })}
         </p>
         <ErrorNotice message={error} />
         <div className="field">
-          <label htmlFor="late-attendance-reason">Reason</label>
+          <label htmlFor="late-attendance-reason">{t("common.reason")}</label>
           <textarea
             ref={input}
             id="late-attendance-reason"
@@ -130,9 +132,11 @@ export function LateReasonDialog({
             disabled={saving}
             onChange={(event) => setReason(event.target.value)}
             aria-describedby="late-reason-description late-reason-limit"
-            placeholder="Tell us why you were late…"
+            placeholder={t("lateReason.placeholder")}
           />
-          <small id="late-reason-limit">{reason.length}/1000 characters</small>
+          <small id="late-reason-limit">
+            {t("lateReason.characters", { count: reason.length })}
+          </small>
         </div>
         <label className="field-checkbox">
           <input
@@ -143,16 +147,14 @@ export function LateReasonDialog({
             onChange={(event) => setRequestApproval(event.target.checked)}
             aria-describedby="late-approval-description"
           />
-          Request late approval
+          {t("lateReason.requestApproval")}
         </label>
         <p
           id="late-approval-description"
           className="muted"
           style={{ marginTop: 8 }}
         >
-          An administrator will review your reason. Approved late arrivals do
-          not count toward your late total. Actual arrival time and overtime
-          calculations stay the same.
+          {t("lateReason.approvalDescription")}
         </p>
         {needsReconcile && (
           <button
@@ -161,7 +163,7 @@ export function LateReasonDialog({
             disabled={saving}
             onClick={() => void reconcile()}
           >
-            Refresh attendance before trying again
+            {t("lateReason.refresh")}
           </button>
         )}
         <div className="form-actions">
@@ -171,7 +173,7 @@ export function LateReasonDialog({
             disabled={saving}
             onClick={close}
           >
-            Later
+            {t("lateReason.later")}
           </button>
           <button
             type="submit"
@@ -179,10 +181,10 @@ export function LateReasonDialog({
             disabled={saving || needsReconcile}
           >
             {saving
-              ? "Saving…"
+              ? t("common.saving")
               : requestApproval
-                ? "Submit reason and request"
-                : "Submit reason"}
+                ? t("lateReason.submitRequest")
+                : t("lateReason.submit")}
           </button>
         </div>
       </form>

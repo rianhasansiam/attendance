@@ -1,3 +1,5 @@
+import { getLocale } from "next-intl/server";
+import { resolveLocale } from "@/i18n/config";
 import { api } from "@/lib/api";
 import { requireDriveCostManager } from "@/lib/auth";
 import { rateLimit } from "@/lib/security";
@@ -17,6 +19,7 @@ export function GET(request: Request) {
         q: params.get("q") ?? undefined,
         paymentStatus: params.get("paymentStatus") ?? undefined,
       }),
+      resolveLocale(await getLocale()),
     );
   });
 }

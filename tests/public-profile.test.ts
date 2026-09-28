@@ -214,3 +214,26 @@ describe("public profile image policy", () => {
     expect((await getPublicProfile("user"))?.image).toBeNull();
   });
 });
+
+describe("public profile localized missing-name fallback", () => {
+  it.each([null, "", "   "])(
+    "uses the requested Chinese fallback only for missing name %j",
+    async (name) => {
+      mocks.findUser.mockResolvedValue({
+        ...publicUser,
+        name,
+        email: "private@example.test",
+      });
+      const result = await getPublicProfile("unnamed", "团队成员");
+      expect(result).toEqual({ ...publicProfile, name: "团队成员" });
+      expect(JSON.stringify(result)).not.toContain("private@example.test");
+    },
+  );
+
+  it("preserves stored names, including a literal English fallback phrase", async () => {
+    for (const name of ["Team member", "团队成员", "张明 / English name"]) {
+      mocks.findUser.mockResolvedValue({ ...publicUser, name });
+      expect((await getPublicProfile("named", "团队成员"))?.name).toBe(name);
+    }
+  });
+});

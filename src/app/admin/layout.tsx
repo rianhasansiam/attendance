@@ -1,3 +1,4 @@
+import { FeatureMessages } from "@/i18n/feature-messages";
 import { requirePageUser } from "@/lib/auth";
 import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
@@ -24,27 +25,29 @@ async function AuthenticatedAdminLayout({
   await connection();
   const user = await requirePageUser("ADMIN");
   return (
-    <StoreProvider
-      identity={{
-        id: user.id,
-        role: user.role,
-        sessionId: user.sessionId,
-        expires: user.sessionExpires,
-      }}
-    >
-      <AppShell
-        mode="admin"
-        user={{
+    <FeatureMessages namespaces={["admin", "employee", "expenses"]}>
+      <StoreProvider
+        identity={{
           id: user.id,
-          profileSlug: user.profileSlug,
-          name: user.name,
-          email: user.email,
           role: user.role,
-          image: user.image,
+          sessionId: user.sessionId,
+          expires: user.sessionExpires,
         }}
       >
-        {children}
-      </AppShell>
-    </StoreProvider>
+        <AppShell
+          mode="admin"
+          user={{
+            id: user.id,
+            profileSlug: user.profileSlug,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            image: user.image,
+          }}
+        >
+          {children}
+        </AppShell>
+      </StoreProvider>
+    </FeatureMessages>
   );
 }

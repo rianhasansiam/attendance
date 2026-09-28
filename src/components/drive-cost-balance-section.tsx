@@ -4,19 +4,14 @@ import { useRef, useState, type FormEvent } from "react";
 import { Plus, Wallet } from "lucide-react";
 import { ErrorNotice, Loading, Notice } from "./ui";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
-import { errorMessage } from "@/store/api/errors";
+import { useLocale, useTranslations } from "next-intl";
+import { useExpenseFeedback } from "./expense-feedback";
+import { formatMoney } from "@/i18n/format-money";
 import {
   useAddDriveCostBalanceMutation,
   type AddDriveCostBalanceInput,
   type DriveCostBalance,
 } from "@/store/features/drive-costs/api";
-
-function taka(amount: string) {
-  const [, sign, whole, fraction = ""] = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(
-    amount,
-  )!;
-  return `${sign}৳${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${fraction.padEnd(2, "0")}`;
-}
 
 export function DriveCostBalanceSection({
   canAddBalance,
@@ -33,10 +28,12 @@ export function DriveCostBalanceSection({
   isFetching: boolean;
   refresh: () => void;
 }) {
+  const t = useTranslations("expenses");
+  const locale = useLocale();
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [actionError, setActionError] = useState("");
-  const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useExpenseFeedback();
+  const [message, setMessage] = useExpenseFeedback();
   const [busy, setBusy] = useState(false);
   const [retryPending, setRetryPending] = useState(false);
   const submitting = useRef(false);
@@ -53,9 +50,7 @@ export function DriveCostBalanceSection({
         Number(normalizedAmount) <= 0 ||
         Number(normalizedAmount) > 9_999_999_999.99)
     ) {
-      setActionError(
-        "Enter an amount greater than zero, up to 9,999,999,999.99, with at most two decimal places.",
-      );
+      setActionError({ key: "positiveBalanceAmount" });
       return;
     }
 
@@ -76,9 +71,9 @@ export function DriveCostBalanceSection({
       setRetryPending(false);
       setAmount("");
       setNote("");
-      setMessage("Drive cost balance added successfully.");
+      setMessage({ key: "driveBalanceAdded" });
     } catch (error) {
-      setActionError(errorMessage(error));
+      setActionError({ error });
       if (isAmbiguousWrite(error)) {
         setRetryPending(true);
         refresh();
@@ -94,17 +89,14 @@ export function DriveCostBalanceSection({
   return (
     <section
       className="card card-body drive-balance-card"
-      aria-label="Drive cost balance"
+      aria-label={t("driveBalance")}
     >
       <div className="calc-header">
         <div className="calc-title">
           <Wallet size={18} />
           <div>
-            <h3>Drive cost balance</h3>
-            <p>
-              Total balance added minus all paid trips, across all dates. The
-              balance can be negative.
-            </p>
+            <h3>{t("driveBalance")}</h3>
+            <p>{t("driveBalanceDescription")}</p>
           </div>
         </div>
       </div>
@@ -116,44 +108,47 @@ export function DriveCostBalanceSection({
           <div
             className={`calc-summary-card calc-total${data.balance.startsWith("-") ? " balance-negative" : ""}`}
           >
-            <small>Current balance</small>
-            <strong>{taka(data.balance)}</strong>
-            <p>Available for drive costs</p>
+            <small>{t("currentBalanceLower")}</small>
+            <strong>
+              {formatMoney(data.balance, "৳", locale).replace("৳ ", "৳")}
+            </strong>
+            <p>{t("availableDrive")}</p>
           </div>
           <div className="calc-summary-card">
-            <small>Total added</small>
-            <strong>{taka(data.totalAdded)}</strong>
-            <p>Added by super admins</p>
+            <small>{t("totalAdded")}</small>
+            <strong>
+              {formatMoney(data.totalAdded, "৳", locale).replace("৳ ", "৳")}
+            </strong>
+            <p>{t("addedByAdmins")}</p>
           </div>
           <div className="calc-summary-card">
-            <small>Paid trips</small>
-            <strong>{taka(data.totalPaid)}</strong>
-            <p>Deducted from the balance</p>
+            <small>{t("paidTrips")}</small>
+            <strong>
+              {formatMoney(data.totalPaid, "৳", locale).replace("৳ ", "৳")}
+            </strong>
+            <p>{t("deductedBalance")}</p>
           </div>
         </div>
       ) : null}
       {isFetching && data && (
         <p className="muted" role="status">
-          Refreshing balance…
+          {t("refreshingBalance")}
         </p>
       )}
       {message && <Notice notify>{message}</Notice>}
       {canAddBalance && (
         <form
           className="calc-inputs drive-balance-form"
-          aria-label="Add drive cost balance"
+          aria-label={t("addDriveBalance")}
           onSubmit={submit}
         >
           {retryPending && (
             <div className="drive-balance-retry">
-              <Notice>
-                The addition could not be confirmed. Retry this balance addition
-                to confirm the result safely.
-              </Notice>
+              <Notice>{t("balanceUnconfirmed")}</Notice>
             </div>
           )}
           <div className="field">
-            <label htmlFor="drive-balance-amount">Amount (BDT)</label>
+            <label htmlFor="drive-balance-amount">{t("amountBdt")}</label>
             <input
               id="drive-balance-amount"
               name="amount"
@@ -170,14 +165,14 @@ export function DriveCostBalanceSection({
             />
           </div>
           <div className="field drive-balance-note">
-            <label htmlFor="drive-balance-note">Note (optional)</label>
+            <label htmlFor="drive-balance-note">{t("noteOptional")}</label>
             <input
               id="drive-balance-note"
               name="note"
               type="text"
               maxLength={500}
               disabled={busy || retryPending}
-              placeholder="e.g. October travel budget"
+              placeholder={t("budgetExample")}
               value={note}
               onChange={(event) => setNote(event.target.value)}
             />
@@ -185,10 +180,10 @@ export function DriveCostBalanceSection({
           <button className="button calc-run-btn" type="submit" disabled={busy}>
             <Plus size={16} />
             {busy
-              ? "Adding…"
+              ? t("adding")
               : retryPending
-                ? "Retry balance addition"
-                : "Add balance"}
+                ? t("retryBalance")
+                : t("addBalanceLower")}
           </button>
         </form>
       )}

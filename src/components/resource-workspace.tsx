@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type FormEvent } from "react";
+import { useTranslations, useLocale } from "next-intl";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -15,6 +16,7 @@ import {
   UserRoundPen,
 } from "lucide-react";
 import {
+  date,
   ErrorNotice,
   items,
   label,
@@ -30,7 +32,8 @@ import { useDebouncedValue } from "@/lib/client/use-debounced-value";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { confirmAction, promptAction } from "@/lib/client/alerts";
 import { api, ClientRequestError } from "@/lib/client/request";
-import { errorMessage, normalizeError } from "@/store/api/errors";
+import { normalizeError } from "@/store/api/errors";
+import { useErrorMessage } from "@/i18n/errors";
 import { baseApi } from "@/store/api/base-api";
 import { useAppDispatch } from "@/store/hooks";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
@@ -50,7 +53,13 @@ import type {
 } from "@/store/features/management/contracts";
 import { Modal } from "./modal";
 export { Modal } from "./modal";
-import { fieldValue, resourceConfigs, type Field } from "./resource-config";
+import {
+  adminOptionLabel,
+  auditValueLabel,
+  fieldValue,
+  getResourceConfigs,
+  type Field,
+} from "./resource-config";
 import { PasswordField, validateNewPassword } from "./auth/password-fields";
 
 function PublicProfileLink({
@@ -60,6 +69,7 @@ function PublicProfileLink({
   resource: string;
   row: DataRow;
 }) {
+  const t = useTranslations("admin");
   if (resource !== "employees" && resource !== "users") return null;
   const id = resource === "employees" ? nested(row, "user.id") : row.id;
   const slug =
@@ -75,8 +85,8 @@ function PublicProfileLink({
       prefetch={false}
       target="_blank"
       rel="noopener noreferrer"
-      title="View public profile (opens in new tab)"
-      aria-label="View public profile (opens in new tab)"
+      title={t("resources.viewPublicProfile")}
+      aria-label={t("resources.viewPublicProfile")}
       className="icon-button"
     >
       <ExternalLink size={16} />
@@ -91,6 +101,7 @@ function EditPublicProfileLink({
   resource: string;
   row: DataRow;
 }) {
+  const t = useTranslations("admin");
   if (resource !== "employees" && resource !== "users") return null;
   const id = resource === "employees" ? nested(row, "user.id") : row.id;
   if (typeof id !== "string" || !id) return null;
@@ -98,8 +109,8 @@ function EditPublicProfileLink({
     <Link
       href={`/admin/users/${encodeURIComponent(id)}/profile`}
       prefetch={false}
-      title="Edit public profile"
-      aria-label="Edit public profile"
+      title={t("resources.editPublicProfile")}
+      aria-label={t("resources.editPublicProfile")}
       className="icon-button"
     >
       <UserRoundPen size={16} />
@@ -108,6 +119,8 @@ function EditPublicProfileLink({
 }
 
 function ReferenceField({ field, value }: { field: Field; value: string }) {
+  const t = useTranslations("admin");
+  const locale = useLocale();
   const [query, setQuery] = useState("");
   const search = useDebouncedValue(query);
   const [pagination, setPagination] = useState({ query: "", page: 1 });
@@ -126,8 +139,12 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
     <>
       <input
         type="search"
-        aria-label={`Find ${field.label.toLowerCase()}`}
-        placeholder={`Search ${field.label.toLowerCase()}…`}
+        aria-label={t("resources.findField", {
+          field: field.label.toLowerCase(),
+        })}
+        placeholder={t("resources.searchField", {
+          field: field.label.toLowerCase(),
+        })}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
@@ -139,14 +156,19 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
         onChange={(event) => setSelection(event.target.value)}
       >
         <option value="">
-          {loading ? "Loading options…" : `Select ${field.label.toLowerCase()}`}
+          {loading
+            ? t("resources.loadingOptions")
+            : t("resources.selectField", { field: field.label.toLowerCase() })}
         </option>
         {selection && !rows.some((row) => row.id === selection) && (
-          <option value={selection}>Current selection</option>
+          <option value={selection}>{t("resources.currentSelection")}</option>
         )}
         {rows.map((row) => (
           <option key={String(row.id)} value={String(row.id)}>
-            {label(nested(row, "user.name") || row.name || row.employeeCode)}
+            {label(
+              nested(row, "user.name") || row.name || row.employeeCode,
+              locale,
+            )}
             {row.employeeCode ? ` · ${row.employeeCode}` : ""}
           </option>
         ))}
@@ -159,7 +181,7 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
             disabled={loading || page <= 1}
             onClick={() => setPagination({ query: search, page: page - 1 })}
           >
-            Previous options
+            {t("resources.previousOptions")}
           </button>
           <button
             type="button"
@@ -167,7 +189,7 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
             disabled={loading || page * 100 >= (data?.total || 0)}
             onClick={() => setPagination({ query: search, page: page + 1 })}
           >
-            Next options
+            {t("resources.nextOptions")}
           </button>
         </div>
       )}
@@ -179,7 +201,7 @@ function ReferenceField({ field, value }: { field: Field; value: string }) {
             className="button small secondary"
             onClick={refresh}
           >
-            Retry options
+            {t("resources.retryOptions")}
           </button>
         </>
       )}
@@ -195,6 +217,7 @@ export function FormField({
   row: DataRow;
   disabled?: boolean;
 }) {
+  const t = useTranslations("admin");
   const value = fieldValue(row, field);
   if (field.type === "password")
     return (
@@ -224,7 +247,7 @@ export function FormField({
       <fieldset className="field full">
         <legend>{field.label}</legend>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 13 }}>
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+          {(["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const).map(
             (day, index) => (
               <label className="field-checkbox" key={day}>
                 <input
@@ -233,7 +256,7 @@ export function FormField({
                   type="checkbox"
                   defaultChecked={Array.isArray(value) && value.includes(index)}
                 />
-                {day}
+                {t(`days.${day}`)}
               </label>
             ),
           )}
@@ -261,7 +284,7 @@ export function FormField({
               value={option}
               disabled={field.disabledOptions?.includes(option)}
             >
-              {option.replaceAll("_", " ")}
+              {adminOptionLabel(t, option)}
             </option>
           ))}
         </select>
@@ -308,7 +331,10 @@ export function AdminResource({
   canEditPublicProfiles?: boolean;
   currentUserId?: string;
 }) {
-  const config = resourceConfigs[resource];
+  const t = useTranslations("admin");
+  const locale = useLocale();
+  const config = useMemo(() => getResourceConfigs(t)[resource], [t, resource]);
+  const errorMessage = useErrorMessage();
   const { params, update } = useUrlFilters();
   const query = params.get("q") || "";
   const search = useDebouncedValue(query);
@@ -324,7 +350,12 @@ export function AdminResource({
   const [confirming, setConfirming] = useState(false);
   const [needsReconcile, setNeedsReconcile] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<
+    | ""
+    | "resources.employeeDeleted"
+    | "resources.userDeleted"
+    | "resources.saved"
+  >("");
   const [deletedRecords, setDeletedRecords] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -398,7 +429,7 @@ export function AdminResource({
         ? {
             ...field,
             disabledOptions: ["EMPLOYEE", "MANAGE_DRIVER"],
-            hint: "Employee and Manage Driver roles require an employee profile. This account does not have one.",
+            hint: t("resources.employeeProfileRequired"),
           }
         : field,
     );
@@ -460,10 +491,10 @@ export function AdminResource({
       setEditing(null);
       setMessage(
         resource === "employees" && method === "DELETE"
-          ? "Employee and sign-in account permanently deleted."
+          ? "resources.employeeDeleted"
           : resource === "users" && method === "DELETE"
-            ? "User account permanently deleted."
-            : "Your changes have been saved.",
+            ? "resources.userDeleted"
+            : "resources.saved",
       );
     } catch (error) {
       setActionError(errorMessage(error));
@@ -566,7 +597,7 @@ export function AdminResource({
   return (
     <>
       <PageHeader
-        eyebrow="WORKSPACE MANAGEMENT"
+        eyebrow={t("resources.eyebrow")}
         title={config.title}
         description={config.description}
         action={
@@ -577,21 +608,19 @@ export function AdminResource({
               onClick={openNew}
             >
               <Plus size={16} />
-              Add {config.singular}
+              {t("resources.add", { resource: config.singular })}
             </button>
           ) : undefined
         }
       />
       <ErrorNotice message={error || (!editing ? actionError : "")} />
       {needsReconcile && !editing && (
-        <Notice>
-          Refresh these records successfully before trying another change.
-        </Notice>
+        <Notice>{t("resources.refreshBeforeChange")}</Notice>
       )}
       {message && (
         <Notice notify>
           <Check size={16} />
-          {message}
+          {t(message)}
         </Notice>
       )}
       <section className="card">
@@ -599,8 +628,12 @@ export function AdminResource({
           <div className="search-field">
             <Search size={16} />
             <input
-              aria-label={`Search ${config.title.toLowerCase()}`}
-              placeholder={`Search ${config.title.toLowerCase()}…`}
+              aria-label={t("resources.searchLabel", {
+                resource: config.title.toLowerCase(),
+              })}
+              placeholder={t("resources.searchPlaceholder", {
+                resource: config.title.toLowerCase(),
+              })}
               value={query}
               onChange={(event) => {
                 update({ q: event.target.value || null, page: null });
@@ -609,7 +642,9 @@ export function AdminResource({
           </div>
           <div className="buttons">
             <span className="muted" role="status" style={{ fontSize: 11 }}>
-              {isFetching && data ? "Refreshing…" : `${total} records`}
+              {isFetching && data
+                ? t("common.refreshing")
+                : t("common.records", { count: total })}
             </span>
             <Refresh onClick={() => void refreshResource()} />
           </div>
@@ -619,7 +654,19 @@ export function AdminResource({
         ) : (
           <Table
             rows={rows}
-            columns={config.columns}
+            columns={config.columns.map((column) =>
+              resource === "events" && column.key === "reason"
+                ? {
+                    ...column,
+                    render: (value, row) =>
+                      typeof row.type === "string" &&
+                      row.type.endsWith("_REJECTED") &&
+                      value
+                        ? errorMessage({ code: String(value) })
+                        : label(value, locale),
+                  }
+                : column,
+            )}
             actions={(row) => (
               <div className="row-actions">
                 {resource === "devices" ? (
@@ -634,7 +681,7 @@ export function AdminResource({
                           mutate(String(row.id), { approved: true })
                         }
                       >
-                        Approve
+                        {t("common.approve")}
                       </button>
                     )}
                     {!row.revokedAt && (
@@ -647,9 +694,9 @@ export function AdminResource({
                           void withActionDialog(async () => {
                             if (
                               await confirmAction({
-                                title: "Revoke device?",
-                                text: "It will no longer verify attendance.",
-                                confirmText: "Revoke device",
+                                title: t("resources.revokeDeviceTitle"),
+                                text: t("resources.revokeDeviceDescription"),
+                                confirmText: t("resources.revokeDevice"),
                                 danger: true,
                               })
                             )
@@ -657,7 +704,7 @@ export function AdminResource({
                           })
                         }
                       >
-                        Revoke
+                        {t("common.revoke")}
                       </button>
                     )}
                   </>
@@ -673,10 +720,10 @@ export function AdminResource({
                           onClick={() =>
                             void withActionDialog(async () => {
                               const reviewNote = await promptAction({
-                                title: "Approve leave?",
-                                inputLabel: "Review note (optional)",
+                                title: t("resources.approveLeaveTitle"),
+                                inputLabel: t("resources.reviewNote"),
                                 initialValue: "",
-                                confirmText: "Approve leave",
+                                confirmText: t("resources.approveLeave"),
                                 maxLength: 1000,
                               });
                               if (reviewNote !== null)
@@ -687,7 +734,7 @@ export function AdminResource({
                             })
                           }
                         >
-                          Approve
+                          {t("common.approve")}
                         </button>
                         <button
                           disabled={
@@ -697,10 +744,10 @@ export function AdminResource({
                           onClick={() =>
                             void withActionDialog(async () => {
                               const reviewNote = await promptAction({
-                                title: "Decline leave?",
-                                inputLabel: "Review note (optional)",
+                                title: t("resources.declineLeaveTitle"),
+                                inputLabel: t("resources.reviewNote"),
                                 initialValue: "",
-                                confirmText: "Decline leave",
+                                confirmText: t("resources.declineLeave"),
                                 maxLength: 1000,
                               });
                               if (reviewNote !== null)
@@ -711,14 +758,14 @@ export function AdminResource({
                             })
                           }
                         >
-                          Decline
+                          {t("common.decline")}
                         </button>
                       </>
                     )}
                   </>
                 ) : config.readOnly ? (
                   <button
-                    aria-label="View audit entry"
+                    aria-label={t("resources.viewAuditEntry")}
                     className="icon-button"
                     onClick={() => setViewing(row)}
                   >
@@ -732,7 +779,7 @@ export function AdminResource({
                     )}
                     {resource === "employees" && (
                       <Link
-                        title="View employee attendance"
+                        title={t("resources.viewEmployeeAttendance")}
                         className="icon-button"
                         href={`/admin/attendance?employeeId=${row.id}`}
                       >
@@ -740,7 +787,9 @@ export function AdminResource({
                       </Link>
                     )}
                     <button
-                      aria-label={`Edit ${config.singular}`}
+                      aria-label={t("resources.edit", {
+                        resource: config.singular,
+                      })}
                       disabled={
                         busy ||
                         confirming ||
@@ -767,20 +816,28 @@ export function AdminResource({
                         disabled={
                           busy || confirming || needsReconcile || isFetching
                         }
-                        aria-label={`Delete ${config.singular}`}
+                        aria-label={t("resources.delete", {
+                          resource: config.singular,
+                        })}
                         className="icon-button"
                         onClick={() =>
                           void withActionDialog(async () => {
                             if (
                               await confirmAction({
-                                title: `Delete ${config.singular}?`,
+                                title: t("resources.deleteTitle", {
+                                  resource: config.singular,
+                                }),
                                 text:
                                   resource === "employees"
-                                    ? "Permanently delete this employee and their sign-in account? This cannot be undone. Related records will be kept with the employee’s details replaced by “deleted info”."
+                                    ? t("resources.deleteEmployeeDescription")
                                     : resource === "users"
-                                      ? "Permanently delete this user account? This cannot be undone. Related records will be kept with the user’s details replaced by “deleted info”."
-                                      : `Delete this ${config.singular}? Existing references may prevent deletion.`,
-                                confirmText: `Delete ${config.singular}`,
+                                      ? t("resources.deleteUserDescription")
+                                      : t("resources.deleteDescription", {
+                                          resource: config.singular,
+                                        }),
+                                confirmText: t("resources.delete", {
+                                  resource: config.singular,
+                                }),
                                 danger: true,
                               })
                             )
@@ -798,9 +855,7 @@ export function AdminResource({
           />
         )}
         <div className="pagination">
-          <span>
-            Page {page} · {total} total records
-          </span>
+          <span>{t("resources.page", { page, count: total })}</span>
           <div className="buttons">
             <button
               className="button small secondary"
@@ -808,14 +863,14 @@ export function AdminResource({
               onClick={() => setPage(page - 1)}
             >
               <ArrowLeft size={13} />
-              Previous
+              {t("common.previous")}
             </button>
             <button
               className="button small secondary"
               disabled={page * 25 >= total || loading}
               onClick={() => setPage(page + 1)}
             >
-              Next
+              {t("common.next")}
               <ArrowRight size={13} />
             </button>
           </div>
@@ -823,7 +878,9 @@ export function AdminResource({
       </section>
       {editing && (
         <Modal
-          title={`${editing.id ? "Edit" : "Add"} ${config.singular}`}
+          title={t(editing.id ? "resources.edit" : "resources.add", {
+            resource: config.singular,
+          })}
           close={() => {
             if (!busy) setEditing(null);
           }}
@@ -834,31 +891,28 @@ export function AdminResource({
               <p className="muted">{String(editing.email || "")}</p>
             )}
             {editingOwnAccount && (
-              <Notice>
-                You can edit your name. Your own role and account status cannot
-                be changed here.
-              </Notice>
+              <Notice>{t("resources.ownAccountHint")}</Notice>
             )}
             {resource === "employees" &&
               Boolean(editing.id) &&
               !canEditPublicProfiles && (
                 <p className="muted">
-                  {String(nested(editing, "user.name") || "Employee")} · Only
-                  Super Admin can change the name and public profile details.
+                  {t("resources.profileRestricted", {
+                    name: String(
+                      nested(editing, "user.name") || t("labels.employee"),
+                    ),
+                  })}
                 </p>
               )}
             {needsReconcile && (
               <>
-                <Notice>
-                  The result is uncertain. Refresh these records before another
-                  change.
-                </Notice>
+                <Notice>{t("resources.uncertainChange")}</Notice>
                 <button
                   type="button"
                   className="button secondary"
                   onClick={() => void refreshResource()}
                 >
-                  Refresh records
+                  {t("resources.refreshRecords")}
                 </button>
               </>
             )}
@@ -879,34 +933,44 @@ export function AdminResource({
                 className="button secondary"
                 onClick={() => setEditing(null)}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 disabled={busy || confirming || needsReconcile || isFetching}
                 type="submit"
                 className="button"
               >
-                {busy ? "Saving…" : "Save changes"}
+                {busy ? t("common.saving") : t("common.saveChanges")}
               </button>
             </div>
           </form>
         </Modal>
       )}
       {viewing && (
-        <Modal title="Audit entry" close={() => setViewing(null)}>
+        <Modal title={t("resources.auditEntry")} close={() => setViewing(null)}>
           <dl className="detail-list">
-            {["action", "resource", "resourceId", "createdAt"].map((key) => (
-              <div className="detail-item" key={key}>
-                <dt>{key}</dt>
-                <dd>{label(viewing[key])}</dd>
-              </div>
-            ))}
+            {(["action", "resource", "resourceId", "createdAt"] as const).map(
+              (key) => (
+                <div className="detail-item" key={key}>
+                  <dt>{t(`audit.${key}`)}</dt>
+                  <dd>
+                    {key === "createdAt"
+                      ? date(viewing[key], locale)
+                      : key === "action" || key === "resource"
+                        ? auditValueLabel(t, viewing[key])
+                        : label(viewing[key], locale)}
+                  </dd>
+                </div>
+              ),
+            )}
           </dl>
-          <h3 style={{ margin: "25px 0 10px" }}>Previous state</h3>
+          <h3 style={{ margin: "25px 0 10px" }}>
+            {t("resources.previousState")}
+          </h3>
           <pre className="json-detail">
             {JSON.stringify(viewing.previousState, null, 2)}
           </pre>
-          <h3 style={{ margin: "20px 0 10px" }}>New state</h3>
+          <h3 style={{ margin: "20px 0 10px" }}>{t("resources.newState")}</h3>
           <pre className="json-detail">
             {JSON.stringify(viewing.newState, null, 2)}
           </pre>

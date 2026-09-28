@@ -116,7 +116,7 @@ test("drive cost date filters include both boundaries and combine with search an
   await expect(
     list.getByRole("cell", { name: "Trip 11", exact: true }),
   ).toBeVisible();
-  await expect(list).toContainText("Page 1 · 1 total records");
+  await expect(list).toContainText("Page 1 · 1 total record");
   await search.fill("");
   await expect(list.locator("tbody tr")).toHaveCount(3);
 
@@ -231,7 +231,7 @@ test("paid and unpaid filters persist in the list and independently calculate an
   await expect(status).toHaveValue("PAID");
   await expect(list).toContainText("Page 1 · 2 total records");
   await search.fill("Chattogram");
-  await expect(list).toContainText("Page 1 · 1 total records");
+  await expect(list).toContainText("Page 1 · 1 total record");
   // Unapplied drafts must not change which displayed records are exported.
   await status.selectOption("UNPAID");
   const reportResponse = page.waitForResponse((response) =>

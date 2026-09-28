@@ -6,6 +6,8 @@ The interface supports English (`en`, default) and Simplified Chinese (`zh-CN`).
 
 The accessible language selector appears on login, the shared desktop/mobile header, and public profiles. `POST /api/locale` validates the allowlist and stores `attendance-locale` for one year with `Path=/`, `HttpOnly`, `SameSite=Lax`, and `Secure` on HTTPS. Invalid or absent preferences resolve to English; browser language does not override this default.
 
+The endpoint validates the browser's `Origin` against the configured public `AUTH_URL`, matching the application's other write endpoints, and rejects missing or cross-site origins. The cookie's `Secure` flag also follows `AUTH_URL`. Behind Nginx, Next.js may reconstruct `request.url` with its internal loopback host, so that internal URL and caller-supplied forwarding headers are not used as the public origin.
+
 After the cookie is saved, Next.js refreshes the current Server Component tree. Components have no locale-based root key, so routes, query parameters, filters, pagination, input nodes, unsaved values, sessions, and Redux state remain in place. A failed update keeps the current interface and displays a translated retry message.
 
 `src/i18n/request.ts` resolves each request independently. The root renders the matching HTML `lang` and initial provider messages together, behind a Suspense boundary. Loading fallbacks use a client translation leaf so they do not read request cookies outside Suspense. Browser titles and descriptions are rendered with the selected locale using [React 19 metadata hoisting](https://react.dev/reference/react-dom/components/title), so they are present in server HTML and update with the provider. This also handles authorization redirects without Next.js 16.3’s cookie-dependent `generateMetadata` validation edge case. Framework validation remains enabled. Cached data remains language-neutral; translated output is request-scoped. The root sends shared messages, and feature providers send only the current workspace's selected-language namespaces. No browser translation service is used.
@@ -48,6 +50,14 @@ Dates and times use the selected locale while keeping the original date-only val
 Human-readable PDF headings, statuses, summaries, and dates use the locale cookie. JSON responses, filenames, enum identifiers, and stored content retain their contracts. PDF output embeds local Hind Siliguri fonts for Latin/Bengali and Noto Sans CJK SC for Chinese; these font files are server assets and are not downloaded by the web interface. The web interface uses installed system CJK fonts.
 
 Browser date pickers, native HTML validation bubbles, password-manager UI, biometric/passkey prompts, geolocation permission dialogs, Google consent screens, and OS installation prompts follow browser/provider/OS settings. The application cannot force their language. Existing installed PWA names may require reinstallation for a refreshed localized manifest.
+
+## Production language-switch troubleshooting
+
+If local switching works but production displays “Could not change the language”, inspect the `POST /api/locale` response. A `403` with `INVALID_ORIGIN` means the request's browser origin did not pass validation. The original locale handler compared against Next.js's internal request URL, which rejected valid public origins behind the documented Nginx/loopback deployment. The corrected handler uses `AUTH_URL`.
+
+Deploy the updated application code, rebuild with `pnpm build`, and restart the application through the existing deployment process. Confirm the production process's `AUTH_URL` is its public HTTPS origin (for example, `https://attendance.example.com`), matching `WEBAUTHN_ORIGIN` as required by the existing environment validator. This fix needs no database migration or Nginx configuration change. Regression tests cover proxy requests, secure cookies behind TLS termination, local HTTP, and rejected foreign/forged origins.
+
+The proxy regression reproduced five failures before the fix. After the fix, `pnpm exec vitest run tests/localization.test.ts` passed all 21 tests. `pnpm test` passed 1,056 tests, with 197 database tests intentionally skipped because no test database was configured for this follow-up. `pnpm lint`, `pnpm typecheck`, `pnpm format:check`, and `pnpm build` also passed. A local production server on `127.0.0.1:3117` accepted both language updates with simulated Nginx headers and the configured public HTTPS origin, emitted secure cookies, rendered the corresponding HTML language on the next request, and rejected a forged foreign origin. That smoke check used dummy configuration and no database connection. The actual production server was not changed or inspected.
 
 ## Verification
 

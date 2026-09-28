@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { isLocale, localeCookie, localeMaxAge } from "@/i18n/config";
+import { getEnv } from "@/lib/env";
 export async function POST(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
+  // Behind Nginx, request.url can contain Next's internal loopback address.
+  // Use the configured public origin, never caller-supplied forwarding headers.
+  const publicUrl = new URL(getEnv().AUTH_URL);
+  if (
+    request.headers.get("origin") !== publicUrl.origin ||
+    request.headers.get("sec-fetch-site") === "cross-site"
+  )
     return NextResponse.json({ error: "INVALID_ORIGIN" }, { status: 403 });
   const body = await request.json().catch(() => null);
   if (!isLocale(body?.locale))
@@ -13,7 +19,7 @@ export async function POST(request: Request) {
     maxAge: localeMaxAge,
     httpOnly: true,
     sameSite: "lax",
-    secure: new URL(request.url).protocol === "https:",
+    secure: publicUrl.protocol === "https:",
   });
   response.headers.set("Cache-Control", "no-store");
   return response;

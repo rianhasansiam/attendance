@@ -3,7 +3,7 @@ import {
   TYPE,
   type MessageFormatElement,
 } from "@formatjs/icu-messageformat-parser";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { createTranslator, type AbstractIntlMessages } from "next-intl";
 import { resolveLocale, localeCookie, localeMaxAge } from "@/i18n/config";
@@ -11,6 +11,11 @@ import { loadMessages, withEnglishFallback } from "@/i18n/messages";
 import { localizeError } from "@/i18n/errors";
 import { POST } from "@/app/api/locale/route";
 import { date, duration, time } from "@/components/ui";
+
+const serverConfig = vi.hoisted(() => ({
+  AUTH_URL: "https://attendance.test",
+}));
+vi.mock("@/lib/env", () => ({ getEnv: () => serverConfig }));
 
 function flatten(
   messages: AbstractIntlMessages,
@@ -124,6 +129,10 @@ describe("translation dictionaries", () => {
 });
 
 describe("locale preference endpoint", () => {
+  beforeEach(() => {
+    serverConfig.AUTH_URL = "https://attendance.test";
+  });
+
   function request(locale: unknown, origin = "https://attendance.test") {
     return new Request("https://attendance.test/api/locale", {
       method: "POST",
@@ -152,10 +161,90 @@ describe("locale preference endpoint", () => {
     const response = await POST(
       new Request("https://attendance.test/api/locale", {
         method: "POST",
+        headers: { Origin: "https://attendance.test" },
         body: "{",
       }),
     );
     expect(response.status).toBe(400);
     expect(response.headers.get("set-cookie")).toBeNull();
   });
+
+  it.each([
+    "http://127.0.0.1:3000/api/locale",
+    "https://127.0.0.1:3000/api/locale",
+  ])("accepts the public origin behind a proxy at %s", async (upstream) => {
+    const response = await POST(
+      new Request(upstream, {
+        method: "POST",
+        headers: {
+          Origin: "https://attendance.test",
+          Host: "attendance.test",
+          "X-Forwarded-Host": "attendance.test",
+          "X-Forwarded-Proto": "https",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ locale: "zh-CN" }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ locale: "zh-CN" });
+    expect(response.headers.get("set-cookie")).toContain("Secure");
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not trust a matching request URL or forwarded headers over the configured origin", async () => {
+    const response = await POST(
+      new Request("https://elsewhere.test/api/locale", {
+        method: "POST",
+        headers: {
+          Origin: "https://elsewhere.test",
+          Host: "elsewhere.test",
+          "X-Forwarded-Host": "elsewhere.test",
+          "X-Forwarded-Proto": "https",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ locale: "en" }),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "INVALID_ORIGIN" });
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("keeps local HTTP development cookies usable", async () => {
+    serverConfig.AUTH_URL = "http://localhost:3000";
+    const response = await POST(
+      new Request("http://127.0.0.1:3000/api/locale", {
+        method: "POST",
+        headers: {
+          Origin: "http://localhost:3000",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ locale: "zh-CN" }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).not.toContain("Secure");
+  });
+
+  it("rejects explicit cross-site requests even with the configured Origin", async () => {
+    const input = request("en");
+    input.headers.set("sec-fetch-site", "cross-site");
+    const response = await POST(input);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it.each([null, "null"])(
+    "rejects an unverifiable Origin %j",
+    async (origin) => {
+      const input = request("en");
+      if (origin === null) input.headers.delete("origin");
+      else input.headers.set("origin", origin);
+      const response = await POST(input);
+      expect(response.status).toBe(403);
+      expect(response.headers.get("set-cookie")).toBeNull();
+    },
+  );
 });

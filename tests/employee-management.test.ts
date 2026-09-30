@@ -109,6 +109,46 @@ beforeEach(() => {
 });
 
 describe("employee role management", () => {
+  it.each([undefined, ""])(
+    "creates a Google-only employee without hashing an absent password (%s)",
+    async (password) => {
+      await createEmployee(superAdmin, {
+        ...employeeInput,
+        password,
+        confirmPassword: password,
+      });
+      expect(mocks.hashPassword).not.toHaveBeenCalled();
+      expect(mocks.createUser).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          email: employeeInput.email,
+          role: "EMPLOYEE",
+          passwordHash: null,
+        }),
+        select: expect.any(Object),
+      });
+      expect(mocks.createEmployee).toHaveBeenCalledOnce();
+      expect(JSON.stringify(mocks.audit.mock.calls)).not.toMatch(
+        /password|googleAccountId/,
+      );
+    },
+  );
+
+  it.each([
+    { password: "short", confirmPassword: "short" },
+    { password: employeeInput.password, confirmPassword: undefined },
+    { password: undefined, confirmPassword: employeeInput.password },
+    { password: employeeInput.password, confirmPassword: "different password" },
+  ])(
+    "rejects incomplete or invalid optional passwords before database work",
+    async (credentials) => {
+      await expect(
+        createEmployee(superAdmin, { ...employeeInput, ...credentials }),
+      ).rejects.toMatchObject({ name: "ZodError" });
+      expect(mocks.hashPassword).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects employee creation by a regular administrator before hashing or database work", async () => {
     await expect(createEmployee(admin, employeeInput)).rejects.toMatchObject({
       code: "FORBIDDEN",

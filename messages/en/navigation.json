@@ -1,6 +1,6 @@
 {
   "overview": "Overview",
-  "employees": "Employees",
+  "employees": "Users & employees",
   "attendance": "Attendance",
   "lateApprovals": "Late approvals",
   "reports": "Reports",
@@ -21,6 +21,8 @@
   "history": "Attendance history",
   "myDevices": "My devices",
   "profile": "My profile",
+  "employeeProfile": "Employee profile",
+  "adminWorkspace": "Admin workspace",
   "users": "All Users",
   "settings": "Settings",
   "publicProfile": "Public profile",

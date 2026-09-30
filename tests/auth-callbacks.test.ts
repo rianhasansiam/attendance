@@ -163,6 +163,69 @@ describe("actual Auth.js configuration callbacks and adapter", () => {
       }),
     );
   });
+  it("links a first Google sign-in to the provisioned employee and starts a session without a password", async () => {
+    const config = mocks.factory!();
+    const provisioned = { ...user, googleAccountId: null, passwordHash: null };
+    mocks.db.user.findUnique.mockResolvedValue(provisioned);
+    const googleSignIn = {
+      ...signInInput,
+      // On first sign-in Auth.js supplies the provider profile before linking
+      // it to the existing local user by their verified, normalized email.
+      user: { id: "google-subject", email: user.email },
+      profile: { ...signInInput.profile, email: " STAFF@EXAMPLE.COM " },
+    } as SignInInput;
+
+    expect(await config.callbacks!.signIn!(googleSignIn)).toBe(true);
+    expect(mocks.db.user.findUnique).toHaveBeenCalledWith({
+      where: { email: user.email },
+      include: { employee: true },
+    });
+    expect(mocks.db.user.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        id: user.id,
+        email: user.email,
+        status: "ACTIVE",
+        OR: [{ googleAccountId: null }, { googleAccountId: "google-subject" }],
+      },
+      data: {
+        googleAccountId: "google-subject",
+        lastLoginAt: expect.any(Date),
+        emailVerified: expect.any(Date),
+        image: "https://example.com/avatar.png",
+      },
+    });
+
+    const linked = { ...provisioned, googleAccountId: "google-subject" };
+    mocks.db.user.findUnique.mockResolvedValue(linked);
+    await config.adapter!.linkAccount!({
+      userId: linked.id,
+      provider: "google",
+      providerAccountId: "google-subject",
+      type: "oidc",
+    });
+    expect(mocks.db.account.create).toHaveBeenCalledWith({
+      data: {
+        userId: user.id,
+        provider: "google",
+        providerAccountId: "google-subject",
+        type: "oidc",
+      },
+    });
+    const token = await config.callbacks!.jwt!({
+      token: {},
+      user: linked,
+      account: signInInput.account,
+      trigger: "signIn",
+    } as JwtInput);
+    expect(token).toEqual({ sub: user.id, sessionId: "session-id" });
+    expect(mocks.authorizeCredentials).not.toHaveBeenCalled();
+    const session = await config.callbacks!.session!({
+      session: rawSession,
+      token,
+    } as unknown as SessionInput);
+    expect(session.user).toMatchObject({ id: user.id, email: user.email });
+    expect(session.user).not.toHaveProperty("passwordHash");
+  });
   it("rejects unverified email, subject mismatch, wrong provider and missing employee profile", async () => {
     const signIn = mocks.factory!().callbacks!.signIn!;
     expect(

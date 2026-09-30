@@ -83,6 +83,12 @@ test("Super Admin creates an employee with a matching password that signs in to 
     .getByRole("searchbox", { name: "Find office", exact: true })
     .fill(office.name);
   await dialog.getByLabel("Office *", { exact: true }).selectOption(office.id);
+  await dialog
+    .getByRole("checkbox", {
+      name: "Set an application password (optional)",
+      exact: true,
+    })
+    .check();
   const passwordField = dialog.getByLabel("Application password *", {
     exact: true,
   });
@@ -154,6 +160,70 @@ test("Super Admin creates an employee with a matching password that signs in to 
   } finally {
     await employeeContext.close();
   }
+});
+
+test("Super Admin creates an employee for Google sign-in without an application password", async ({
+  page,
+  context,
+}) => {
+  const { user, office } = await signIn(context, "SUPER_ADMIN");
+  const id = randomUUID();
+  const email = `google-employee-${id}@example.test`;
+  await page.goto("/admin/employees");
+  await page.getByRole("button", { name: "Add employee", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Add employee",
+    exact: true,
+  });
+  await expect(
+    dialog.getByRole("checkbox", {
+      name: "Set an application password (optional)",
+      exact: true,
+    }),
+  ).not.toBeChecked();
+  await expect(dialog.locator('input[type="password"]')).toHaveCount(0);
+  await expect(dialog).toContainText("No application password is needed.");
+  await dialog.getByLabel("Name *", { exact: true }).fill("Google employee");
+  await dialog.getByLabel("Email *", { exact: true }).fill(email);
+  await dialog.getByLabel("Employee ID *", { exact: true }).fill(id);
+  await dialog
+    .getByRole("searchbox", { name: "Find office", exact: true })
+    .fill(office.name);
+  await dialog.getByLabel("Office *", { exact: true }).selectOption(office.id);
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/admin/employees" &&
+      response.request().method() === "POST",
+  );
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  expect(response.request().postDataJSON()).not.toHaveProperty("password");
+  expect(response.request().postDataJSON()).not.toHaveProperty(
+    "confirmPassword",
+  );
+  await expect(dialog).toBeHidden();
+  const created = await db.user.findUniqueOrThrow({
+    where: { email },
+    include: { employee: true, accounts: true },
+  });
+  expect(created.passwordHash).toBeNull();
+  expect(created.googleAccountId).toBeNull();
+  expect(created.accounts).toHaveLength(0);
+  expect(created.employee?.employeeCode).toBe(id);
+  expect(created.employee?.officeId).toBe(office.id);
+  expect(created.role).toBe("EMPLOYEE");
+  expect(created.status).toBe("ACTIVE");
+  const audit = await db.auditLog.findFirstOrThrow({
+    where: {
+      resourceId: created.employee!.id,
+      action: "EMPLOYEE_CREATED",
+      actorId: user.id,
+    },
+  });
+  expect(JSON.stringify(audit)).not.toMatch(/passwordHash|confirmPassword/);
 });
 
 test("Admin can edit employment records but cannot edit public names or create employee accounts", async ({

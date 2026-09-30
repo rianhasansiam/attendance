@@ -20,7 +20,13 @@ async function ProfileEditorPage({ params }: Props) {
     if (error instanceof DomainError && error.status === 404) notFound();
     throw error;
   }
-  return <PublicProfileEditor key={profile.id} profile={profile} />;
+  return (
+    <PublicProfileEditor
+      key={profile.id}
+      profile={profile}
+      isOwnProfile={actor.id === userId}
+    />
+  );
 }
 
 export default function Page(props: Props) {

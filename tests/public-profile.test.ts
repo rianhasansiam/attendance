@@ -10,6 +10,8 @@ import { getPublicProfile } from "@/modules/public-profile/service";
 const publicUser = {
   profileSlug: "public_colleague",
   name: "Public colleague",
+  email: "colleague@example.test",
+  employee: { employeeCode: "EMP-001" },
   image: "https://lh3.googleusercontent.com/profile-photo",
   designation: "Operations officer",
   phone: "+880 1700 123456",
@@ -21,6 +23,8 @@ const publicUser = {
 const publicProfile = {
   slug: publicUser.profileSlug,
   name: publicUser.name,
+  email: publicUser.email,
+  employeeCode: publicUser.employee.employeeCode,
   image: publicUser.image,
   designation: publicUser.designation,
   phone: publicUser.phone,
@@ -48,6 +52,8 @@ describe("public profile privacy boundary", () => {
       select: {
         profileSlug: true,
         name: true,
+        email: true,
+        employee: { select: { employeeCode: true } },
         image: true,
         designation: true,
         phone: true,
@@ -63,7 +69,6 @@ describe("public profile privacy boundary", () => {
     mocks.findUser.mockResolvedValue({
       ...publicUser,
       id: "private-user-id",
-      email: "private-email@example.test",
       passwordHash: "private-password-hash",
       googleAccountId: "private-google-account",
       role: "SUPER_ADMIN",
@@ -72,7 +77,7 @@ describe("public profile privacy boundary", () => {
       accounts: [{ access_token: "private-access-token" }],
       employee: {
         id: "private-employee-id",
-        employeeCode: "private-employee-code",
+        employeeCode: publicUser.employee.employeeCode,
         joinedAt: new Date("2020-01-01"),
         department: { name: "private-internal-department" },
         office: {
@@ -101,6 +106,7 @@ describe("public profile privacy boundary", () => {
     await expect(getPublicProfile("admin")).resolves.toEqual({
       ...publicProfile,
       name: "Public administrator",
+      employeeCode: null,
       image: null,
     });
   });
@@ -115,6 +121,7 @@ describe("public profile privacy boundary", () => {
       homeAddress: null,
       dateOfBirth: null,
       employee: {
+        employeeCode: publicUser.employee.employeeCode,
         department: { name: "Private department" },
         office: { name: "Private office" },
       },
@@ -122,6 +129,8 @@ describe("public profile privacy boundary", () => {
     expect(await getPublicProfile("employee")).toEqual({
       slug: publicUser.profileSlug,
       name: publicUser.name,
+      email: publicUser.email,
+      employeeCode: publicUser.employee.employeeCode,
       image: publicUser.image,
       designation: null,
       phone: null,
@@ -143,11 +152,11 @@ describe("public profile privacy boundary", () => {
       mocks.findUser.mockResolvedValue({
         ...publicUser,
         name,
-        email: "do-not-publish@example.test",
       });
       const result = await getPublicProfile("unnamed");
       expect(result?.name).toBe("Team member");
-      expect(JSON.stringify(result)).not.toContain("do-not-publish");
+      expect(result?.email).toBe(publicUser.email);
+      expect(result?.name).not.toBe(publicUser.email);
     },
   );
 
@@ -222,11 +231,10 @@ describe("public profile localized missing-name fallback", () => {
       mocks.findUser.mockResolvedValue({
         ...publicUser,
         name,
-        email: "private@example.test",
       });
       const result = await getPublicProfile("unnamed", "团队成员");
       expect(result).toEqual({ ...publicProfile, name: "团队成员" });
-      expect(JSON.stringify(result)).not.toContain("private@example.test");
+      expect(result?.name).not.toBe(publicUser.email);
     },
   );
 

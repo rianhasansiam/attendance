@@ -1,25 +1,27 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
+import { redirect } from "next/navigation";
 import LoadingWorkspace from "@/app/loading";
-import { AdminResource } from "@/components/resource-workspace";
 import { requirePageUser } from "@/lib/auth";
 
-export default function Page() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default function Page({ searchParams }: { searchParams: SearchParams }) {
   return (
     <Suspense fallback={<LoadingWorkspace />}>
-      <SuperAdminUsers />
+      <UsersRedirect searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function SuperAdminUsers() {
+async function UsersRedirect({ searchParams }: { searchParams: SearchParams }) {
   await connection();
-  const user = await requirePageUser("SUPER_ADMIN");
-  return (
-    <AdminResource
-      resource="users"
-      currentUserId={user.id}
-      canEditPublicProfiles
-    />
-  );
+  await requirePageUser("ADMIN");
+  const params = await searchParams;
+  const query = new URLSearchParams();
+  for (const key of ["q", "page"]) {
+    const value = params[key];
+    if (typeof value === "string") query.set(key, value);
+  }
+  return redirect(`/admin/employees${query.size ? `?${query}` : ""}`);
 }

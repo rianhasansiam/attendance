@@ -13,8 +13,10 @@ import {
   type Actor,
 } from "@/modules/management/permissions";
 import {
+  employeeProfileCreateSchema,
   employeeSchema,
   employeeUpdateSchema,
+  idSchema,
 } from "@/modules/management/validation";
 
 export const publicUserSelect = {
@@ -93,9 +95,10 @@ export async function createEmployee(
 ) {
   assertSuperAdmin(actor);
   const data = employeeSchema.parse(input);
-  // Password hashing happens before row locks; never include credentials in
-  // employee data, public responses, or administrative audit snapshots.
-  const passwordHash = await hashPassword(data.password);
+  // Google-only employees need no application password. Hash an optional
+  // password before row locks; never include credentials in public responses
+  // or administrative audit snapshots.
+  const passwordHash = data.password ? await hashPassword(data.password) : null;
   return db.$transaction(async (tx) => {
     const [currentActor] = await tx.$queryRaw<
       Array<Actor & { status: string }>
@@ -149,6 +152,87 @@ export async function createEmployee(
   });
 }
 
+/** Attach employment details to an existing identity without changing access. */
+export async function createEmployeeProfile(
+  actor: Actor,
+  userId: string,
+  input: z.infer<typeof employeeProfileCreateSchema>,
+) {
+  assertSuperAdmin(actor);
+  const id = idSchema.parse(userId);
+  const data = employeeProfileCreateSchema.parse(input);
+  try {
+    return await db.$transaction(
+      async (tx) => {
+        // Match employee and user management's lock order. The identity lock
+        // serializes simultaneous attachments when there is no profile yet.
+        await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "userId" = ${id} FOR UPDATE`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" IN (${actor.id}, ${id}) ORDER BY "id" FOR UPDATE`;
+        const currentActor = await tx.user.findUnique({
+          where: { id: actor.id },
+          select: { id: true, role: true, status: true },
+        });
+        if (!currentActor || currentActor.status !== "ACTIVE")
+          throw new DomainError(
+            "FORBIDDEN",
+            "An active super administrator account is required to create employee profiles.",
+            403,
+          );
+        assertSuperAdmin(currentActor);
+        const target = await tx.user.findUnique({
+          where: { id },
+          select: { id: true, employee: { select: { id: true } } },
+        });
+        if (!target) throw new DomainError("NOT_FOUND", "User not found.", 404);
+        if (target.employee)
+          throw new DomainError(
+            "EMPLOYEE_PROFILE_EXISTS",
+            "This user already has an employee profile. Refresh the list to edit it.",
+            409,
+          );
+        await validateAssignments(tx, data.officeId, data.departmentId);
+        const created = await tx.employee.create({
+          data: { ...data, userId: id },
+          include: employeeInclude,
+        });
+        await writeAudit(
+          actor.id,
+          "EMPLOYEE_PROFILE_CREATED",
+          "Employee",
+          created.id,
+          undefined,
+          created,
+          tx,
+        );
+        return created;
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 30_000,
+      },
+    );
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      const adapterError = error.meta?.driverAdapterError as
+        { cause?: { kind?: string } } | undefined;
+      if (
+        error.code === "P2002" ||
+        error.code === "P2034" ||
+        (error.code === "P2010" &&
+          (adapterError?.cause?.kind === "TransactionWriteConflict" ||
+            error.meta?.code === "40001" ||
+            error.meta?.code === "40P01"))
+      )
+        throw new DomainError(
+          "CONFLICT",
+          "This user or employee ID already exists or changed during the request. Refresh the list and try again.",
+          409,
+        );
+    }
+    throw error;
+  }
+}
+
 /** Remove employee identity and sign-in access while anonymizing linked history. */
 export async function deleteEmployee(actor: Actor, id: string) {
   assertSuperAdmin(actor);
@@ -182,7 +266,7 @@ export async function deleteEmployee(actor: Actor, id: string) {
         if (!isEmployeeRole(previous.user.role))
           throw new DomainError(
             "FORBIDDEN",
-            "Administrator accounts must be managed through All Users.",
+            "Use Delete user in Users & employees to delete administrator accounts.",
             403,
           );
         assertMayManageUser(actor, previous.user, { status: "INACTIVE" });

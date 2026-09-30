@@ -12,6 +12,7 @@ import {
 } from "@/store/make-store";
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
 

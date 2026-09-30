@@ -33,11 +33,13 @@ async function profileFixture({
   listedDetails?: boolean;
 } = {}) {
   const key = randomUUID();
+  const publicIdentity = {
+    email: `public-profile-${key}@example.test`,
+    employeeCode: `EMP-${key}`,
+  };
   const privateValues = {
-    email: `private-profile-${key}@example.test`,
     passwordHash: `private-password-hash-${key}`,
     googleAccountId: `private-google-account-${key}`,
-    employeeCode: `private-employee-code-${key}`,
     accessToken: `private-access-token-${key}`,
     providerAccountId: `private-provider-account-${key}`,
     sessionToken: `private-session-token-${key}`,
@@ -48,7 +50,7 @@ async function profileFixture({
   const user = await db.user.create({
     data: {
       name,
-      email: privateValues.email,
+      email: publicIdentity.email,
       role,
       status,
       image,
@@ -73,7 +75,7 @@ async function profileFixture({
         ? {
             employee: {
               create: {
-                employeeCode: privateValues.employeeCode,
+                employeeCode: publicIdentity.employeeCode,
                 department: {
                   create: { name: privateValues.department },
                 },
@@ -94,7 +96,7 @@ async function profileFixture({
       employee: { include: { department: true, office: true } },
     },
   });
-  return { user, privateValues };
+  return { user, publicIdentity, privateValues };
 }
 
 async function signIn(context: BrowserContext, role: Role) {
@@ -127,7 +129,7 @@ test("an anonymous visitor sees the public employee details without private data
   page,
   context,
 }) => {
-  const { user, privateValues } = await profileFixture();
+  const { user, publicIdentity, privateValues } = await profileFixture();
   const path = `/profile/${user.profileSlug}`;
   const response = await page.goto(path);
   await expect(page).toHaveURL(`${origin}/profile/${user.profileSlug}`);
@@ -135,6 +137,8 @@ test("an anonymous visitor sees the public employee details without private data
     page.getByRole("heading", { level: 1, name: user.name!, exact: true }),
   ).toBeVisible();
   await expectPublicDetails(page, {
+    Email: publicIdentity.email,
+    "Employee ID": publicIdentity.employeeCode,
     Designation: publicDetails.designation,
     Phone: publicDetails.phone,
     "Blood group": publicDetails.bloodGroup,
@@ -142,7 +146,7 @@ test("an anonymous visitor sees the public employee details without private data
     "Home address": publicDetails.homeAddress,
     "Date of birth": "January 15, 1995",
   });
-  await expect(page.locator("dt")).toHaveCount(6);
+  await expect(page.locator("dt")).toHaveCount(8);
   await expect(
     page.getByRole("link", { name: "Edit public profile", exact: true }),
   ).toHaveCount(0);
@@ -160,6 +164,10 @@ test("an anonymous visitor sees the public employee details without private data
   expect(rscResponse.headers()["content-type"]).toContain("text/x-component");
   const rsc = await rscResponse.text();
   expect(rsc).toContain(user.name!);
+  for (const publicValue of Object.values(publicIdentity)) {
+    expect(html).toContain(publicValue);
+    expect(rsc).toContain(publicValue);
+  }
   for (const privateValue of [
     ...Object.values(privateValues),
     user.employee!.id,
@@ -215,7 +223,11 @@ test("an anonymous visitor can view an administrator without an employee record"
   ).toBeVisible();
   await expect(
     page.locator("dd").filter({ hasText: /^Not listed$/ }),
-  ).toHaveCount(6);
+  ).toHaveCount(7);
+  await expectPublicDetails(page, {
+    Email: user.email,
+    "Employee ID": "Not listed",
+  });
 });
 
 for (const status of ["INACTIVE", "SUSPENDED"] as const) {
@@ -231,7 +243,10 @@ for (const status of ["INACTIVE", "SUSPENDED"] as const) {
       page.getByRole("heading", { name: "Profile unavailable", exact: true }),
     ).toBeVisible();
     await expect(page.getByText(user.name!, { exact: true })).toHaveCount(0);
-    expect(await response!.text()).not.toContain(user.name!);
+    const html = await response!.text();
+    expect(html).not.toContain(user.name!);
+    expect(html).not.toContain(user.email);
+    expect(html).not.toContain(user.employee!.employeeCode);
     // Streamed notFound() metadata may appear in both the head and body.
     await expect(page.locator('meta[name="robots"]').first()).toHaveAttribute(
       "content",
@@ -280,19 +295,20 @@ test("missing names and untrusted images use neutral public fallbacks", async ({
   page,
 }) => {
   const image = "https://untrusted.example.test/private-tracking-image";
-  const { user, privateValues } = await profileFixture({ name: null, image });
+  const { user } = await profileFixture({ name: null, image });
   const externalRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().startsWith("https://untrusted.example.test")) {
       externalRequests.push(request.url());
     }
   });
-  const response = await page.goto(`/profile/${user.id}`);
+  const response = await page.goto(`/profile/${user.profileSlug}`);
   await expect(
     page.getByRole("heading", { level: 1, name: "Team member", exact: true }),
   ).toBeVisible();
+  await expectPublicDetails(page, { Email: user.email });
   const html = await response!.text();
-  expect(html).not.toContain(privateValues.email);
+  expect(html).toContain(user.email);
   expect(html).not.toContain(image);
   expect(externalRequests).toEqual([]);
 });
@@ -303,7 +319,7 @@ test("Super Admin edits every public detail and anonymous visitors see the saved
   browser,
 }) => {
   await signIn(context, "SUPER_ADMIN");
-  const { user, privateValues } = await profileFixture();
+  const { user, publicIdentity, privateValues } = await profileFixture();
   const path = `/profile/${user.id}`;
   const apiPath = `/api/admin/users/${user.id}/public-profile`;
   const changes = {
@@ -371,7 +387,7 @@ test("Super Admin edits every public detail and anonymous visitors see the saved
     expect(persisted).toMatchObject({
       ...changes,
       dateOfBirth: new Date("1992-02-29T00:00:00.000Z"),
-      email: privateValues.email,
+      email: publicIdentity.email,
       passwordHash: privateValues.passwordHash,
       googleAccountId: privateValues.googleAccountId,
     });
@@ -385,6 +401,8 @@ test("Super Admin edits every public detail and anonymous visitors see the saved
       }),
     ).toBeVisible();
     await expectPublicDetails(anonymousPage, {
+      Email: publicIdentity.email,
+      "Employee ID": publicIdentity.employeeCode,
       Designation: changes.designation,
       Phone: changes.phone,
       "Blood group": changes.bloodGroup,
@@ -398,6 +416,124 @@ test("Super Admin edits every public detail and anonymous visitors see the saved
     for (const value of Object.values(privateValues)) {
       expect(publicHtml).not.toContain(value);
     }
+  } finally {
+    await anonymousContext.close();
+  }
+});
+
+test("Super Admin can edit their own profile from navigation without an employee record", async ({
+  page,
+  context,
+  browser,
+}) => {
+  const { user, privateValues } = await signIn(context, "SUPER_ADMIN");
+  expect(user.employee).toBeNull();
+  const changes = {
+    name: "Self service administrator",
+    designation: "Managing director",
+    phone: "+880 1900 123456",
+    bloodGroup: "A-",
+    publicDepartment: "Leadership",
+    homeAddress: "House 24, Dhaka",
+    dateOfBirth: "1990-04-12",
+  };
+  const apiPath = `/api/admin/users/${user.id}/public-profile`;
+  const anonymousContext = await browser.newContext();
+  try {
+    const anonymousPage = await anonymousContext.newPage();
+    await anonymousPage.goto(`${origin}/profile/${user.profileSlug}`);
+    await expect(
+      anonymousPage.getByRole("heading", { level: 1, name: user.name! }),
+    ).toBeVisible();
+
+    await page.goto("/admin/users");
+    await expect(page.locator(".topbar-user .avatar")).toHaveText("PU");
+    const profileLink = page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: "My profile", exact: true });
+    await profileLink.click();
+    await expect(page).toHaveURL(`${origin}/admin/users/${user.id}/profile`);
+    await expect(profileLink).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "My profile", exact: true }),
+    ).toBeVisible();
+    for (const [label, value] of Object.entries({
+      "Name *": changes.name,
+      Designation: changes.designation,
+      Phone: changes.phone,
+      Department: changes.publicDepartment,
+      "Home address": changes.homeAddress,
+      "Date of birth": changes.dateOfBirth,
+    })) {
+      await page.getByLabel(label, { exact: true }).fill(value);
+    }
+    await page
+      .getByLabel("Blood group", { exact: true })
+      .selectOption(changes.bloodGroup);
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === apiPath &&
+        response.request().method() === "PATCH",
+    );
+    await page
+      .getByRole("button", { name: "Save my profile", exact: true })
+      .click();
+    expect((await responsePromise).ok()).toBe(true);
+    await expect(
+      page.getByText("Public profile saved.", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.locator(".topbar-user .avatar")).toHaveText("SE");
+
+    const persisted = await db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      include: { employee: true, accounts: true, sessions: true },
+    });
+    expect(persisted).toMatchObject({
+      ...changes,
+      dateOfBirth: new Date("1990-04-12T00:00:00.000Z"),
+      profileSlug: user.profileSlug,
+      role: "SUPER_ADMIN",
+      status: "ACTIVE",
+      email: user.email,
+      employee: null,
+      passwordHash: privateValues.passwordHash,
+      googleAccountId: privateValues.googleAccountId,
+      accounts: [
+        {
+          provider: "google",
+          providerAccountId: privateValues.providerAccountId,
+          access_token: privateValues.accessToken,
+        },
+      ],
+      sessions: [{ sessionToken: privateValues.sessionToken }],
+    });
+    await page.reload();
+    await expect(page.getByLabel("Name *", { exact: true })).toHaveValue(
+      changes.name,
+    );
+    await expect(page.getByLabel("Phone", { exact: true })).toHaveValue(
+      changes.phone,
+    );
+    await expect(page.locator(".topbar-user .avatar")).toHaveText("SE");
+
+    await anonymousPage.reload();
+    await expect(
+      anonymousPage.getByRole("heading", {
+        level: 1,
+        name: changes.name,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expectPublicDetails(anonymousPage, {
+      Email: user.email,
+      "Employee ID": "Not listed",
+      Designation: changes.designation,
+      Phone: changes.phone,
+      "Blood group": changes.bloodGroup,
+      Department: changes.publicDepartment,
+      "Home address": changes.homeAddress,
+      "Date of birth": "April 12, 1990",
+    });
   } finally {
     await anonymousContext.close();
   }

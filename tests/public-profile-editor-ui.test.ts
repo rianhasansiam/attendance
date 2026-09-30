@@ -15,6 +15,8 @@ import {
 } from "@/store/make-store";
 import type { ManagedPublicProfile } from "@/modules/public-profile/management";
 
+const router = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/lib/client/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/client/request")>()),
   api: vi.fn(),
@@ -40,6 +42,7 @@ let store: AppStore;
 
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  router.refresh.mockReset();
   vi.mocked(api)
     .mockReset()
     .mockImplementation(async (_url, options) =>
@@ -54,7 +57,7 @@ beforeEach(async () => {
   await render();
 });
 
-async function render(locale = "en") {
+async function render(locale = "en", isOwnProfile = false) {
   await act(async () => {
     root.render(
       h(NextIntlClientProvider, {
@@ -70,7 +73,7 @@ async function render(locale = "en") {
             : testMessages,
         children: h(Provider, {
           store,
-          children: h(PublicProfileEditor, { profile }),
+          children: h(PublicProfileEditor, { profile, isOwnProfile }),
         }),
       }),
     );
@@ -154,6 +157,52 @@ it("saves only the seven public fields and clears optional fields with null", as
   expect(container.textContent).toContain("Public profile saved.");
   expect(input("name").value).toBe("Updated Person");
   expect(input("dateOfBirth").value).toBe("");
+  expect(router.refresh).not.toHaveBeenCalled();
+});
+
+it("labels the own profile editor and refreshes the account display only after a successful save", async () => {
+  await render("en", true);
+  expect(form().getAttribute("aria-label")).toBe("My profile");
+  expect(container.querySelector('button[type="submit"]')?.textContent).toBe(
+    "Save my profile",
+  );
+  input("name").value = "My updated name";
+  let resolve!: (value: ManagedPublicProfile) => void;
+  vi.mocked(api).mockReturnValueOnce(
+    new Promise<ManagedPublicProfile>((done) => {
+      resolve = done;
+    }),
+  );
+  await submit();
+  expect(router.refresh).not.toHaveBeenCalled();
+  expect(vi.mocked(api).mock.calls[0][0]).toBe(
+    "/api/admin/users/test-user/public-profile",
+  );
+  expect(
+    JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body)),
+  ).toMatchObject({ name: "My updated name" });
+  await act(async () => resolve({ ...profile, name: "My updated name" }));
+  expect(router.refresh).toHaveBeenCalledOnce();
+  expect(input("name").value).toBe("My updated name");
+  expect(container.textContent).toContain("Public profile saved.");
+});
+
+it("preserves unsaved own information and skips the refresh when permission is rejected", async () => {
+  await render("en", true);
+  input("name").value = "Unsaved own name";
+  vi.mocked(api).mockRejectedValueOnce(
+    new ClientRequestError({
+      status: 403,
+      code: "FORBIDDEN",
+      message: "Permission changed",
+    }),
+  );
+  await submit();
+  expect(router.refresh).not.toHaveBeenCalled();
+  expect(input("name").value).toBe("Unsaved own name");
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    "You do not have access to this resource.",
+  );
 });
 
 it.each([

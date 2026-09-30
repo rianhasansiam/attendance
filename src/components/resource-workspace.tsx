@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -13,6 +14,8 @@ import {
   Plus,
   Search,
   Trash2,
+  UserRoundPlus,
+  UserCog,
   UserRoundPen,
 } from "lucide-react";
 import {
@@ -323,17 +326,21 @@ export function AdminResource({
   canCreateEmployees = false,
   canDeleteEmployees = false,
   canEditPublicProfiles = false,
+  canManageUsers = false,
   currentUserId,
 }: {
   resource: ManagementResource;
   canCreateEmployees?: boolean;
   canDeleteEmployees?: boolean;
   canEditPublicProfiles?: boolean;
+  canManageUsers?: boolean;
   currentUserId?: string;
 }) {
   const t = useTranslations("admin");
   const locale = useLocale();
-  const config = useMemo(() => getResourceConfigs(t)[resource], [t, resource]);
+  const router = useRouter();
+  const configs = useMemo(() => getResourceConfigs(t), [t]);
+  const config = configs[resource];
   const errorMessage = useErrorMessage();
   const { params, update } = useUrlFilters();
   const query = params.get("q") || "";
@@ -343,9 +350,14 @@ export function AdminResource({
     update({ page: next });
   }
   const [editing, setEditing] = useState<DataRow | null>(null);
+  const [editingResource, setEditingResource] =
+    useState<ManagementResource>(resource);
+  const [addingEmployeeProfile, setAddingEmployeeProfile] = useState(false);
+  const [employeePasswordEnabled, setEmployeePasswordEnabled] = useState(false);
   const [viewing, setViewing] = useState<DataRow | null>(null);
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
+  const pendingEmployeeProfileUserId = useRef<string | null>(null);
   const dialogPending = useRef(false);
   const [confirming, setConfirming] = useState(false);
   const [needsReconcile, setNeedsReconcile] = useState(false);
@@ -384,27 +396,63 @@ export function AdminResource({
   async function refreshResource() {
     try {
       await refresh().unwrap();
+      const profileUserId = pendingEmployeeProfileUserId.current;
+      if (profileUserId) {
+        // Adding an employee ID can move this account to another search page.
+        // Reconcile the account directly before enabling another write.
+        const account = await api<DataRow>(
+          `/api/admin/users/${encodeURIComponent(profileUserId)}`,
+          { signal: AbortSignal.timeout(30_000) },
+        );
+        if (account.employee) {
+          dispatch(
+            baseApi.util.invalidateTags(
+              managementInvalidation({ resource: "employees" }),
+            ),
+          );
+          setEditing(null);
+          setAddingEmployeeProfile(false);
+          setActionError("");
+          setMessage("resources.saved");
+          if (profileUserId === currentUserId) router.refresh();
+        }
+        pendingEmployeeProfileUserId.current = null;
+      }
       setNeedsReconcile(false);
     } catch {
       // A failed read cannot establish the outcome of an interrupted write.
     }
   }
   if (!config) return null;
+  const editingConfig = configs[editingResource];
   const canCreate =
     !config.readOnly &&
     !config.noCreate &&
     (resource !== "employees" || canCreateEmployees);
   const editingOwnAccount =
-    resource === "users" &&
     Boolean(currentUserId) &&
-    editing?.id === currentUserId;
-  const fields = config.fields
+    (editingResource === "users"
+      ? editing?.id === currentUserId
+      : editingResource === "employees" &&
+        nested(editing ?? {}, "user.id") === currentUserId);
+  const fields = editingConfig.fields
+    .filter(
+      (field) =>
+        !addingEmployeeProfile ||
+        ["employeeCode", "officeId", "departmentId"].includes(field.name),
+    )
     .filter((field) =>
       editing?.id ? field.edit !== false : field.create !== false,
     )
     .filter(
       (field) =>
-        resource !== "employees" ||
+        editingResource !== "employees" ||
+        field.type !== "password" ||
+        employeePasswordEnabled,
+    )
+    .filter(
+      (field) =>
+        editingResource !== "employees" ||
         !editing?.id ||
         field.name !== "role" ||
         ["EMPLOYEE", "MANAGE_DRIVER"].includes(
@@ -413,7 +461,7 @@ export function AdminResource({
     )
     .filter(
       (field) =>
-        resource !== "employees" ||
+        editingResource !== "employees" ||
         !editing?.id ||
         canEditPublicProfiles ||
         field.name !== "name",
@@ -422,7 +470,7 @@ export function AdminResource({
       (field) => !editingOwnAccount || !["role", "status"].includes(field.name),
     )
     .map((field) =>
-      resource === "users" &&
+      editingResource === "users" &&
       editing?.id &&
       !editing.employee &&
       field.name === "role"
@@ -431,22 +479,44 @@ export function AdminResource({
             disabledOptions: ["EMPLOYEE", "MANAGE_DRIVER"],
             hint: t("resources.employeeProfileRequired"),
           }
-        : field,
+        : editingResource === "employees" && field.name === "role"
+          ? {
+              ...field,
+              options: editing?.id
+                ? ["EMPLOYEE", "MANAGE_DRIVER"]
+                : field.options,
+              hint: t(
+                editing?.id
+                  ? "fields.driverRoleHint"
+                  : "fields.employeeRoleHint",
+              ),
+            }
+          : field,
     );
   async function mutate(
     id: string | null,
     payload: JsonRecord,
     method: "PATCH" | "POST" | "DELETE" = id ? "PATCH" : "POST",
+    targetResource: ManagementResource = resource,
+    directoryRowId: string | null = id,
+    employeeProfileUserId?: string,
   ) {
     if (
       submitting.current ||
       needsReconcile ||
       isFetching ||
-      (method === "POST" && !canCreate) ||
       (resource === "employees" &&
+        targetResource === "users" &&
+        !canManageUsers) ||
+      (employeeProfileUserId &&
+        (resource !== "employees" || !canManageUsers)) ||
+      (method === "POST" && !employeeProfileUserId && !canCreate) ||
+      (targetResource === "employees" &&
         method === "DELETE" &&
         !canDeleteEmployees) ||
-      (resource === "users" && method === "DELETE" && id === currentUserId)
+      (targetResource === "users" &&
+        method === "DELETE" &&
+        id === currentUserId)
     )
       return;
     submitting.current = true;
@@ -454,7 +524,7 @@ export function AdminResource({
     setActionError("");
     setMessage("");
     try {
-      if (resource === "employees" && method === "POST") {
+      if (targetResource === "employees" && method === "POST") {
         // Credentials must not enter Redux mutation arguments or DevTools.
         const controller = new AbortController();
         const timeout = setTimeout(
@@ -465,11 +535,16 @@ export function AdminResource({
           30_000,
         );
         try {
-          await api("/api/admin/employees", {
-            method: "POST",
-            body: JSON.stringify(payload),
-            signal: controller.signal,
-          });
+          await api(
+            employeeProfileUserId
+              ? `/api/admin/users/${encodeURIComponent(employeeProfileUserId)}/employee-profile`
+              : "/api/admin/employees",
+            {
+              method: "POST",
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            },
+          );
         } finally {
           clearTimeout(timeout);
         }
@@ -478,27 +553,31 @@ export function AdminResource({
         );
       } else {
         await writeManagement({
-          resource,
+          resource: targetResource,
           id: id || undefined,
           method,
           body: payload,
         }).unwrap();
       }
-      if (method === "DELETE" && id)
+      if (method === "DELETE" && directoryRowId)
         setDeletedRecords((previous) =>
-          new Set(previous).add(`${resource}:${id}`),
+          new Set(previous).add(`${resource}:${directoryRowId}`),
         );
       setEditing(null);
+      setAddingEmployeeProfile(false);
+      if (employeeProfileUserId === currentUserId && employeeProfileUserId)
+        router.refresh();
       setMessage(
-        resource === "employees" && method === "DELETE"
+        targetResource === "employees" && method === "DELETE"
           ? "resources.employeeDeleted"
-          : resource === "users" && method === "DELETE"
+          : targetResource === "users" && method === "DELETE"
             ? "resources.userDeleted"
             : "resources.saved",
       );
     } catch (error) {
       setActionError(errorMessage(error));
       if (isAmbiguousWrite(error)) {
+        pendingEmployeeProfileUserId.current = employeeProfileUserId ?? null;
         setNeedsReconcile(true);
         await refreshResource();
       }
@@ -517,6 +596,9 @@ export function AdminResource({
     )
       return;
     setActionError("");
+    setEditingResource(resource);
+    setAddingEmployeeProfile(false);
+    setEmployeePasswordEnabled(false);
     if (resource !== "offices") {
       setEditing({});
       return;
@@ -555,21 +637,35 @@ export function AdminResource({
     if (submitting.current || needsReconcile || isFetching) return;
     const element = event.currentTarget;
     const form = new FormData(element);
-    const creatingEmployee = resource === "employees" && !editing?.id;
+    const creatingEmployee =
+      editingResource === "employees" && !editing?.id && !addingEmployeeProfile;
+    if (addingEmployeeProfile && !canManageUsers) return;
     if (creatingEmployee) {
       if (!canCreate) return;
-      const passwordError = validateNewPassword(
-        String(form.get("password") || ""),
-        String(form.get("confirmPassword") || ""),
-      );
-      if (passwordError) {
-        setActionError(passwordError);
-        return;
+      if (employeePasswordEnabled) {
+        const passwordError = validateNewPassword(
+          String(form.get("password") || ""),
+          String(form.get("confirmPassword") || ""),
+        );
+        if (passwordError) {
+          setActionError(passwordError);
+          return;
+        }
       }
     }
     const payload: JsonRecord = {};
     for (const field of fields) {
       const value = form.get(field.name);
+      // Accounts missing employment data may already have an employee role.
+      // Preserve that role when its disabled option is left selected; the
+      // account's name and status can still be edited independently.
+      if (
+        editingResource === "users" &&
+        field.name === "role" &&
+        field.disabledOptions?.includes(String(editing?.role)) &&
+        (value === null || value === editing?.role)
+      )
+        continue;
       payload[field.name] =
         field.type === "checkbox"
           ? form.has(field.name)
@@ -587,7 +683,16 @@ export function AdminResource({
                 ? null
                 : String(value ?? "");
     }
-    await mutate(editing?.id ? String(editing.id) : null, payload);
+    await mutate(
+      !addingEmployeeProfile && editing?.id ? String(editing.id) : null,
+      payload,
+      !addingEmployeeProfile && editing?.id ? "PATCH" : "POST",
+      editingResource,
+      editing?.id ? String(editing.id) : null,
+      addingEmployeeProfile
+        ? String(nested(editing ?? {}, "user.id"))
+        : undefined,
+    );
     if (creatingEmployee)
       for (const name of ["password", "confirmPassword"]) {
         const input = element.elements.namedItem(name);
@@ -777,39 +882,102 @@ export function AdminResource({
                     {canEditPublicProfiles && (
                       <EditPublicProfileLink resource={resource} row={row} />
                     )}
-                    {resource === "employees" && (
-                      <Link
-                        title={t("resources.viewEmployeeAttendance")}
+                    {resource === "employees" &&
+                      row.hasEmployeeProfile !== false && (
+                        <Link
+                          title={t("resources.viewEmployeeAttendance")}
+                          aria-label={t("resources.viewEmployeeAttendance")}
+                          className="icon-button"
+                          href={`/admin/attendance?employeeId=${encodeURIComponent(String(row.id))}`}
+                        >
+                          <Eye size={16} />
+                        </Link>
+                      )}
+                    {resource === "employees" &&
+                      canManageUsers &&
+                      row.hasEmployeeProfile === false &&
+                      typeof nested(row, "user.id") === "string" && (
+                        <button
+                          title={t("resources.addEmployeeProfile")}
+                          aria-label={t("resources.addEmployeeProfile")}
+                          disabled={
+                            busy || confirming || needsReconcile || isFetching
+                          }
+                          className="icon-button"
+                          onClick={() => {
+                            setEditingResource("employees");
+                            setAddingEmployeeProfile(true);
+                            setEmployeePasswordEnabled(false);
+                            setEditing(row);
+                            setActionError("");
+                          }}
+                        >
+                          <UserRoundPlus size={16} />
+                        </button>
+                      )}
+                    {resource === "employees" &&
+                      canManageUsers &&
+                      typeof nested(row, "user.id") === "string" && (
+                        <button
+                          title={t("resources.manageUserAccount")}
+                          aria-label={t("resources.manageUserAccount")}
+                          disabled={
+                            busy || confirming || needsReconcile || isFetching
+                          }
+                          className="icon-button"
+                          onClick={() => {
+                            setEditingResource("users");
+                            setAddingEmployeeProfile(false);
+                            setEditing({
+                              ...(row.user as DataRow),
+                              employee:
+                                row.hasEmployeeProfile !== false
+                                  ? { id: row.id }
+                                  : null,
+                            });
+                            setActionError("");
+                          }}
+                        >
+                          <UserCog size={16} />
+                        </button>
+                      )}
+                    {(resource !== "employees" ||
+                      (row.hasEmployeeProfile !== false &&
+                        (canEditPublicProfiles ||
+                          !["ADMIN", "SUPER_ADMIN"].includes(
+                            String(nested(row, "user.role")),
+                          )))) && (
+                      <button
+                        aria-label={t("resources.edit", {
+                          resource: config.singular,
+                        })}
+                        disabled={
+                          busy ||
+                          confirming ||
+                          needsReconcile ||
+                          isFetching ||
+                          (resource === "assignments" && row.employee === null)
+                        }
                         className="icon-button"
-                        href={`/admin/attendance?employeeId=${row.id}`}
+                        onClick={() => {
+                          setEditingResource(resource);
+                          setAddingEmployeeProfile(false);
+                          setEditing(row);
+                          setActionError("");
+                        }}
                       >
-                        <Eye size={16} />
-                      </Link>
+                        <Pencil size={15} />
+                      </button>
                     )}
-                    <button
-                      aria-label={t("resources.edit", {
-                        resource: config.singular,
-                      })}
-                      disabled={
-                        busy ||
-                        confirming ||
-                        needsReconcile ||
-                        isFetching ||
-                        (resource === "assignments" && row.employee === null)
-                      }
-                      className="icon-button"
-                      onClick={() => {
-                        setEditing(row);
-                        setActionError("");
-                      }}
-                    >
-                      <Pencil size={15} />
-                    </button>
                     {(resource === "employees"
-                      ? canDeleteEmployees &&
-                        ["EMPLOYEE", "MANAGE_DRIVER"].includes(
-                          String(nested(row, "user.role")),
-                        )
+                      ? canManageUsers
+                        ? typeof nested(row, "user.id") === "string" &&
+                          nested(row, "user.id") !== currentUserId
+                        : row.hasEmployeeProfile !== false &&
+                          canDeleteEmployees &&
+                          ["EMPLOYEE", "MANAGE_DRIVER"].includes(
+                            String(nested(row, "user.role")),
+                          )
                       : !config.noDelete &&
                         (resource !== "users" || row.id !== currentUserId)) && (
                       <button
@@ -817,31 +985,51 @@ export function AdminResource({
                           busy || confirming || needsReconcile || isFetching
                         }
                         aria-label={t("resources.delete", {
-                          resource: config.singular,
+                          resource:
+                            resource === "employees" && canManageUsers
+                              ? configs.users.singular
+                              : config.singular,
                         })}
                         className="icon-button"
                         onClick={() =>
                           void withActionDialog(async () => {
+                            const deletingDirectoryAccount =
+                              resource === "employees" && canManageUsers;
+                            const deleteResource = deletingDirectoryAccount
+                              ? "users"
+                              : resource;
+                            const deleteSingular =
+                              configs[deleteResource].singular;
                             if (
                               await confirmAction({
                                 title: t("resources.deleteTitle", {
-                                  resource: config.singular,
+                                  resource: deleteSingular,
                                 }),
                                 text:
-                                  resource === "employees"
+                                  deleteResource === "employees"
                                     ? t("resources.deleteEmployeeDescription")
-                                    : resource === "users"
+                                    : deleteResource === "users"
                                       ? t("resources.deleteUserDescription")
                                       : t("resources.deleteDescription", {
                                           resource: config.singular,
                                         }),
                                 confirmText: t("resources.delete", {
-                                  resource: config.singular,
+                                  resource: deleteSingular,
                                 }),
                                 danger: true,
                               })
                             )
-                              await mutate(String(row.id), {}, "DELETE");
+                              await mutate(
+                                String(
+                                  deletingDirectoryAccount
+                                    ? nested(row, "user.id")
+                                    : row.id,
+                                ),
+                                {},
+                                "DELETE",
+                                deleteResource,
+                                String(row.id),
+                              );
                           })
                         }
                       >
@@ -878,23 +1066,42 @@ export function AdminResource({
       </section>
       {editing && (
         <Modal
-          title={t(editing.id ? "resources.edit" : "resources.add", {
-            resource: config.singular,
-          })}
+          title={
+            addingEmployeeProfile
+              ? t("resources.addEmployeeProfile")
+              : resource === "employees" && editingResource === "users"
+                ? t("resources.manageUserAccount")
+                : t(editing.id ? "resources.edit" : "resources.add", {
+                    resource: editingConfig.singular,
+                  })
+          }
           close={() => {
-            if (!busy) setEditing(null);
+            if (!busy) {
+              setEditing(null);
+              setAddingEmployeeProfile(false);
+            }
           }}
         >
           <form onSubmit={submit}>
             <ErrorNotice message={actionError} />
-            {resource === "users" && (
+            {editingResource === "users" && (
               <p className="muted">{String(editing.email || "")}</p>
             )}
-            {editingOwnAccount && (
+            {addingEmployeeProfile && (
+              <>
+                <p className="muted">
+                  {label(nested(editing, "user.name"), locale)} ·{" "}
+                  {label(nested(editing, "user.email"), locale)}
+                </p>
+                <Notice>{t("resources.addEmployeeProfileHint")}</Notice>
+              </>
+            )}
+            {editingOwnAccount && !addingEmployeeProfile && (
               <Notice>{t("resources.ownAccountHint")}</Notice>
             )}
-            {resource === "employees" &&
+            {editingResource === "employees" &&
               Boolean(editing.id) &&
+              !addingEmployeeProfile &&
               !canEditPublicProfiles && (
                 <p className="muted">
                   {t("resources.profileRestricted", {
@@ -917,6 +1124,23 @@ export function AdminResource({
               </>
             )}
             <div className="form-grid">
+              {editingResource === "employees" && !editing.id && (
+                <div className="field full">
+                  <label className="field-checkbox">
+                    <input
+                      id="employee-password-enabled"
+                      type="checkbox"
+                      checked={employeePasswordEnabled}
+                      disabled={busy}
+                      onChange={(event) => {
+                        setEmployeePasswordEnabled(event.target.checked);
+                        setActionError("");
+                      }}
+                    />
+                    {t("labels.setApplicationPassword")}
+                  </label>
+                </div>
+              )}
               {fields.map((field) => (
                 <FormField
                   key={field.name}
@@ -931,7 +1155,10 @@ export function AdminResource({
                 disabled={busy}
                 type="button"
                 className="button secondary"
-                onClick={() => setEditing(null)}
+                onClick={() => {
+                  setEditing(null);
+                  setAddingEmployeeProfile(false);
+                }}
               >
                 {t("common.cancel")}
               </button>

@@ -16,7 +16,7 @@ async function fixture(role: Role, status: UserStatus = "ACTIVE") {
   const key = randomUUID();
   return db.user.create({
     data: {
-      name: `Delete employee ${key}`,
+      name: `Delete user ${key}`,
       email: `delete-${key}@example.test`,
       role,
       status,
@@ -76,7 +76,7 @@ test("Admin cannot see or call employee deletion; other non-super roles are also
   await signIn(context, admin.id);
   await page.goto("/admin/employees");
   await page
-    .getByRole("textbox", { name: "Search employees" })
+    .getByRole("textbox", { name: "Search users & employees" })
     .fill(target.email);
   const row = page.getByRole("row").filter({ hasText: target.email });
   await expect(row).toBeVisible();
@@ -84,7 +84,7 @@ test("Admin cannot see or call employee deletion; other non-super roles are also
     row.getByRole("button", { name: "Edit employee", exact: true }),
   ).toBeVisible();
   await expect(
-    row.getByRole("button", { name: "Delete employee", exact: true }),
+    row.getByRole("button", { name: "Delete user", exact: true }),
   ).toHaveCount(0);
   expect(
     (
@@ -179,20 +179,20 @@ for (const status of ["ACTIVE", "INACTIVE"] as const) {
       await signIn(context, superAdmin.id);
       await page.goto("/admin/employees");
       await page
-        .getByRole("textbox", { name: "Search employees" })
+        .getByRole("textbox", { name: "Search users & employees" })
         .fill(target.email);
       const row = page.getByRole("row").filter({ hasText: target.email });
       const remove = row.getByRole("button", {
-        name: "Delete employee",
+        name: "Delete user",
         exact: true,
       });
       await expect(remove).toBeVisible();
       await remove.click();
       const confirmation = page.getByRole("dialog", {
-        name: "Delete employee?",
+        name: "Delete user?",
       });
       await expect(confirmation).toContainText("Permanently delete");
-      await expect(confirmation).toContainText("sign-in account");
+      await expect(confirmation).toContainText("user account");
       await expect(confirmation).toContainText("deleted info");
       await confirmation
         .getByRole("button", { name: "Cancel", exact: true })
@@ -202,10 +202,10 @@ for (const status of ["ACTIVE", "INACTIVE"] as const) {
       expect(await db.session.count({ where: { userId: target.id } })).toBe(1);
       await remove.click();
       await confirmation
-        .getByRole("button", { name: "Delete employee", exact: true })
+        .getByRole("button", { name: "Delete user", exact: true })
         .click();
       await expect(page.locator('.notice[role="status"]')).toContainText(
-        "Employee and sign-in account permanently deleted.",
+        "User account permanently deleted.",
       );
       await expect(row).toHaveCount(0);
       expect(await db.employee.count({ where: { id: employee.id } })).toBe(0);
@@ -229,8 +229,8 @@ for (const status of ["ACTIVE", "INACTIVE"] as const) {
         await db.auditLog.count({
           where: {
             actorId: superAdmin.id,
-            action: "EMPLOYEE_DELETED",
-            resourceId: employee.id,
+            action: "USER_DELETED",
+            resourceId: target.id,
           },
         }),
       ).toBe(1);
@@ -282,23 +282,23 @@ test("employee deletion removes login access and displays retained attendance as
     await signIn(context, superAdmin.id);
     await page.goto("/admin/employees");
     await page
-      .getByRole("textbox", { name: "Search employees" })
+      .getByRole("textbox", { name: "Search users & employees" })
       .fill(target.email);
     const row = page.getByRole("row").filter({ hasText: target.email });
     const remove = row.getByRole("button", {
-      name: "Delete employee",
+      name: "Delete user",
       exact: true,
     });
     await expect(remove).toBeVisible();
     const response = page.waitForResponse(
       (res) =>
         res.request().method() === "DELETE" &&
-        res.url().endsWith(`/api/admin/employees/${employee.id}`),
+        res.url().endsWith(`/api/admin/users/${target.id}`),
     );
     await remove.click();
     await page
-      .getByRole("dialog", { name: "Delete employee?" })
-      .getByRole("button", { name: "Delete employee", exact: true })
+      .getByRole("dialog", { name: "Delete user?" })
+      .getByRole("button", { name: "Delete user", exact: true })
       .click();
     expect((await response).status()).toBe(200);
     await expect(row).toHaveCount(0);
@@ -327,7 +327,7 @@ test("employee deletion removes login access and displays retained attendance as
     ).toBe(0);
     expect(
       await db.auditLog.count({
-        where: { resourceId: employee.id, action: "EMPLOYEE_DELETED" },
+        where: { resourceId: target.id, action: "USER_DELETED" },
       }),
     ).toBe(1);
     expect(

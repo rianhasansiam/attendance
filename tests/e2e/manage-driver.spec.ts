@@ -80,7 +80,7 @@ test("administrators can assign and remove driver management from an employee", 
   await signIn(context, "ADMIN");
   await page.goto("/admin/employees");
   await page
-    .getByRole("textbox", { name: "Search employees" })
+    .getByRole("textbox", { name: "Search users & employees" })
     .fill(employee.email);
   await expect(page.locator("tbody tr")).toHaveCount(1);
   await page

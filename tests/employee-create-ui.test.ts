@@ -11,6 +11,7 @@ import {
 } from "@/store/make-store";
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/client/alerts", () => ({
@@ -105,6 +106,11 @@ function button(text: string) {
 function input(name: string) {
   return container.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
 }
+function passwordOption() {
+  return container.querySelector<HTMLInputElement>(
+    "#employee-password-enabled",
+  )!;
+}
 async function eventually(assertion: () => void) {
   await act(async () => {
     await vi.waitFor(assertion);
@@ -130,7 +136,7 @@ async function render(
     expect(container.textContent).toContain(employee.user.email),
   );
 }
-async function openCreation() {
+async function openCreation(withPassword = false) {
   await render(true);
   await act(async () => button("Add employee")!.click());
   await eventually(() =>
@@ -139,9 +145,15 @@ async function openCreation() {
   input("name").value = "New employee";
   input("email").value = "new.employee@example.test";
   input("employeeCode").value = "EMP-002";
-  input("officeId").value = "office";
-  input("password").value = password;
-  input("confirmPassword").value = password;
+  await act(async () => {
+    input("officeId").value = "office";
+    input("officeId").dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  if (withPassword) {
+    await act(async () => passwordOption().click());
+    input("password").value = password;
+    input("confirmPassword").value = password;
+  }
 }
 async function submit() {
   await act(async () => {
@@ -163,8 +175,57 @@ it.each([undefined, false])(
   },
 );
 
-it("asks for a masked application password and confirmation only during creation", async () => {
+it("creates a Google sign-in employee without requiring or sending a password", async () => {
   await openCreation();
+  expect(passwordOption().checked).toBe(false);
+  expect(input("password")).toBeNull();
+  expect(input("confirmPassword")).toBeNull();
+  expect(container.textContent).toContain("No application password is needed.");
+  await submit();
+  await eventually(() => expect(writes).toHaveLength(1));
+  expect(await writes[0].clone().json()).toEqual({
+    name: "New employee",
+    email: "new.employee@example.test",
+    employeeCode: "EMP-002",
+    officeId: "office",
+    departmentId: null,
+    role: "EMPLOYEE",
+    status: "ACTIVE",
+  });
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it.each(["ADMIN", "SUPER_ADMIN"])(
+  "creates a %s account with an employee profile and optional password",
+  async (role) => {
+    await openCreation();
+    const roles = container.querySelector<HTMLSelectElement>('[name="role"]')!;
+    expect([...roles.options].map((option) => option.value)).toEqual([
+      "EMPLOYEE",
+      "MANAGE_DRIVER",
+      "ADMIN",
+      "SUPER_ADMIN",
+    ]);
+    expect(container.textContent).toContain(
+      "Every role receives an employee profile.",
+    );
+    roles.value = role;
+    await submit();
+    await eventually(() => expect(writes).toHaveLength(1));
+    expect(await writes[0].clone().json()).toEqual({
+      name: "New employee",
+      email: "new.employee@example.test",
+      employeeCode: "EMP-002",
+      officeId: "office",
+      departmentId: null,
+      role,
+      status: "ACTIVE",
+    });
+  },
+);
+
+it("asks for a masked application password only when optional password sign-in is selected", async () => {
+  await openCreation(true);
   for (const name of ["password", "confirmPassword"]) {
     expect(input(name).type).toBe("password");
     expect(input(name).autocomplete).toBe("new-password");
@@ -179,8 +240,35 @@ it("asks for a masked application password and confirmation only during creation
   expect(input("password").type).toBe("text");
   await act(async () => button("Cancel")!.click());
   await act(async () => button("Add employee")!.click());
+  expect(passwordOption().checked).toBe(false);
+  expect(input("password")).toBeNull();
+  expect(input("confirmPassword")).toBeNull();
+  await act(async () => passwordOption().click());
   expect(input("password").value).toBe("");
   expect(input("confirmPassword").value).toBe("");
+});
+
+it("clears credentials when switching back to Google sign-in and omits them from creation", async () => {
+  await openCreation(true);
+  input("confirmPassword").value = "does not match";
+  await submit();
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "The passwords do not match.",
+  );
+  await act(async () => passwordOption().click());
+  expect(input("password")).toBeNull();
+  expect(input("confirmPassword")).toBeNull();
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => passwordOption().click());
+  expect(input("password").value).toBe("");
+  expect(input("confirmPassword").value).toBe("");
+  await act(async () => passwordOption().click());
+  await submit();
+  expect(writes).toHaveLength(1);
+  const payload = await writes[0].clone().json();
+  expect(payload).not.toHaveProperty("password");
+  expect(payload).not.toHaveProperty("confirmPassword");
+  expect(JSON.stringify(store.getState())).not.toContain(password);
 });
 
 it.each([
@@ -195,7 +283,7 @@ it.each([
 ])(
   "rejects invalid creation passwords before sending (%s)",
   async (value, confirmation, message) => {
-    await openCreation();
+    await openCreation(true);
     input("password").value = value;
     input("confirmPassword").value = confirmation;
     await submit();
@@ -207,7 +295,7 @@ it.each([
 );
 
 it("creates the account directly without putting credentials in Redux", async () => {
-  await openCreation();
+  await openCreation(true);
   const dispatch = vi.spyOn(store, "dispatch");
   await submit();
   await eventually(() => expect(writes).toHaveLength(1));
@@ -236,34 +324,38 @@ it("blocks creation if permission changes while its form is open", async () => {
   expect(writes).toHaveLength(0);
 });
 
-it("sends only one request while account creation is pending", async () => {
-  let finish!: () => void;
-  const pending = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
-  mutation = async () => {
-    await pending;
-    return Response.json({ success: true, data: { id: "created-employee" } });
-  };
-  await openCreation();
-  await submit();
-  await submit();
-  expect(writes).toHaveLength(1);
-  expect(button("Save changes")).toBeUndefined();
-  expect(button("Saving…")!.disabled).toBe(true);
-  expect(input("password").disabled).toBe(true);
-  await act(async () => finish());
-  await eventually(() =>
-    expect(container.querySelector('[role="dialog"]')).toBeNull(),
-  );
-});
+it.each([false, true])(
+  "sends only one request while account creation is pending (password: %s)",
+  async (withPassword) => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    mutation = async () => {
+      await pending;
+      return Response.json({ success: true, data: { id: "created-employee" } });
+    };
+    await openCreation(withPassword);
+    await submit();
+    await submit();
+    expect(writes).toHaveLength(1);
+    expect(button("Save changes")).toBeUndefined();
+    expect(button("Saving…")!.disabled).toBe(true);
+    expect(passwordOption().disabled).toBe(true);
+    if (withPassword) expect(input("password").disabled).toBe(true);
+    await act(async () => finish());
+    await eventually(() =>
+      expect(container.querySelector('[role="dialog"]')).toBeNull(),
+    );
+  },
+);
 
 it("prevents replay after an uncertain creation until records refresh successfully", async () => {
   mutation = async () => {
     rejectReads = true;
     throw new TypeError("Network interrupted");
   };
-  await openCreation();
+  await openCreation(true);
   await submit();
   await eventually(() =>
     expect(container.textContent).toContain("The result is uncertain."),
@@ -288,7 +380,7 @@ it("clears credentials after a rejected write so they are not retained in the fo
       },
       { status: 409 },
     );
-  await openCreation();
+  await openCreation(true);
   await submit();
   await eventually(() =>
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
@@ -309,6 +401,7 @@ it("keeps normal employee edits available without asking for or submitting crede
   );
   expect(input("password")).toBeNull();
   expect(input("confirmPassword")).toBeNull();
+  expect(passwordOption()).toBeNull();
   await submit();
   await eventually(() => expect(writes).toHaveLength(1));
   expect(writes[0].method).toBe("PATCH");

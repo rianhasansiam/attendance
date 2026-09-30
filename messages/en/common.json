@@ -131,6 +131,7 @@
     "LEAVE_ALREADY_REVIEWED": "This leave request has already been reviewed.",
     "LEAVE_NOT_CANCELLABLE": "Only your own pending leave requests can be cancelled.",
     "EMPLOYEE_REQUIRED": "This user needs an employee profile before receiving an employee role.",
+    "EMPLOYEE_PROFILE_EXISTS": "This user already has an employee profile. Refresh the list to edit it.",
     "SELF_ACCESS_CHANGE": "You cannot remove your own administrator access.",
     "INVALID_ATTENDANCE_TIME": "Check the attendance times and try again.",
     "FUTURE_ATTENDANCE": "Attendance times cannot be in the future.",

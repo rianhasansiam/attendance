@@ -3,6 +3,7 @@ import type { Role } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { authorizeCredentials } from "@/modules/auth/credentials";
+import { authorizeGoogle } from "@/modules/auth/authorization";
 import { verifyPassword } from "@/modules/auth/password";
 import { createEmployee, updateEmployee } from "@/modules/employees/service";
 import { createRecord } from "@/modules/management/service";
@@ -68,6 +69,56 @@ describe.skipIf(!databaseUrl)(
     });
 
     afterAll(async () => db.$disconnect());
+
+    it.each(["EMPLOYEE", "MANAGE_DRIVER"] as const)(
+      "provisions a Google-only %s without an application password",
+      async (role) => {
+        const profile = {
+          name: "Google employee",
+          email: `google-${randomUUID()}@example.test`,
+          employeeCode: randomUUID(),
+          officeId,
+          status: "ACTIVE",
+        };
+        const created = (await createRecord(superAdmin, "employees", {
+          ...profile,
+          email: `  ${profile.email.toUpperCase()}  `,
+          role,
+        })) as Awaited<ReturnType<typeof createEmployee>>;
+        const user = await db.user.findUniqueOrThrow({
+          where: { id: created.userId },
+          include: { employee: true },
+        });
+        expect(user.passwordHash).toBeNull();
+        expect(user.googleAccountId).toBeNull();
+        expect(user.employee?.id).toBe(created.id);
+        expect(created.user).toMatchObject({ email: profile.email, role });
+        expect(() =>
+          authorizeGoogle(
+            {
+              email: profile.email,
+              email_verified: true,
+              sub: `google-${randomUUID()}`,
+            },
+            user,
+          ),
+        ).not.toThrow();
+        expect(
+          await authorizeCredentials(
+            { email: profile.email, password },
+            new Request("http://localhost:3000/api/auth/callback/credentials"),
+          ),
+        ).toBeNull();
+        const audit = await db.auditLog.findFirstOrThrow({
+          where: { resourceId: created.id, action: "EMPLOYEE_CREATED" },
+        });
+        for (const visible of [created, audit.previousState, audit.newState]) {
+          expect(JSON.stringify(visible)).not.toMatch(
+            /password|googleAccountId/,
+          );
+        }
+      },
+    );
 
     it.each(["EMPLOYEE", "MANAGE_DRIVER"] as const)(
       "creates a %s identity with a usable password and no credential disclosure",

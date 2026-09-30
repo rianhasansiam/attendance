@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useEmployeeError, useEmployeeMessage } from "./employee-feedback";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { ErrorNotice, Notice, PageHeader } from "@/components/ui";
@@ -21,10 +22,16 @@ import { useAppDispatch } from "@/store/hooks";
 
 export function PublicProfileEditor({
   profile,
+  isOwnProfile = false,
 }: {
   profile: ManagedPublicProfile;
+  isOwnProfile?: boolean;
 }) {
   const t = useTranslations("employee");
+  const router = useRouter();
+  const title = t(
+    isOwnProfile ? "publicProfile.editOwnTitle" : "publicProfile.editTitle",
+  );
   const [savedProfile, setSavedProfile] = useState(profile);
   const [revision, setRevision] = useState(0);
   const [pending, setPending] = useState(false);
@@ -135,6 +142,7 @@ export function PublicProfileEditor({
         ),
       );
       setMessage("publicProfile.saved");
+      if (isOwnProfile) router.refresh();
     } catch (error) {
       setError(error);
       if (isAmbiguousWrite(error)) setNeedsRefresh(true);
@@ -148,10 +156,14 @@ export function PublicProfileEditor({
     <>
       <PageHeader
         eyebrow={t("publicProfile.eyebrow")}
-        title={t("publicProfile.editTitle")}
-        description={t("publicProfile.editDescription", {
-          name: savedProfile.name || t("publicProfile.thisUser"),
-        })}
+        title={title}
+        description={
+          isOwnProfile
+            ? t("publicProfile.editOwnDescription")
+            : t("publicProfile.editDescription", {
+                name: savedProfile.name || t("publicProfile.thisUser"),
+              })
+        }
         action={
           <Link
             className="button secondary"
@@ -168,7 +180,7 @@ export function PublicProfileEditor({
         <form
           key={revision}
           onSubmit={submit}
-          aria-label={t("publicProfile.editTitle")}
+          aria-label={title}
           aria-busy={pending}
         >
           <ErrorNotice message={error} />
@@ -271,8 +283,8 @@ export function PublicProfileEditor({
             </div>
           </div>
           <div className="form-actions">
-            <Link className="button secondary" href="/admin/users">
-              <ArrowLeft size={16} /> {t("publicProfile.allUsers")}
+            <Link className="button secondary" href="/admin/employees">
+              <ArrowLeft size={16} /> {t("publicProfile.directory")}
             </Link>
             {needsRefresh && (
               <button
@@ -289,7 +301,13 @@ export function PublicProfileEditor({
               type="submit"
               disabled={pending || needsRefresh}
             >
-              {pending ? t("common.saving") : t("publicProfile.save")}
+              {pending
+                ? t("common.saving")
+                : t(
+                    isOwnProfile
+                      ? "publicProfile.saveOwn"
+                      : "publicProfile.save",
+                  )}
             </button>
           </div>
         </form>

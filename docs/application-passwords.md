@@ -1,14 +1,17 @@
 # Application passwords
 
-Only a super administrator can create employee accounts from **Admin → Employees → Add employee** (`/admin/employees`). Enter the employee's email, initial application password and matching confirmation together with their employee details. The employee can then sign in with that email and password. There is no public registration or email password-recovery system.
+Only a super administrator can create employee accounts from **Admin → Users & employees → Add employee** (`/admin/employees`). Enter the employee's Google email and employee details; no password is required. The employee can then choose **Continue with Google** on the login page using that same email. To also enable email/password sign-in, select **Set an application password (optional)** and enter a password with matching confirmation. There is no public registration or email password-recovery system.
+
+The creation form supports all four roles, including Admin and Super Admin; each new account receives its employee profile. To add employment details to an existing administrator, use **Add employee profile** on that account's row. This requires an employee ID and active office, preserves the existing role and sign-in methods, and does not require a password or revoke sessions.
 
 Google sign-in remains available for the same authorized account. The application password belongs to XHYD; never enter a Google password into the employee form or application password fields.
 
 ## Provisioning and password settings
 
 - Employee creation is restricted to `SUPER_ADMIN` in both the interface and API. Regular administrators can continue viewing and editing existing employee profiles, but cannot create accounts.
-- The initial password is required, hashed before storage and never returned in employee records or saved in audit snapshots. The policy is 12–128 characters, with matching confirmation and no composition rules, trimming or truncation.
-- Share the initial credentials with the employee through your approved private channel. No welcome or password-reset email is sent.
+- Google-only registration leaves `User.passwordHash` null. The API accepts omitted or empty password and confirmation fields; supplying only one nonempty field is rejected. Google verifies and links the registered email on the first successful sign-in.
+- An optional initial password is hashed before storage and never returned in employee records or saved in audit snapshots. The policy is 12–128 characters, with matching confirmation and no composition rules, trimming or truncation.
+- If you set an initial application password, share it with the employee through your approved private channel. Google-only employees need no application password. No welcome or password-reset email is sent.
 - **Account security**, available to every signed-in role, supports changing an existing password after verifying the current password. Existing Google-only accounts can set their first application password while authenticated.
 - Saving a password invalidates all sessions, including the current session. The user must sign in again. Any legacy recovery tokens are also invalidated.
 - An administrative email change clears the application password and revokes sessions, OAuth links and registered credentials. The user must verify the updated identity through Google sign-in before setting a new password in Account security.

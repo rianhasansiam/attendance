@@ -239,12 +239,14 @@ test("switching an authenticated report preserves route, filters, pagination, un
     (await db.office.findUniqueOrThrow({ where: { id: office.id } })).timezone,
   ).toBe("Asia/Dhaka");
   const navigation = page.getByRole("navigation", { name: "主导航" });
-  await navigation.getByRole("link", { name: "员工", exact: true }).click();
+  await navigation
+    .getByRole("link", { name: "用户与员工", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/admin\/employees$/);
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "员工", exact: true }),
+    page.getByRole("heading", { name: "用户与员工", exact: true }),
   ).toBeVisible();
 });
 

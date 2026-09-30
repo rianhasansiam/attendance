@@ -21,6 +21,8 @@ async function EmployeesPage() {
       canCreateEmployees={user.role === "SUPER_ADMIN"}
       canDeleteEmployees={user.role === "SUPER_ADMIN"}
       canEditPublicProfiles={user.role === "SUPER_ADMIN"}
+      canManageUsers={user.role === "SUPER_ADMIN"}
+      currentUserId={user.id}
     />
   );
 }

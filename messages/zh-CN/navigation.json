@@ -1,6 +1,6 @@
 {
   "overview": "仪表盘",
-  "employees": "员工",
+  "employees": "用户与员工",
   "attendance": "考勤",
   "lateApprovals": "迟到审批",
   "reports": "报表",
@@ -21,6 +21,8 @@
   "history": "考勤记录",
   "myDevices": "我的设备",
   "profile": "我的资料",
+  "employeeProfile": "员工资料",
+  "adminWorkspace": "管理工作区",
   "users": "所有用户",
   "settings": "设置",
   "publicProfile": "公开资料",

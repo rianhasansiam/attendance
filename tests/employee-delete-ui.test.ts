@@ -12,6 +12,7 @@ import {
 } from "@/store/make-store";
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -132,9 +133,9 @@ async function render(canDeleteEmployees?: boolean) {
     );
   });
   await eventually(() =>
-    expect(
-      container.querySelectorAll('button[aria-label="Edit employee"]'),
-    ).toHaveLength(employees.length),
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(
+      employees.length,
+    ),
   );
 }
 

@@ -89,7 +89,7 @@ describe("management authorization and validation", () => {
       ),
     ).toThrow();
   });
-  it("requires a matching 12–128 character password when creating an employee and rejects password fields during profile edits", () => {
+  it("accepts Google-only employees and validates an optional application password", () => {
     const input = {
       name: "New employee",
       email: "  EMPLOYEE@EXAMPLE.TEST  ",
@@ -99,7 +99,16 @@ describe("management authorization and validation", () => {
       confirmPassword: "employee initial passphrase",
     };
     expect(employeeSchema.parse(input).email).toBe("employee@example.test");
-    for (const password of [undefined, "", "too short", "p".repeat(129)]) {
+    for (const password of [undefined, ""]) {
+      const parsed = employeeSchema.parse({
+        ...input,
+        password,
+        confirmPassword: password,
+      });
+      expect(parsed.password).toBeUndefined();
+      expect(parsed.confirmPassword).toBeUndefined();
+    }
+    for (const password of ["too short", "p".repeat(129)]) {
       expect(
         employeeSchema.safeParse({
           ...input,
@@ -112,6 +121,23 @@ describe("management authorization and validation", () => {
       employeeSchema.safeParse({ ...input, confirmPassword: "different value" })
         .success,
     ).toBe(false);
+    for (const missing of [undefined, "", null]) {
+      expect(
+        employeeSchema.safeParse({ ...input, password: missing }).success,
+      ).toBe(false);
+      expect(
+        employeeSchema.safeParse({ ...input, confirmPassword: missing })
+          .success,
+      ).toBe(false);
+    }
+    const untrimmed = "  employee password  ";
+    expect(
+      employeeSchema.parse({
+        ...input,
+        password: untrimmed,
+        confirmPassword: untrimmed,
+      }).password,
+    ).toBe(untrimmed);
     expect(
       employeeUpdateSchema.safeParse({ name: "Renamed employee" }).success,
     ).toBe(true);
@@ -140,7 +166,7 @@ describe("management authorization and validation", () => {
         email: "employee@example.com",
         employeeCode: "E1",
         officeId: "o",
-        role: "SUPER_ADMIN",
+        isAdmin: true,
       }).success,
     ).toBe(false);
   });

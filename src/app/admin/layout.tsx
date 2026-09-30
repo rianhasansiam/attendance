@@ -43,6 +43,7 @@ async function AuthenticatedAdminLayout({
             email: user.email,
             role: user.role,
             image: user.image,
+            hasEmployeeProfile: Boolean(user.employee),
           }}
         >
           {children}

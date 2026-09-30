@@ -8,7 +8,9 @@ import {
   CalendarDays,
   Droplet,
   House,
+  IdCard,
   Layers3,
+  Mail,
   Phone,
 } from "lucide-react";
 import { getPublicProfile } from "@/modules/public-profile/service";
@@ -50,6 +52,16 @@ async function Profile({ params }: Props) {
         <p className={styles.intro}>{t("publicProfile.intro")}</p>
         <dl className={styles.details}>
           {[
+            {
+              label: t("publicProfile.email"),
+              value: profile.email,
+              Icon: Mail,
+            },
+            {
+              label: t("publicProfile.employeeId"),
+              value: profile.employeeCode,
+              Icon: IdCard,
+            },
             {
               label: t("publicProfile.designation"),
               value: profile.designation,

@@ -93,6 +93,7 @@ export function AppShell({
     email: string;
     role: string;
     image?: string | null;
+    hasEmployeeProfile?: boolean;
   };
   mode: "admin" | "employee";
 }) {
@@ -113,9 +114,27 @@ export function AppShell({
           ...adminNavigation.filter(
             (item) => !item.canAccess || item.canAccess(user.role),
           ),
+          ...(user.hasEmployeeProfile
+            ? [
+                {
+                  label: "employeeProfile",
+                  href: "/employee/profile",
+                  icon: UserRound,
+                },
+                {
+                  label: "myWorkspace",
+                  href: "/employee/dashboard",
+                  icon: House,
+                },
+              ]
+            : []),
           ...(user.role === "SUPER_ADMIN"
             ? [
-                { label: "users", href: "users", icon: Users },
+                {
+                  label: "profile",
+                  href: `/admin/users/${encodeURIComponent(user.id)}/profile`,
+                  icon: UserRound,
+                },
                 { label: "settings", href: "settings", icon: Settings2 },
               ]
             : []),
@@ -124,6 +143,15 @@ export function AppShell({
           ...employeeNavigation,
           ...(user.role === "MANAGE_DRIVER"
             ? [{ label: "driveCost", href: "drive-cost", icon: CarFront }]
+            : []),
+          ...(["ADMIN", "SUPER_ADMIN"].includes(user.role)
+            ? [
+                {
+                  label: "adminWorkspace",
+                  href: "/admin/dashboard",
+                  icon: Building2,
+                },
+              ]
             : []),
         ]),
     {

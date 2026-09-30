@@ -86,7 +86,7 @@ export function getResourceConfigs(
   };
   return {
     employees: {
-      title: t("labels.employees"),
+      title: t("labels.usersAndEmployees"),
       singular: t("singular.employees"),
       description: t("resources.employeesDescription"),
       fields: [
@@ -130,15 +130,15 @@ export function getResourceConfigs(
           name: "role",
           label: t("labels.role"),
           type: "select",
-          options: ["EMPLOYEE", "MANAGE_DRIVER"],
+          options: ["EMPLOYEE", "MANAGE_DRIVER", "ADMIN", "SUPER_ADMIN"],
           default: "EMPLOYEE",
           source: "user.role",
-          hint: t("fields.driverRoleHint"),
+          hint: t("fields.employeeRoleHint"),
         },
         status,
       ],
       columns: [
-        { key: "user.name", label: t("labels.employee") },
+        { key: "user.name", label: t("labels.name") },
         { key: "employeeCode", label: t("labels.employeeId") },
         { key: "user.email", label: t("labels.email") },
         { key: "department.name", label: t("labels.department") },

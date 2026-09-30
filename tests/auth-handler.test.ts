@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { decode } from "next-auth/jwt";
 
@@ -106,6 +106,10 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("installed Auth.js HTTP authentication flow", () => {
   it("keeps both Google and credentials registered", async () => {
     const response = await handlers.GET(request("providers"));
@@ -114,6 +118,58 @@ describe("installed Auth.js HTTP authentication flow", () => {
       google: { type: "oidc" },
       credentials: { type: "credentials" },
     });
+  });
+
+  it("starts password-free Google sign-in with the configured callback and OAuth protections", async () => {
+    const discovery = vi.fn().mockResolvedValue(
+      Response.json({
+        issuer: "https://accounts.google.com",
+        authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_endpoint: "https://oauth2.googleapis.com/token",
+        jwks_uri: "https://www.googleapis.com/oauth2/v3/certs",
+        response_types_supported: ["code"],
+        subject_types_supported: ["public"],
+        id_token_signing_alg_values_supported: ["RS256"],
+        code_challenge_methods_supported: ["S256"],
+      }),
+    );
+    vi.stubGlobal("fetch", discovery);
+    const protection = await csrf();
+    const response = await handlers.POST(
+      request("signin/google", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: protection.cookie,
+        },
+        body: new URLSearchParams({ csrfToken: protection.csrfToken }),
+      }),
+    );
+
+    expect(response.status).toBe(302);
+    const redirect = new URL(response.headers.get("location")!);
+    expect(redirect.origin).toBe("https://accounts.google.com");
+    expect(redirect.searchParams.get("client_id")).toBe(
+      mocks.env.GOOGLE_CLIENT_ID,
+    );
+    expect(redirect.searchParams.get("redirect_uri")).toBe(
+      `${mocks.env.AUTH_URL}/api/auth/callback/google`,
+    );
+    expect(redirect.searchParams.get("scope")).toBe("openid email profile");
+    expect(redirect.searchParams.get("prompt")).toBe("select_account");
+    expect(redirect.searchParams.get("code_challenge_method")).toBe("S256");
+    for (const check of ["state", "nonce", "code_challenge"]) {
+      expect(redirect.searchParams.get(check)).toBeTruthy();
+    }
+    for (const name of ["state", "nonce", "pkce.code_verifier"]) {
+      const cookie = response.headers
+        .getSetCookie()
+        .find((value) => value.startsWith(`authjs.${name}=`));
+      expect(cookie).toContain("HttpOnly");
+      expect(cookie).toContain("SameSite=Lax");
+    }
+    expect(mocks.authorizeCredentials).not.toHaveBeenCalled();
+    expect(mocks.db.session.create).not.toHaveBeenCalled();
   });
 
   it("requires Auth.js CSRF verification before credential authorization", async () => {

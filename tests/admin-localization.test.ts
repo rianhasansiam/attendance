@@ -29,8 +29,8 @@ describe("admin localization", () => {
   it("changes resource labels while preserving fields, enum values and timezone defaults", () => {
     const en = getResourceConfigs(translator("en"));
     const zh = getResourceConfigs(translator("zh-CN"));
-    expect(en.employees.title).toBe("Employees");
-    expect(zh.employees.title).toBe("员工");
+    expect(en.employees.title).toBe("Users & employees");
+    expect(zh.employees.title).toBe("用户与员工");
     for (const resource of Object.keys(en)) {
       expect(
         zh[resource].fields.map(

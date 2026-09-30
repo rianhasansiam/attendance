@@ -57,8 +57,19 @@ const employeeProfileSchema = z
   .strict();
 export const employeeSchema = employeeProfileSchema
   .extend({
-    password: newPasswordSchema,
-    confirmPassword: z.string().max(PASSWORD_MAX_LENGTH),
+    role: z
+      .enum(["SUPER_ADMIN", "ADMIN", "EMPLOYEE", "MANAGE_DRIVER"])
+      .optional(),
+    // Google-only employees have no application password. Do not trim a
+    // supplied password; only an empty field is treated as omitted.
+    password: newPasswordSchema
+      .or(z.literal("").transform(() => undefined))
+      .optional(),
+    confirmPassword: z
+      .string()
+      .max(PASSWORD_MAX_LENGTH)
+      .transform((value) => (value === "" ? undefined : value))
+      .optional(),
   })
   .refine((input) => input.password === input.confirmPassword, {
     message: "Passwords do not match.",
@@ -67,6 +78,9 @@ export const employeeSchema = employeeProfileSchema
 export const employeeUpdateSchema = employeeProfileSchema
   .partial()
   .extend({ status: statusSchema.optional() })
+  .strict();
+export const employeeProfileCreateSchema = employeeProfileSchema
+  .pick({ employeeCode: true, officeId: true, departmentId: true })
   .strict();
 export const departmentSchema = z
   .object({ name: label, active: z.boolean().default(true) })

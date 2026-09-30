@@ -43,6 +43,7 @@ async function AuthorizedWorkspace() {
             email: user.email,
             role: user.role,
             image: user.image,
+            hasEmployeeProfile: Boolean(user.employee),
           }}
         >
           <DailyExpensesWorkspace

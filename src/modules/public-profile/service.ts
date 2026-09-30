@@ -32,6 +32,8 @@ export async function getPublicProfile(
     select: {
       profileSlug: true,
       name: true,
+      email: true,
+      employee: { select: { employeeCode: true } },
       image: true,
       designation: true,
       phone: true,
@@ -46,6 +48,8 @@ export async function getPublicProfile(
   return {
     slug: user.profileSlug,
     name: user.name?.trim() || defaultDisplayName,
+    email: user.email,
+    employeeCode: user.employee?.employeeCode ?? null,
     image: publicImage(user.image),
     designation: user.designation,
     phone: user.phone,

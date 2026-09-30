@@ -121,23 +121,55 @@ export async function listRecords(
   let result: [unknown[], number];
   switch (resource) {
     case "employees": {
-      const where = q
+      // Every account belongs in the directory, with or without employment
+      // details. Query users once for consistent search and pagination.
+      const where: Prisma.UserWhereInput = q
         ? {
             OR: [
-              { employeeCode: { contains: q, mode: "insensitive" as const } },
-              employeeName(q),
+              { name: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+              {
+                employee: {
+                  is: {
+                    employeeCode: { contains: q, mode: "insensitive" },
+                  },
+                },
+              },
             ],
           }
         : {};
-      result = await Promise.all([
-        db.employee.findMany({
+      const [users, total] = await Promise.all([
+        db.user.findMany({
           where,
-          include: employeeInclude,
-          orderBy: { employeeCode: "asc" },
+          select: {
+            ...publicUserSelect,
+            employee: { include: { office: true, department: true } },
+          },
+          orderBy: [{ employee: { employeeCode: "asc" } }, { id: "asc" }],
           ...window,
         }),
-        db.employee.count({ where }),
+        db.user.count({ where }),
       ]);
+      result = [
+        users.map(({ employee, ...user }) => ({
+          ...(employee ?? {
+            // This is a directory row, not an Employee ID usable in mutations.
+            id: `user:${user.id}`,
+            userId: user.id,
+            employeeCode: null,
+            officeId: null,
+            departmentId: null,
+            joinedAt: null,
+            createdAt: null,
+            updatedAt: null,
+            office: null,
+            department: null,
+          }),
+          hasEmployeeProfile: employee !== null,
+          user,
+        })),
+        total,
+      ];
       break;
     }
     case "departments":

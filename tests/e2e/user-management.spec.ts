@@ -67,7 +67,7 @@ async function signIn(context: BrowserContext, userId: string) {
   ]);
 }
 
-test("only Super Admin can open All Users or call its read and write endpoints", async ({
+test("Admin uses the shared directory but account endpoints remain Super Admin-only", async ({
   page,
   context,
 }) => {
@@ -84,7 +84,17 @@ test("only Super Admin can open All Users or call its read and write endpoints",
         .getByRole("link", { name: "All Users", exact: true }),
     ).toHaveCount(0);
     await page.goto("/admin/users");
-    await expect(page).toHaveURL(/\/forbidden$/);
+    if (role === "ADMIN") {
+      await expect(page).toHaveURL(/\/admin\/employees$/);
+      await expect(
+        page.getByRole("heading", { name: "Users & employees", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Manage account", exact: true }),
+      ).toHaveCount(0);
+    } else {
+      await expect(page).toHaveURL(/\/forbidden$/);
+    }
     expect((await context.request.get("/api/admin/users")).status(), role).toBe(
       403,
     );
@@ -130,16 +140,18 @@ test("Super Admin sees every role, changes roles and permanently deletes an unus
   try {
     await signIn(deletedContext, admin.id);
     await signIn(context, actor.id);
-    await page.goto("/admin/users");
+    await page.goto("/admin/employees");
     await expect(
-      page.getByRole("heading", { name: "All Users", exact: true }),
+      page.getByRole("heading", { name: "Users & employees", exact: true }),
     ).toBeVisible();
     await expect(
       page
         .getByRole("navigation", { name: "Main navigation" })
-        .getByRole("link", { name: "All Users", exact: true }),
-    ).toHaveAttribute("href", "/admin/users");
-    await page.getByRole("textbox", { name: "Search all users" }).fill(group);
+        .getByRole("link", { name: "Users & employees", exact: true }),
+    ).toHaveAttribute("href", "/admin/employees");
+    await page
+      .getByRole("textbox", { name: "Search users & employees" })
+      .fill(group);
     for (const user of [actor, employee, manager, admin, otherSuperAdmin]) {
       await expect(
         page.getByRole("row").filter({ hasText: user.email }),
@@ -153,9 +165,9 @@ test("Super Admin sees every role, changes roles and permanently deletes an unus
       ownRow.getByRole("button", { name: "Delete user", exact: true }),
     ).toHaveCount(0);
     await ownRow
-      .getByRole("button", { name: "Edit user", exact: true })
+      .getByRole("button", { name: "Manage account", exact: true })
       .click();
-    const edit = page.getByRole("dialog", { name: "Edit user" });
+    const edit = page.getByRole("dialog", { name: "Manage account" });
     await expect(edit.getByLabel(/^Role/)).toHaveCount(0);
     await expect(
       edit.getByLabel("Account status", { exact: true }),
@@ -164,7 +176,7 @@ test("Super Admin sees every role, changes roles and permanently deletes an unus
 
     const adminRow = page.getByRole("row").filter({ hasText: admin.email });
     await adminRow
-      .getByRole("button", { name: "Edit user", exact: true })
+      .getByRole("button", { name: "Manage account", exact: true })
       .click();
     await expect(
       edit.getByText(
@@ -189,7 +201,7 @@ test("Super Admin sees every role, changes roles and permanently deletes an unus
       "EMPLOYEE",
     ] as const) {
       await employeeRow
-        .getByRole("button", { name: "Edit user", exact: true })
+        .getByRole("button", { name: "Manage account", exact: true })
         .click();
       await edit.getByLabel(/^Role/).selectOption(role);
       await edit
@@ -247,7 +259,7 @@ test("Super Admin sees every role, changes roles and permanently deletes an unus
   }
 });
 
-test("All Users deletion keeps linked leave history with deleted info", async ({
+test("Shared directory deletion keeps linked leave history with deleted info", async ({
   page,
   context,
 }) => {
@@ -262,9 +274,9 @@ test("All Users deletion keeps linked leave history with deleted info", async ({
     },
   });
   await signIn(context, actor.id);
-  await page.goto("/admin/users");
+  await page.goto("/admin/employees");
   await page
-    .getByRole("textbox", { name: "Search all users" })
+    .getByRole("textbox", { name: "Search users & employees" })
     .fill(target.email);
   const row = page.getByRole("row").filter({ hasText: target.email });
   await expect(row).toBeVisible();

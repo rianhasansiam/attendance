@@ -293,3 +293,125 @@ describe("account password settings", () => {
     },
   );
 });
+
+describe("own profile navigation", () => {
+  it.each(["ADMIN", "SUPER_ADMIN"])(
+    "lets %s open their employee profile and return to administration",
+    async (role) => {
+      const user = {
+        id: "signed-in-admin",
+        profileSlug: "admin-person",
+        email: "admin@example.test",
+        name: "Administrator",
+        role,
+        hasEmployeeProfile: true,
+      };
+      await render(h(AppShell, { mode: "admin", user, children: "Directory" }));
+      expect(
+        container.querySelector('a[href="/employee/profile"]')?.textContent,
+      ).toBe("Employee profile");
+      expect(
+        container.querySelector('a[href="/employee/dashboard"]')?.textContent,
+      ).toBe("My workspace");
+
+      await render(
+        h(AppShell, { mode: "employee", user, children: "Profile" }),
+      );
+      expect(
+        container.querySelector('nav a[href="/admin/dashboard"]')?.textContent,
+      ).toBe("Admin workspace");
+      expect(
+        container.querySelector('a[href="/employee/profile"]')?.textContent,
+      ).toBe("My profile");
+    },
+  );
+
+  it.each(["ADMIN", "SUPER_ADMIN"])(
+    "does not offer %s an employee workspace before a profile is assigned",
+    async (role) => {
+      await render(
+        h(AppShell, {
+          mode: "admin",
+          user: {
+            id: "signed-in-admin",
+            profileSlug: "admin-person",
+            email: "admin@example.test",
+            name: "Administrator",
+            role,
+            hasEmployeeProfile: false,
+          },
+          children: "Directory",
+        }),
+      );
+      expect(container.querySelector('a[href="/employee/profile"]')).toBeNull();
+      expect(
+        container.querySelector('a[href="/employee/dashboard"]'),
+      ).toBeNull();
+    },
+  );
+
+  it.each(["EMPLOYEE", "MANAGE_DRIVER"])(
+    "does not offer %s an administrator workspace",
+    async (role) => {
+      await render(
+        h(AppShell, {
+          mode: "employee",
+          user: {
+            id: "signed-in-employee",
+            profileSlug: "person",
+            email: "person@example.test",
+            name: "Person",
+            role,
+            hasEmployeeProfile: true,
+          },
+          children: "Profile",
+        }),
+      );
+      expect(
+        container.querySelector('nav a[href="/admin/dashboard"]'),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
+    ["SUPER_ADMIN", "/admin/users/signed-in-user/profile"],
+    ["ADMIN", null],
+    ["EMPLOYEE", "/employee/profile"],
+    ["MANAGE_DRIVER", "/employee/profile"],
+  ] as const)(
+    "links %s to the profile editor allowed for their role",
+    async (role, expectedPath) => {
+      window.history.replaceState(null, "", expectedPath ?? "/admin/dashboard");
+      await render(
+        h(AppShell, {
+          mode:
+            role === "EMPLOYEE" || role === "MANAGE_DRIVER"
+              ? "employee"
+              : "admin",
+          user: {
+            id: "signed-in-user",
+            profileSlug: "person",
+            email: "person@example.test",
+            name: "Person",
+            role,
+          },
+          children: "Profile",
+        }),
+      );
+      const profileLink = [...container.querySelectorAll("nav a")].find(
+        (link) => link.textContent === "My profile",
+      );
+      if (expectedPath) {
+        expect(profileLink?.getAttribute("href")).toBe(expectedPath);
+        expect(profileLink?.getAttribute("aria-current")).toBe("page");
+        expect(container.querySelector(".breadcrumb strong")?.textContent).toBe(
+          "My profile",
+        );
+      } else {
+        expect(profileLink).toBeUndefined();
+      }
+      const publicLink = container.querySelector('a[href="/profile/person"]');
+      expect(publicLink?.textContent).toBe("Public profile");
+    },
+  );
+});

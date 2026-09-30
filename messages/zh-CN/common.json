@@ -131,6 +131,7 @@
     "LEAVE_ALREADY_REVIEWED": "此请假申请已审核。",
     "LEAVE_NOT_CANCELLABLE": "只能取消您本人待审核的请假申请。",
     "EMPLOYEE_REQUIRED": "此用户须先创建员工档案，才能分配员工角色。",
+    "EMPLOYEE_PROFILE_EXISTS": "此用户已有员工档案，请刷新列表后编辑。",
     "SELF_ACCESS_CHANGE": "您不能移除自己的管理员权限。",
     "INVALID_ATTENDANCE_TIME": "请检查考勤时间后重试。",
     "FUTURE_ATTENDANCE": "考勤时间不能是未来时间。",

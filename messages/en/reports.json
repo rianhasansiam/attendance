@@ -38,8 +38,8 @@
     "approvalMismatch": "Approval no longer matches attendance",
     "unknown": "Unknown",
     "scheduledDay": "Scheduled day",
-    "footer": "Times use each row's shift timezone. Actual late minutes are retained; status reflects approved late requests. Positive overtime counts completed minutes after scheduled end, less actual late minutes. Negative overtime shows a work-hour shortfall. Overtime of at least 30 minutes per record is green and counted in the total; values below 30 minutes, including shortfalls, remain visible in red and are excluded.",
-    "unknownOvertime": "Total excludes {count, plural, one {# record} other {# records}} with unknown overtime.",
+    "footer": "Times use each row's shift timezone. Daily overtime retains its existing calculation after actual late minutes. Overtime of at least 30 minutes per record is green and counted; smaller values are red and excluded as credits. Negative overtime shows a work-hour shortfall. Actual late (min) greater than 5 deducts a fixed 30 minutes, regardless of extra work or late approval; exactly 5 does not. Completed workdays below 8h 30m also deduct the missing worked minutes. Open attendance and nonworking days have no shortage deduction.",
+    "unknownOvertime": "Total excludes {count, plural, one {# record} other {# records}} with unknown overtime from credits; known late and completed-day shortage deductions still apply.",
     "deleted": "Deleted Info"
   },
   "status": {

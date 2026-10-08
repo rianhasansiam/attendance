@@ -88,7 +88,11 @@ export async function attendanceReportPdf(
   for (const row of records) {
     worked += row.workedMinutes;
     if (row.overtimeMinutes === null) unknown++;
-    else overtime += countedOvertimeMinutes(row.overtimeMinutes);
+    overtime += countedOvertimeMinutes(
+      row.overtimeMinutes,
+      row.lateMinutes,
+      row.checkInAt && row.checkOutAt ? row.workedMinutes : null,
+    );
   }
   const bytes = await createReportPdf({
     locale,

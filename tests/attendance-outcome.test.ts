@@ -127,4 +127,22 @@ describe("canonical attendance outcome", () => {
       attendanceOutcome({ ...record, checkOutAt: null, overtimeMinutes: 0 }),
     ).toMatchObject({ rawOvertimeMinutes: 0, overtimeMinutes: 0 });
   });
+  it("preserves daily overtime when recorded lateness exceeds five minutes", () => {
+    const checkInAt = new Date("2026-09-19T09:20:00Z");
+    expect(
+      attendanceOutcome({
+        ...record,
+        checkInAt,
+        checkOutAt: new Date("2026-09-19T18:00:00Z"),
+        lateMinutes: 20,
+        lateApproval: { status: "APPROVED", checkInAt, lateMinutes: 20 },
+      }),
+    ).toMatchObject({
+      status: "PRESENT",
+      actualLateMinutes: 20,
+      effectiveLateMinutes: 0,
+      rawOvertimeMinutes: 60,
+      overtimeMinutes: 40,
+    });
+  });
 });

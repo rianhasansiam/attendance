@@ -83,16 +83,29 @@ function attendance(target = employee(), day = "2025-01-06") {
     attendanceDate: date(day),
     status: "LATE",
     checkInAt: new Date(`${day}T09:30:00Z`),
-    checkOutAt: new Date(`${day}T17:00:00Z`),
+    checkOutAt: new Date(`${day}T18:00:00Z`),
     lateMinutes: 30,
     lateReason: "Train service was delayed.",
-    workedMinutes: 450,
+    workedMinutes: 510,
     overtimeMinutes: 0,
     employee: target,
     office: target.office,
     shift,
     checkInLatitude: 99,
     checkInIp: "private-test-address",
+  };
+}
+function lateDeductionAttendance(extraMinutes: number, day = "2025-01-06") {
+  const scheduledEndAt = new Date(`${day}T17:00:00Z`);
+  return {
+    ...attendance(employee(), day),
+    checkInAt: new Date(`${day}T08:06:00Z`),
+    checkOutAt: new Date(scheduledEndAt.getTime() + extraMinutes * 60_000),
+    scheduledEndAt,
+    lateMinutes: 6,
+    workedMinutes: 534 + extraMinutes,
+    overtimeMinutes: extraMinutes - 6,
+    shift: { ...shift, startTime: "08:00" },
   };
 }
 const filters = {
@@ -210,6 +223,7 @@ describe("dynamic report derivation", () => {
       ...attendance(),
       scheduledEndAt: new Date("2025-01-06T17:00:00Z"),
       checkOutAt: new Date("2025-01-06T17:30:00Z"),
+      workedMinutes: 480,
       overtimeMinutes: 30,
     };
     mocks.attendances.mockResolvedValue([record]);
@@ -219,7 +233,7 @@ describe("dynamic report derivation", () => {
       to: "2025-01-06",
     });
     expect(result).toMatchObject({
-      summary: { overtimeMinutes: 0, unknownOvertimeRecords: 0 },
+      summary: { overtimeMinutes: -60, unknownOvertimeRecords: 0 },
       items: [
         {
           actualLateMinutes: 30,
@@ -300,7 +314,7 @@ describe("dynamic report derivation", () => {
     });
     expect(result).toMatchObject({
       total: 1,
-      summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
+      summary: { overtimeMinutes: 0, unknownOvertimeRecords: 0 },
       items: [
         { status: "LATE", lateApprovalStatus: "PENDING", overtimeMinutes: 30 },
       ],
@@ -377,12 +391,13 @@ describe("dynamic report derivation", () => {
 
 describe("filtered overtime totals", () => {
   it.each([1, 2])(
-    "excludes shortfalls from the total across pages when viewing page %i",
+    "excludes signed shortfalls and deducts recorded lateness across pages when viewing page %i",
     async (page) => {
       const records = [
         {
           ...attendance(employee(), "2025-01-07"),
           checkOutAt: new Date("2025-01-07T16:00:00Z"),
+          workedMinutes: 390,
           scheduledEndAt: new Date("2025-01-07T17:00:00Z"),
           overtimeMinutes: 0,
         },
@@ -407,7 +422,7 @@ describe("filtered overtime totals", () => {
 
       expect(result).toMatchObject({
         total: 2,
-        summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
+        summary: { overtimeMinutes: -150, unknownOvertimeRecords: 0 },
         items: [{ overtimeMinutes: page === 1 ? -90 : 30 }],
       });
     },
@@ -435,7 +450,7 @@ describe("filtered overtime totals", () => {
 
       expect(result).toMatchObject({
         total: 3,
-        summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
+        summary: { overtimeMinutes: -60, unknownOvertimeRecords: 0 },
         items: [{ overtimeMinutes: records[page - 1].overtimeMinutes }],
       });
     },
@@ -465,7 +480,7 @@ describe("filtered overtime totals", () => {
         total: 2,
         page,
         pageSize: 1,
-        summary: { overtimeMinutes: 80, unknownOvertimeRecords: 0 },
+        summary: { overtimeMinutes: 20, unknownOvertimeRecords: 0 },
       });
       if (result instanceof Response) throw new Error("Expected JSON page");
       expect(result.items.map((row) => row.id)).toEqual([records[page - 1].id]);
@@ -491,7 +506,7 @@ describe("filtered overtime totals", () => {
 
     expect(result).toMatchObject({
       total: 1,
-      summary: { overtimeMinutes: 47, unknownOvertimeRecords: 0 },
+      summary: { overtimeMinutes: 17, unknownOvertimeRecords: 0 },
     });
     expect(mocks.attendances.mock.calls[0][0].where).toMatchObject({
       employeeId: target.id,
@@ -527,7 +542,7 @@ describe("filtered overtime totals", () => {
 
     expect(result).toMatchObject({
       total: 1,
-      summary: { overtimeMinutes: 45, unknownOvertimeRecords: 0 },
+      summary: { overtimeMinutes: 15, unknownOvertimeRecords: 0 },
     });
   });
 
@@ -547,7 +562,7 @@ describe("filtered overtime totals", () => {
 
     expect(result).toMatchObject({
       total: 7,
-      summary: { overtimeMinutes: 35, unknownOvertimeRecords: 1 },
+      summary: { overtimeMinutes: -25, unknownOvertimeRecords: 1 },
     });
     if (result instanceof Response) throw new Error("Expected JSON page");
     expect(result.items.map((row) => row.overtimeMinutes)).toEqual([35]);
@@ -566,9 +581,14 @@ describe("filtered overtime totals", () => {
 
   it("keeps the total and displayed overtime consistent during a concurrent correction", async () => {
     const scanned = { ...attendance(), overtimeMinutes: 45 };
-    mocks.attendances
-      .mockResolvedValueOnce([scanned])
-      .mockResolvedValueOnce([{ ...scanned, overtimeMinutes: 120 }]);
+    mocks.attendances.mockResolvedValueOnce([scanned]).mockResolvedValueOnce([
+      {
+        ...scanned,
+        overtimeMinutes: 120,
+        lateMinutes: 5,
+        workedMinutes: 480,
+      },
+    ]);
 
     const result = await getReport(admin, {
       ...filters,
@@ -577,10 +597,449 @@ describe("filtered overtime totals", () => {
     });
 
     expect(result).toMatchObject({
-      summary: { overtimeMinutes: 45, unknownOvertimeRecords: 0 },
+      summary: { overtimeMinutes: 15, unknownOvertimeRecords: 0 },
     });
     if (result instanceof Response) throw new Error("Expected JSON page");
     expect(result.items.map((row) => row.overtimeMinutes)).toEqual([45]);
+    expect(result.items.map((row) => row.lateMinutes)).toEqual([30]);
+    expect(result.items.map((row) => row.workedMinutes)).toEqual([510]);
+  });
+});
+
+describe("fixed deductions for recorded lateness", () => {
+  it.each([
+    [0, 90],
+    [5, 90],
+    [6, 60],
+    [10, 60],
+    [90, 60],
+  ])(
+    "deducts a fixed 30 minutes only when Late(min) is above five (%i)",
+    async (lateMinutes, total) => {
+      mocks.attendances.mockResolvedValue([
+        {
+          ...attendance(),
+          checkInAt: new Date(
+            date("2025-01-06").getTime() + (9 * 60 + lateMinutes) * 60_000,
+          ),
+          checkOutAt: new Date(
+            date("2025-01-06").getTime() +
+              (9 * 60 + lateMinutes + 510) * 60_000,
+          ),
+          lateMinutes,
+          overtimeMinutes: 90,
+        },
+      ]);
+      const result = await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+      });
+      expect(result).toMatchObject({
+        summary: { overtimeMinutes: total, unknownOvertimeRecords: 0 },
+        items: [{ overtimeMinutes: 90, lateMinutes }],
+      });
+    },
+  );
+
+  it.each([
+    {
+      extra: 0,
+      overtime: -6,
+      total: 60,
+      display: "-0h 6m",
+      pdfTotal: "1h 0m (60 min)",
+    },
+    {
+      extra: 20,
+      overtime: 14,
+      total: 60,
+      display: "0h 14m",
+      pdfTotal: "1h 0m (60 min)",
+    },
+    {
+      extra: 30,
+      overtime: 24,
+      total: 60,
+      display: "0h 24m",
+      pdfTotal: "1h 0m (60 min)",
+    },
+    {
+      extra: 60,
+      overtime: 54,
+      total: 114,
+      display: "0h 54m",
+      pdfTotal: "1h 54m (114 min)",
+    },
+    {
+      extra: 120,
+      overtime: 114,
+      total: 174,
+      display: "1h 54m",
+      pdfTotal: "2h 54m (174 min)",
+    },
+  ])(
+    "retains a fixed deduction after $extra extra minutes in every JSON page and PDF",
+    async ({ extra, overtime, total, display, pdfTotal }) => {
+      const records = [
+        {
+          ...attendance(employee(), "2025-01-07"),
+          status: "PRESENT",
+          checkInAt: new Date("2025-01-07T09:00:00Z"),
+          lateMinutes: 0,
+          overtimeMinutes: 90,
+        },
+        lateDeductionAttendance(extra),
+      ];
+      for (const page of [1, 2]) {
+        mocks.attendances
+          .mockResolvedValueOnce(records)
+          .mockResolvedValueOnce([records[page - 1]]);
+        const result = await getReport(admin, {
+          ...filters,
+          from: "2025-01-06",
+          to: "2025-01-07",
+          page,
+          pageSize: 1,
+        });
+        expect(result).toMatchObject({
+          total: 2,
+          summary: { overtimeMinutes: total, unknownOvertimeRecords: 0 },
+          items: [{ overtimeMinutes: page === 1 ? 90 : overtime }],
+        });
+        expect(JSON.stringify(result)).not.toContain(
+          "lateMakeupShortfallMinutes",
+        );
+      }
+      mocks.attendances.mockResolvedValue(records);
+      await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-07",
+        format: "pdf",
+        page: 2,
+        pageSize: 1,
+      });
+      const document = mocks.pdf.mock.calls[0][0];
+      expect(document.rows.map((row: string[]) => row[6])).toEqual([
+        "1h 30m",
+        display,
+      ]);
+      expect(document.summary).toContainEqual({
+        label: "Total overtime",
+        value: pdfTotal,
+      });
+    },
+  );
+
+  it("deducts recorded lateness after approval while retaining excused status", async () => {
+    const record = {
+      ...attendance(),
+      checkInAt: new Date("2025-01-06T09:06:00Z"),
+      lateMinutes: 6,
+      overtimeMinutes: 90,
+    };
+    mocks.attendances.mockResolvedValue([
+      {
+        ...record,
+        lateApproval: {
+          status: "APPROVED",
+          checkInAt: record.checkInAt,
+          lateMinutes: 6,
+        },
+      },
+    ]);
+    const result = await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+      status: "PRESENT",
+    });
+    expect(result).toMatchObject({
+      summary: { overtimeMinutes: 60, unknownOvertimeRecords: 0 },
+      items: [
+        {
+          status: "PRESENT",
+          lateMinutes: 6,
+          actualLateMinutes: 6,
+          effectiveLateMinutes: 0,
+          isExcusedLate: true,
+          overtimeMinutes: 90,
+        },
+      ],
+    });
+  });
+
+  it.each([
+    { kind: "unknown historical", overtime: null, open: false, unknown: 1 },
+    { kind: "zero historical", overtime: 0, open: false, unknown: 0 },
+    { kind: "negative historical", overtime: -90, open: false, unknown: 0 },
+    { kind: "open", overtime: 0, open: true, unknown: 0 },
+  ])(
+    "deducts known lateness even for $kind overtime",
+    async ({ overtime, open, unknown }) => {
+      mocks.attendances.mockResolvedValue([
+        {
+          ...attendance(),
+          scheduledEndAt: null,
+          checkOutAt: open ? null : new Date("2025-01-06T18:00:00Z"),
+          overtimeMinutes: overtime,
+        },
+      ]);
+      const result = await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+      });
+      expect(result).toMatchObject({
+        summary: { overtimeMinutes: -30, unknownOvertimeRecords: unknown },
+        items: [{ overtimeMinutes: overtime, lateMinutes: 30 }],
+      });
+      await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+        format: "pdf",
+      });
+      expect(mocks.pdf.mock.calls[0][0].summary).toContainEqual({
+        label: "Total overtime",
+        value: "-0h 30m (-30 min)",
+      });
+    },
+  );
+});
+
+describe("completed workday shortages", () => {
+  it.each([
+    {
+      worked: 509,
+      late: 0,
+      overtime: 0,
+      total: -1,
+      unknown: 0,
+      pdfTotal: "-0h 1m (-1 min)",
+    },
+    {
+      worked: 510,
+      late: 0,
+      overtime: 0,
+      total: 0,
+      unknown: 0,
+      pdfTotal: "0h 0m (0 min)",
+    },
+    {
+      worked: 511,
+      late: 0,
+      overtime: 0,
+      total: 0,
+      unknown: 0,
+      pdfTotal: "0h 0m (0 min)",
+    },
+    {
+      worked: 480,
+      late: 0,
+      overtime: 0,
+      total: -30,
+      unknown: 0,
+      pdfTotal: "-0h 30m (-30 min)",
+    },
+    {
+      worked: 480,
+      late: 6,
+      overtime: 0,
+      total: -60,
+      unknown: 0,
+      pdfTotal: "-1h 0m (-60 min)",
+    },
+    {
+      worked: 480,
+      late: 6,
+      overtime: 90,
+      total: 30,
+      unknown: 0,
+      pdfTotal: "0h 30m (30 min)",
+    },
+    {
+      worked: 480,
+      late: 0,
+      overtime: -30,
+      total: -30,
+      unknown: 0,
+      pdfTotal: "-0h 30m (-30 min)",
+    },
+    {
+      worked: 480,
+      late: 0,
+      overtime: null,
+      total: -30,
+      unknown: 1,
+      pdfTotal: "-0h 30m (-30 min)",
+    },
+  ])(
+    "deducts shortages for $worked completed minutes with Late(min) $late and overtime $overtime in JSON and PDF",
+    async ({ worked, late, overtime, total, unknown, pdfTotal }) => {
+      const checkInAt = new Date(
+        date("2025-01-06").getTime() + (9 * 60 + late) * 60_000,
+      );
+      const record = {
+        ...attendance(),
+        status: late > 0 ? "LATE" : "PRESENT",
+        checkInAt,
+        checkOutAt: new Date(checkInAt.getTime() + worked * 60_000),
+        lateMinutes: late,
+        workedMinutes: worked,
+        overtimeMinutes: overtime,
+      };
+      mocks.attendances.mockResolvedValue([record]);
+      const result = await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+      });
+      expect(result).toMatchObject({
+        summary: { overtimeMinutes: total, unknownOvertimeRecords: unknown },
+        items: [{ workedMinutes: worked, overtimeMinutes: overtime }],
+      });
+      await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+        format: "pdf",
+      });
+      expect(mocks.pdf.mock.calls[0][0].summary).toContainEqual({
+        label: "Total overtime",
+        value: pdfTotal,
+      });
+    },
+  );
+
+  it.each([
+    { kind: "open attendance", checkIn: true, checkOut: false },
+    { kind: "checkout without check-in", checkIn: false, checkOut: true },
+    { kind: "unpunched attendance", checkIn: false, checkOut: false },
+  ])(
+    "does not deduct a workday shortage for $kind",
+    async ({ checkIn, checkOut }) => {
+      mocks.attendances.mockResolvedValue([
+        {
+          ...attendance(),
+          checkInAt: checkIn ? new Date("2025-01-06T09:00:00Z") : null,
+          checkOutAt: checkOut ? new Date("2025-01-06T17:00:00Z") : null,
+          lateMinutes: 0,
+          workedMinutes: 0,
+        },
+      ]);
+      const result = await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+      });
+      expect(result).toMatchObject({
+        summary: { overtimeMinutes: 0, unknownOvertimeRecords: 0 },
+      });
+      await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-06",
+        format: "pdf",
+      });
+      expect(mocks.pdf.mock.calls[0][0].summary).toContainEqual({
+        label: "Total overtime",
+        value: "0h 0m (0 min)",
+      });
+    },
+  );
+
+  it("does not deduct shortages for derived absence, leave, holiday, or weekend days", async () => {
+    mocks.attendances.mockResolvedValue([]);
+    const result = await getReport(admin, filters);
+    if (result instanceof Response) throw new Error("Expected JSON report");
+    expect(result.summary.overtimeMinutes).toBe(0);
+    expect(result.items.map((row) => row.status)).toEqual(
+      expect.arrayContaining(["ABSENT", "LEAVE", "HOLIDAY", "WEEKEND"]),
+    );
+    expect(
+      result.items.every((row) => row.derived && row.workedMinutes === 0),
+    ).toBe(true);
+    await getReport(admin, { ...filters, format: "pdf" });
+    expect(mocks.pdf.mock.calls[0][0].summary).toContainEqual({
+      label: "Total overtime",
+      value: "0h 0m (0 min)",
+    });
+  });
+
+  it("deducts shortages and late penalties across all pages and respects the status filter", async () => {
+    const records = [
+      {
+        ...attendance(employee(), "2025-01-07"),
+        status: "PRESENT",
+        lateMinutes: 0,
+        workedMinutes: 600,
+        overtimeMinutes: 90,
+      },
+      {
+        ...attendance(),
+        lateMinutes: 6,
+        workedMinutes: 480,
+        overtimeMinutes: 0,
+      },
+    ];
+    for (const page of [1, 2]) {
+      mocks.attendances
+        .mockResolvedValueOnce(records)
+        .mockResolvedValueOnce([records[page - 1]]);
+      const result = await getReport(admin, {
+        ...filters,
+        from: "2025-01-06",
+        to: "2025-01-07",
+        page,
+        pageSize: 1,
+      });
+      expect(result).toMatchObject({
+        total: 2,
+        summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
+        items: [{ workedMinutes: records[page - 1].workedMinutes }],
+      });
+    }
+    mocks.attendances.mockResolvedValue(records);
+    await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-07",
+      page: 2,
+      pageSize: 1,
+      format: "pdf",
+    });
+    expect(mocks.pdf.mock.calls[0][0].summary).toContainEqual({
+      label: "Total overtime",
+      value: "0h 30m (30 min)",
+    });
+    const filtered = await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-07",
+      status: "PRESENT",
+    });
+    expect(filtered).toMatchObject({
+      total: 1,
+      summary: { overtimeMinutes: 90, unknownOvertimeRecords: 0 },
+    });
+  });
+
+  it("retains the scanned workday shortage when a correction occurs during hydration", async () => {
+    const scanned = { ...attendance(), lateMinutes: 0, workedMinutes: 480 };
+    mocks.attendances
+      .mockResolvedValueOnce([scanned])
+      .mockResolvedValueOnce([{ ...scanned, workedMinutes: 510 }]);
+    const result = await getReport(admin, {
+      ...filters,
+      from: "2025-01-06",
+      to: "2025-01-06",
+    });
+    expect(result).toMatchObject({
+      summary: { overtimeMinutes: -30, unknownOvertimeRecords: 0 },
+      items: [{ workedMinutes: 480 }],
+    });
   });
 });
 
@@ -616,6 +1075,7 @@ describe("attendance PDF exports", () => {
       {
         ...record,
         checkOutAt: new Date("2025-01-06T17:30:00Z"),
+        workedMinutes: 480,
         scheduledEndAt: new Date("2025-01-06T17:00:00Z"),
         overtimeMinutes: 30,
         lateApproval: {
@@ -640,7 +1100,7 @@ describe("attendance PDF exports", () => {
     expect(document.rows[0][8]).toBe("PRESENT\nExcused late");
     expect(document.summary).toContainEqual({
       label: "Total overtime",
-      value: "0h 0m (0 min)",
+      value: "-1h 0m (-60 min)",
     });
   });
 
@@ -678,7 +1138,7 @@ describe("attendance PDF exports", () => {
     ]);
     expect(document.summary).toContainEqual({
       label: "Total overtime",
-      value: "2h 10m (130 min)",
+      value: "0h 40m (40 min)",
     });
     expect(document.footerNote).toContain(
       "excludes 1 record with unknown overtime",
@@ -713,7 +1173,7 @@ describe("attendance PDF exports", () => {
     ).toEqual([undefined, "#B42318", "#176B4A", "#B42318"]);
     expect(document.summary).toContainEqual({
       label: "Total overtime",
-      value: "0h 30m (30 min)",
+      value: "-1h 30m (-90 min)",
     });
     expect(document.footerNote).toContain(
       "Negative overtime shows a work-hour shortfall",
@@ -735,7 +1195,7 @@ describe("attendance PDF exports", () => {
     });
     const document = mocks.pdf.mock.calls[0][0];
     expect(document.rows[0][3]).toBe("2025-01-06\n15:30");
-    expect(document.rows[0][4]).toBe("2025-01-06\n23:00");
+    expect(document.rows[0][4]).toBe("2025-01-07\n00:00");
     expect(document.rows[0][9]).toBe(record.lateReason);
     expect(JSON.stringify(document)).not.toContain("private-test-address");
     expect(JSON.stringify(document)).not.toContain("checkInLatitude");
@@ -934,14 +1394,14 @@ describe("localized attendance exports", () => {
     expect(document.rows[0][1]).toBe("Employee\nE001");
     expect(document.rows[0][2]).toBe("HQ\nDay\nAsia/Dhaka");
     expect(document.rows[0][3]).toBe("2025/01/06\n15:30");
-    expect(document.rows[0][4]).toBe("2025/01/06\n23:00");
+    expect(document.rows[0][4]).toBe("2025/01/07\n00:00");
     expect(document.rows[0][6]).toBe("-1 小时 30 分钟");
     expect(document.rows[0][7]).toBe("30");
     expect(document.rows[0][8]).toBe("迟到");
     expect(document.rows[0][9]).toBe(record.lateReason);
     expect(document.summary).toContainEqual({
       label: "总加班时长",
-      value: "0 小时 0 分钟（0 分钟）",
+      value: "-0 小时 30 分钟（-30 分钟）",
     });
     if (result instanceof Response)
       expect(result.headers.get("Content-Disposition")).toContain(

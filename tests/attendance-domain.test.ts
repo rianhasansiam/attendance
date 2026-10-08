@@ -230,6 +230,25 @@ describe("attendance calculations", () => {
     }
   });
   it.each([
+    [0, 30, 30],
+    [5, 30, 25],
+    [6, 30, 24],
+    [20, 60, 40],
+  ])(
+    "keeps the daily balance based on actual lateness %i and %i extra minutes",
+    (lateMinutes, extraMinutes, overtimeMinutes) => {
+      const endsAt = new Date("2026-09-19T12:00:00Z");
+      expect(
+        calculateOvertime(
+          new Date(startsAt.getTime() + lateMinutes * 60_000),
+          new Date(endsAt.getTime() + extraMinutes * 60_000),
+          lateMinutes,
+          endsAt,
+        ),
+      ).toEqual({ rawOvertimeMinutes: extraMinutes, overtimeMinutes });
+    },
+  );
+  it.each([
     ["09:30", "17:30", "2026-09-19T18:15:00+06:00"],
     ["15:30", "23:30", "2026-09-20T00:15:00+06:00"],
   ])(

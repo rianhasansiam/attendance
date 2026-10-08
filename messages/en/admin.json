@@ -147,7 +147,7 @@
     "correctionReason": "Reason for correction",
     "saveCorrection": "Save correction",
     "page": "Page {page, number} · Times shown in your browser timezone",
-    "overtimeNote": "Across all {count, plural, one {# matching record} other {# matching records}} in the selected date range. Overtime of at least 30 minutes per record is green and counted. Values below 30 minutes, including work-hour shortfalls, are red and excluded from the total.{unknown, plural, =0 {} one { Excludes # record with unknown overtime.} other { Excludes # records with unknown overtime.}}"
+    "overtimeNote": "Across all {count, plural, one {# matching record} other {# matching records}} in the selected date range. Overtime of at least 30 minutes per record is green and counted; smaller values stay red and are excluded as credits. Late (min) greater than 5 deducts a fixed 30 minutes, regardless of extra work or late approval. Completed workdays below 8h 30m also deduct the missing minutes. Shortage is calculated after checkout; open attendance and nonworking days have no shortage deduction.{unknown, plural, =0 {} one { Excludes # record with unknown overtime from credits; known late and completed-day shortage deductions still apply.} other { Excludes # records with unknown overtime from credits; known late and completed-day shortage deductions still apply.}}"
   },
   "settings": {
     "saved": "Workspace settings saved.",

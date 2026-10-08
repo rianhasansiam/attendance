@@ -122,8 +122,22 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
-  test(`checkout records ${expectedMinutes} overtime minutes in employee, admin and report totals`, async ({
+for (const { expectedMinutes, lateMinutes, workedMinutes } of [
+  ...[-75, 29, 30, 40, 90].map((expectedMinutes) => ({
+    expectedMinutes,
+    lateMinutes: 0,
+    workedMinutes: 540,
+  })),
+  { expectedMinutes: 40, lateMinutes: 5, workedMinutes: 540 },
+  { expectedMinutes: 40, lateMinutes: 6, workedMinutes: 540 },
+  { expectedMinutes: -6, lateMinutes: 6, workedMinutes: 540 },
+  { expectedMinutes: 54, lateMinutes: 6, workedMinutes: 540 },
+  { expectedMinutes: 0, lateMinutes: 0, workedMinutes: 480 },
+  { expectedMinutes: 0, lateMinutes: 6, workedMinutes: 480 },
+  { expectedMinutes: 0, lateMinutes: 0, workedMinutes: 509 },
+  { expectedMinutes: 0, lateMinutes: 0, workedMinutes: 510 },
+]) {
+  test(`checkout records ${expectedMinutes} overtime minutes with Late(min) ${lateMinutes} and ${workedMinutes} worked minutes in employee, admin and report totals`, async ({
     page,
     context,
   }) => {
@@ -142,16 +156,21 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
       },
     });
     const now = Date.now();
-    const checkInAt = new Date(now - 9 * 60 * 60_000);
-    const scheduledEndAt = new Date(now - expectedMinutes * 60_000);
+    const checkInAt = new Date(now - workedMinutes * 60_000);
+    const scheduledEndAt = new Date(
+      now - (expectedMinutes + lateMinutes) * 60_000,
+    );
     const businessDate = new Date(
       `${checkInAt.toISOString().slice(0, 10)}T00:00:00Z`,
     );
     const shift = await db.shift.create({
       data: {
         name: `Overtime shift ${suffix}`,
-        startTime: checkInAt.toISOString().slice(11, 16),
+        startTime: new Date(checkInAt.getTime() - lateMinutes * 60_000)
+          .toISOString()
+          .slice(11, 16),
         endTime: scheduledEndAt.toISOString().slice(11, 16),
+        graceMinutes: 0,
         timezone: "UTC",
       },
     });
@@ -164,13 +183,14 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
         attendanceDate: businessDate,
         checkInAt,
         scheduledEndAt,
-        status: "PRESENT",
+        lateMinutes,
+        status: lateMinutes > 0 ? "LATE" : "PRESENT",
         lateReason: "Overtime browser checkout",
       },
     });
     const historicalCheckIn = new Date(checkInAt.getTime() - 2 * 86_400_000);
     const historicalCheckOut = new Date(
-      historicalCheckIn.getTime() + 8 * 60 * 60_000,
+      historicalCheckIn.getTime() + 510 * 60_000,
     );
     await db.attendance.create({
       data: {
@@ -179,7 +199,7 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
         checkInAt: historicalCheckIn,
         checkOutAt: historicalCheckOut,
         status: "PRESENT",
-        workedMinutes: 480,
+        workedMinutes: 510,
         overtimeMinutes: null,
         lateReason: "Unknown historical overtime",
       },
@@ -192,7 +212,7 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
         checkOutAt: new Date(historicalCheckOut.getTime() + 86_400_000),
         scheduledEndAt: new Date(historicalCheckOut.getTime() + 86_400_000),
         status: "PRESENT",
-        workedMinutes: 480,
+        workedMinutes: 510,
         overtimeMinutes: 0,
         lateReason: "No overtime worked",
       },
@@ -218,19 +238,25 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
     });
     expect(checkedOut.checkOutAt).not.toBeNull();
     expect(checkedOut.scheduledEndAt).toEqual(scheduledEndAt);
-    const overtimeMinutes = Math.floor(
-      (checkedOut.checkOutAt!.getTime() - scheduledEndAt.getTime()) / 60_000,
-    );
+    const overtimeMinutes =
+      Math.floor(
+        (checkedOut.checkOutAt!.getTime() - scheduledEndAt.getTime()) / 60_000,
+      ) - lateMinutes;
     expect(overtimeMinutes).toBe(expectedMinutes);
     expect(checkedOut.overtimeMinutes).toBe(overtimeMinutes);
+    expect(checkedOut.workedMinutes).toBe(workedMinutes);
     const displayedOvertime = `${overtimeMinutes < 0 ? "-" : ""}${Math.floor(Math.abs(overtimeMinutes) / 60)}h ${Math.abs(overtimeMinutes) % 60}m`;
-    const displayedTotal = overtimeMinutes >= 30 ? displayedOvertime : "0h 0m";
+    const totalMinutes =
+      (overtimeMinutes >= 30 ? overtimeMinutes : 0) -
+      (lateMinutes > 5 ? 30 : 0) -
+      Math.max(0, 510 - workedMinutes);
+    const displayedTotal = `${totalMinutes < 0 ? "-" : ""}${Math.floor(Math.abs(totalMinutes) / 60)}h ${Math.abs(totalMinutes) % 60}m`;
     await expectOvertimeTable(page, displayedOvertime, overtimeMinutes);
 
     await page.goto("/employee/history");
     await expectOvertimeTable(page, displayedOvertime, overtimeMinutes);
     await page.screenshot({
-      path: `test-results/overtime-${expectedMinutes}m-employee.png`,
+      path: `test-results/overtime-${expectedMinutes}m-late-${lateMinutes}m-worked-${workedMinutes}m-employee.png`,
       fullPage: true,
     });
 
@@ -245,7 +271,7 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
       .getByRole("columnheader", { name: "Overtime", exact: true })
       .scrollIntoViewIfNeeded();
     await page.screenshot({
-      path: `test-results/overtime-${expectedMinutes}m-admin.png`,
+      path: `test-results/overtime-${expectedMinutes}m-late-${lateMinutes}m-worked-${workedMinutes}m-admin.png`,
       fullPage: true,
     });
 
@@ -267,7 +293,7 @@ for (const expectedMinutes of [-75, 29, 30, 40, 90]) {
       .getByRole("columnheader", { name: "Overtime", exact: true })
       .scrollIntoViewIfNeeded();
     await page.screenshot({
-      path: `test-results/overtime-${expectedMinutes}m-reports.png`,
+      path: `test-results/overtime-${expectedMinutes}m-late-${lateMinutes}m-worked-${workedMinutes}m-reports.png`,
       fullPage: true,
     });
   });
@@ -310,22 +336,39 @@ test("filtered overtime includes every page and resets consistently in attendanc
   const rows = Array.from({ length: 29 }, (_, index) => {
     const days = index + 1;
     const day = dateBefore(days);
-    // The counted boundary is on page two; the visible first page is excluded.
+    // Counted credits, a late deduction and an unknown record's workday
+    // shortage are on page two; page one contributes nothing.
     const overtimeMinutes =
-      days === 29 ? null : days === 28 ? 30 : days === 27 ? 29 : 1;
+      days === 29
+        ? null
+        : days === 28
+          ? 30
+          : days === 27
+            ? 60
+            : days === 26
+              ? 29
+              : 1;
+    const lateMinutes = days === 28 ? 6 : days % 2 === 0 ? 1 : 0;
     const scheduledEndAt = new Date(`${day}T17:00:00Z`);
     return {
       employeeId,
       officeId: office.id,
       shiftId: shift.id,
       attendanceDate: new Date(`${day}T00:00:00Z`),
-      checkInAt: new Date(`${day}T09:00:00Z`),
+      checkInAt: new Date(
+        new Date(
+          `${day}T${overtimeMinutes === null ? "09:00" : "08:30"}:00Z`,
+        ).getTime() +
+          lateMinutes * 60_000,
+      ),
       checkOutAt: new Date(
-        scheduledEndAt.getTime() + (overtimeMinutes ?? 0) * 60_000,
+        scheduledEndAt.getTime() +
+          ((overtimeMinutes ?? 0) + lateMinutes) * 60_000,
       ),
       scheduledEndAt: overtimeMinutes === null ? null : scheduledEndAt,
-      workedMinutes: 480 + (overtimeMinutes ?? 0),
+      workedMinutes: overtimeMinutes === null ? 480 : 510 + overtimeMinutes,
       overtimeMinutes,
+      lateMinutes,
       status: days % 2 === 0 ? ("LATE" as const) : ("PRESENT" as const),
     };
   });
@@ -335,7 +378,7 @@ test("filtered overtime includes every page and resets consistently in attendanc
       ...rows[0],
       employeeId: otherEmployee.employee!.id,
       checkOutAt: new Date(`${dateBefore(1)}T19:05:00Z`),
-      workedMinutes: 605,
+      workedMinutes: 635,
       overtimeMinutes: 125,
     },
   });

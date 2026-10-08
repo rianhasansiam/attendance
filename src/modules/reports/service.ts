@@ -567,7 +567,13 @@ export async function getReport(actor: Actor, filters: Filters, locale = "en") {
         ? entry.record.overtimeMinutes
         : attendanceOutcome(entry.record).overtimeMinutes;
       if (overtimeMinutes === null) summary.unknownOvertimeRecords++;
-      else summary.overtimeMinutes += countedOvertimeMinutes(overtimeMinutes);
+      summary.overtimeMinutes += countedOvertimeMinutes(
+        overtimeMinutes,
+        entry.record.lateMinutes,
+        entry.record.checkInAt && entry.record.checkOutAt
+          ? entry.record.workedMinutes
+          : null,
+      );
     }
     return {
       items: await hydrateEntries(

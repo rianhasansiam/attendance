@@ -244,6 +244,13 @@ integration("PostgreSQL attendance and WebAuthn integration", () => {
       overtimeMinutes: -30,
       workedMinutes: 450,
     },
+    {
+      checkInTime: "09:20",
+      checkOutTime: "18:00",
+      lateMinutes: 20,
+      overtimeMinutes: 40,
+      workedMinutes: 520,
+    },
   ])(
     "persists $overtimeMinutes overtime minutes for $checkInTime–$checkOutTime against the captured shift",
     async ({

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { authorizeRole } from "@/modules/auth/authorization";
 import { attendanceOutcome } from "@/modules/attendance/outcome";
+import { countedOvertimeMinutes } from "@/modules/attendance/overtime-policy";
 import type { Actor } from "@/modules/management/permissions";
 import { DomainError } from "@/lib/errors";
 import { DELETED_INFO } from "@/lib/deleted-info";
@@ -566,7 +567,7 @@ export async function getReport(actor: Actor, filters: Filters, locale = "en") {
         ? entry.record.overtimeMinutes
         : attendanceOutcome(entry.record).overtimeMinutes;
       if (overtimeMinutes === null) summary.unknownOvertimeRecords++;
-      else summary.overtimeMinutes += overtimeMinutes;
+      else summary.overtimeMinutes += countedOvertimeMinutes(overtimeMinutes);
     }
     return {
       items: await hydrateEntries(

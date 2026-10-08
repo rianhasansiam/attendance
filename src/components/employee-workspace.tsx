@@ -113,7 +113,7 @@ function useAttendanceColumns() {
     {
       key: "overtimeMinutes",
       label: t("columns.overtime"),
-      format: "nullable-duration" as const,
+      format: "overtime-duration" as const,
     },
     { key: "lateMinutes", label: t("columns.lateMinutes") },
     {

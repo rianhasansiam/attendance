@@ -1,6 +1,10 @@
 import type { z } from "zod";
 import type { reportFilterSchema } from "@/modules/management/validation";
 import { addCalendarDays } from "@/modules/shifts/calculations";
+import {
+  countedOvertimeMinutes,
+  isCountedOvertime,
+} from "@/modules/attendance/overtime-policy";
 import type { ReportRecord } from "./service";
 import { resolveLocale } from "@/i18n/config";
 import { createReportTranslator } from "./translations";
@@ -84,7 +88,7 @@ export async function attendanceReportPdf(
   for (const row of records) {
     worked += row.workedMinutes;
     if (row.overtimeMinutes === null) unknown++;
-    else overtime += row.overtimeMinutes;
+    else overtime += countedOvertimeMinutes(row.overtimeMinutes);
   }
   const bytes = await createReportPdf({
     locale,
@@ -144,6 +148,19 @@ export async function attendanceReportPdf(
         row.lateReason || "-",
       ];
     }),
+    cellTextColors: records.map((row) => [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      row.overtimeMinutes === null
+        ? undefined
+        : isCountedOvertime(row.overtimeMinutes)
+          ? "#176B4A"
+          : "#B42318",
+    ]),
     footerNote:
       t("attendance.footer") +
       (unknown

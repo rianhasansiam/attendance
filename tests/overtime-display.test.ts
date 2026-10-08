@@ -18,20 +18,50 @@ describe("signed overtime display", () => {
     expect(duration(minutes)).toBe(expected);
   });
 
-  it("keeps negative, zero and unknown overtime distinct in attendance tables", () => {
+  it("keeps signed durations visible and colors them using the inclusive 30-minute threshold", () => {
     const markup = renderToStaticMarkup(
       h(Table, {
         columns: [
           {
             key: "overtimeMinutes",
             label: "Overtime",
-            format: "nullable-duration",
+            format: "overtime-duration",
           },
         ],
         rows: [
           { id: "shortfall", overtimeMinutes: -30 },
           { id: "complete", overtimeMinutes: 0 },
+          { id: "below-threshold", overtimeMinutes: 29 },
+          { id: "threshold", overtimeMinutes: 30 },
+          { id: "above-threshold", overtimeMinutes: 31 },
+          { id: "long-overtime", overtimeMinutes: 90 },
           { id: "unknown", overtimeMinutes: null },
+          { id: "missing" },
+        ],
+      }),
+    );
+    expect(markup.match(/<td>.*?<\/td>/g)).toEqual([
+      '<td><span class="overtime-duration overtime-excluded">-0h 30m</span></td>',
+      '<td><span class="overtime-duration overtime-excluded">0h 0m</span></td>',
+      '<td><span class="overtime-duration overtime-excluded">0h 29m</span></td>',
+      '<td><span class="overtime-duration overtime-counted">0h 30m</span></td>',
+      '<td><span class="overtime-duration overtime-counted">0h 31m</span></td>',
+      '<td><span class="overtime-duration overtime-counted">1h 30m</span></td>',
+      "<td>—</td>",
+      "<td>—</td>",
+    ]);
+  });
+
+  it("keeps unrelated nullable duration columns neutral", () => {
+    const markup = renderToStaticMarkup(
+      h(Table, {
+        columns: [
+          { key: "minutes", label: "Duration", format: "nullable-duration" },
+        ],
+        rows: [
+          { id: "shortfall", minutes: -30 },
+          { id: "complete", minutes: 0 },
+          { id: "unknown", minutes: null },
         ],
       }),
     );
@@ -42,7 +72,7 @@ describe("signed overtime display", () => {
     ]);
   });
 
-  it("shows a negative report total with one leading minus", () => {
+  it("formats signed durations in metrics with one leading minus", () => {
     const markup = renderToStaticMarkup(
       h(Metric, {
         title: "Total overtime",

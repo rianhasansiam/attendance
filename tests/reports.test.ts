@@ -377,7 +377,7 @@ describe("dynamic report derivation", () => {
 
 describe("filtered overtime totals", () => {
   it.each([1, 2])(
-    "includes shortfalls in the net total across pages when viewing page %i",
+    "excludes shortfalls from the total across pages when viewing page %i",
     async (page) => {
       const records = [
         {
@@ -407,8 +407,36 @@ describe("filtered overtime totals", () => {
 
       expect(result).toMatchObject({
         total: 2,
-        summary: { overtimeMinutes: -60, unknownOvertimeRecords: 0 },
+        summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
         items: [{ overtimeMinutes: page === 1 ? -90 : 30 }],
+      });
+    },
+  );
+
+  it.each([1, 2, 3])(
+    "applies the 30-minute minimum to each record while preserving page %i overtime",
+    async (page) => {
+      const records = [
+        { ...attendance(employee(), "2025-01-07"), overtimeMinutes: 29 },
+        { ...attendance(employee(), "2025-01-06"), overtimeMinutes: 29 },
+        { ...attendance(employee(), "2025-01-05"), overtimeMinutes: 30 },
+      ];
+      mocks.attendances
+        .mockResolvedValueOnce(records)
+        .mockResolvedValueOnce([records[page - 1]]);
+
+      const result = await getReport(admin, {
+        ...filters,
+        from: "2025-01-05",
+        to: "2025-01-07",
+        page,
+        pageSize: 1,
+      });
+
+      expect(result).toMatchObject({
+        total: 3,
+        summary: { overtimeMinutes: 30, unknownOvertimeRecords: 0 },
+        items: [{ overtimeMinutes: records[page - 1].overtimeMinutes }],
       });
     },
   );
@@ -660,15 +688,16 @@ describe("attendance PDF exports", () => {
     );
   });
 
-  it("exports negative overtime rows and a signed net total", async () => {
+  it("exports excluded overtime rows and colors without including them in the total", async () => {
     mocks.attendances.mockResolvedValue([
       { ...attendance(employee(), "2025-01-05"), overtimeMinutes: 30 },
       { ...attendance(employee(), "2025-01-06"), overtimeMinutes: -90 },
       { ...attendance(employee(), "2025-01-07"), overtimeMinutes: null },
+      { ...attendance(employee(), "2025-01-04"), overtimeMinutes: 29 },
     ]);
     await getReport(admin, {
       ...filters,
-      from: "2025-01-05",
+      from: "2025-01-04",
       to: "2025-01-07",
       format: "pdf",
     });
@@ -677,10 +706,14 @@ describe("attendance PDF exports", () => {
       "Unknown",
       "-1h 30m",
       "0h 30m",
+      "0h 29m",
     ]);
+    expect(
+      document.cellTextColors.map((row: (string | undefined)[]) => row[6]),
+    ).toEqual([undefined, "#B42318", "#176B4A", "#B42318"]);
     expect(document.summary).toContainEqual({
       label: "Total overtime",
-      value: "-1h 0m (-60 min)",
+      value: "0h 30m (30 min)",
     });
     expect(document.footerNote).toContain(
       "Negative overtime shows a work-hour shortfall",
@@ -908,7 +941,7 @@ describe("localized attendance exports", () => {
     expect(document.rows[0][9]).toBe(record.lateReason);
     expect(document.summary).toContainEqual({
       label: "总加班时长",
-      value: "-1 小时 30 分钟（-90 分钟）",
+      value: "0 小时 0 分钟（0 分钟）",
     });
     if (result instanceof Response)
       expect(result.headers.get("Content-Disposition")).toContain(

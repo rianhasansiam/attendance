@@ -445,6 +445,16 @@ tbody tr.date-group-1:hover {
 .align-right {
   text-align: right;
 }
+.overtime-duration {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.overtime-counted {
+  color: var(--green);
+}
+.overtime-excluded {
+  color: #ac4537;
+}
 .badge {
   display: inline-flex;
   align-items: center;

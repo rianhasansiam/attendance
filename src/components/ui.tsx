@@ -5,6 +5,7 @@ import zhCommon from "../../messages/zh-CN/common.json";
 import { Children, isValidElement, type ReactNode } from "react";
 import { AlertNotification } from "@/components/alert-notification";
 import { DELETED_INFO } from "@/lib/deleted-info";
+import { isCountedOvertime } from "@/modules/attendance/overtime-policy";
 import { AlertCircle, ArrowUpRight, RefreshCw } from "lucide-react";
 
 export type DataRow = Record<string, unknown>;
@@ -247,6 +248,7 @@ export function Table({
       | "attendance-status"
       | "duration"
       | "nullable-duration"
+      | "overtime-duration"
       | "text";
   }[];
   actions?: (row: DataRow) => ReactNode;
@@ -307,6 +309,16 @@ export function Table({
                       date(value, locale)
                     ) : column.format === "time" ? (
                       time(value, undefined, locale)
+                    ) : column.format === "overtime-duration" ? (
+                      value == null ? (
+                        "—"
+                      ) : (
+                        <span
+                          className={`overtime-duration ${isCountedOvertime(Number(value)) ? "overtime-counted" : "overtime-excluded"}`}
+                        >
+                          {duration(value, locale)}
+                        </span>
+                      )
                     ) : column.format === "duration" ||
                       column.format === "nullable-duration" ? (
                       column.format === "nullable-duration" && value == null ? (

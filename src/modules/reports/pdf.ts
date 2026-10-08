@@ -12,6 +12,7 @@ export type PdfReport = {
   summary: Array<{ label: string; value: string }>;
   columns: Array<{ label: string; width: number; align?: "left" | "right" }>;
   rows: string[][];
+  cellTextColors?: Array<Array<string | undefined>>;
   dateGroupColumn?: number;
   footerNote?: string;
 };
@@ -364,6 +365,9 @@ export async function createReportPdf(report: PdfReport): Promise<Uint8Array> {
       font("Regular").fontSize(bodySize).fillColor(colors.dark);
       let x = margin;
       cells.forEach((cell, index) => {
+        doc.fillColor(
+          report.cellTextColors?.[rowIndex]?.[index] ?? colors.dark,
+        );
         const visibleLines =
           index === 0 && continuation
             ? continuation

@@ -147,7 +147,7 @@
     "correctionReason": "更正原因",
     "saveCorrection": "保存更正",
     "page": "第 {page, number} 页 · 时间按浏览器时区显示",
-    "overtimeNote": "统计所选日期范围内的全部 {count, plural, other {# 条匹配记录}}。正值表示加班，负值表示工作时长不足。{unknown, plural, =0 {} other { 不包含 # 条加班时长未知的记录。}}"
+    "overtimeNote": "统计所选日期范围内的全部 {count, plural, other {# 条匹配记录}}。每条记录的加班时长达到 30 分钟时显示为绿色并计入总计；低于 30 分钟的值（包括工作时长不足的负值）显示为红色，不计入总计。{unknown, plural, =0 {} other { 不包含 # 条加班时长未知的记录。}}"
   },
   "settings": {
     "saved": "工作空间设置已保存。",

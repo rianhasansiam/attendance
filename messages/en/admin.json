@@ -147,7 +147,7 @@
     "correctionReason": "Reason for correction",
     "saveCorrection": "Save correction",
     "page": "Page {page, number} · Times shown in your browser timezone",
-    "overtimeNote": "Across all {count, plural, one {# matching record} other {# matching records}} in the selected date range. Positive values show overtime; negative values show a work-hour shortfall.{unknown, plural, =0 {} one { Excludes # record with unknown overtime.} other { Excludes # records with unknown overtime.}}"
+    "overtimeNote": "Across all {count, plural, one {# matching record} other {# matching records}} in the selected date range. Overtime of at least 30 minutes per record is green and counted. Values below 30 minutes, including work-hour shortfalls, are red and excluded from the total.{unknown, plural, =0 {} one { Excludes # record with unknown overtime.} other { Excludes # records with unknown overtime.}}"
   },
   "settings": {
     "saved": "Workspace settings saved.",

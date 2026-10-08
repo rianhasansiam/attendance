@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createReportPdf, type PdfReport } from "@/modules/reports/pdf";
 
 const report: PdfReport = {
@@ -126,6 +126,47 @@ describe("PDF report rendering", () => {
     expect(pages).toHaveLength(1);
     expect(pages[0]).toContain("No records match the selected filters.");
     expect(pages[0]).toContain("0 records | Page 1 of 1");
+  });
+
+  it("paints overtime cell colors while restoring the default for other cells", async () => {
+    const bytes = await createReportPdf({
+      ...report,
+      rows: [
+        ["2026-09-22", "Below minimum", "Excluded", "0h 29m"],
+        ["2026-09-23", "At minimum", "Counted", "0h 30m"],
+        ["2026-09-24", "Historical", "No schedule", "Unknown"],
+      ],
+      cellTextColors: [
+        [undefined, undefined, undefined, "#B42318"],
+        [undefined, undefined, undefined, "#176B4A"],
+      ],
+    });
+    const loadingTask = getDocument({ data: bytes, useSystemFonts: false });
+    const document = await loadingTask.promise;
+    try {
+      const page = await document.getPage(1);
+      const operators = await page.getOperatorList();
+      let color = "";
+      const textColors = new Map<string, string>();
+      operators.fnArray.forEach((operation, index) => {
+        const args = operators.argsArray[index];
+        if (operation === OPS.setFillRGBColor) color = args[0];
+        if (operation === OPS.showText) {
+          const text = args[0]
+            .map((glyph: { unicode?: string } | number) =>
+              typeof glyph === "number" ? "" : (glyph.unicode ?? ""),
+            )
+            .join("");
+          textColors.set(text, color);
+        }
+      });
+      expect(textColors.get("0h 29m")).toBe("#b42318");
+      expect(textColors.get("0h 30m")).toBe("#176b4a");
+      expect(textColors.get("At minimum")).toBe("#16372c");
+      expect(textColors.get("Unknown")).toBe("#16372c");
+    } finally {
+      await loadingTask.destroy();
+    }
   });
 });
 

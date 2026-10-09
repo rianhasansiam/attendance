@@ -10,6 +10,8 @@ export function DocumentMetadata() {
   const auth = useTranslations("auth");
   const navigation = useTranslations("navigation");
   const common = useTranslations("common");
+  // The public corporate homepage owns its server-rendered English metadata.
+  if (pathname === "/") return null;
   const publicProfile = pathname.startsWith("/profile/");
   const title = publicProfile
     ? `${navigation("publicProfile")} · Attend`

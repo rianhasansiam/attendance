@@ -9,6 +9,7 @@ import { clearWorkspaceData } from "@/store/make-store";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
 import { canManageDailyExpenses } from "@/modules/daily-expenses/permissions";
 import Image from "next/image";
+import localFont from "next/font/local";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
@@ -35,6 +36,15 @@ import {
   Wallet,
   X,
 } from "lucide-react";
+
+const adminManrope = localFont({
+  src: "../assets/fonts/manrope/Manrope-Variable.ttf",
+  weight: "200 800",
+  display: "swap",
+  variable: "--admin-font",
+  preload: false,
+  fallback: ["Arial", "Helvetica", "sans-serif"],
+});
 
 const adminNavigation = [
   { label: "overview", href: "dashboard", icon: House },
@@ -80,6 +90,22 @@ export function Brand() {
     </div>
   );
 }
+
+function AdminBrand() {
+  return (
+    <div className="brand admin-brand">
+      <Image
+        className="admin-brand-logo"
+        src="/company_logo.jpeg"
+        alt="XHYD"
+        width={1082}
+        height={205}
+        sizes="148px"
+      />
+    </div>
+  );
+}
+
 export function AppShell({
   children,
   user,
@@ -166,7 +192,13 @@ export function AppShell({
     (item) => pathname === navigationHref(item.href),
   );
   return (
-    <div className="workspace">
+    <div
+      className={
+        mode === "admin"
+          ? `workspace workspace-admin ${adminManrope.variable}`
+          : "workspace"
+      }
+    >
       <a href="#main-content" className="skip-link">
         {t("skip")}
       </a>
@@ -179,7 +211,7 @@ export function AppShell({
       )}
       <aside className={`sidebar ${open ? "is-open" : ""}`}>
         <Link href={`/${mode}/dashboard`} aria-label={t("home")}>
-          <Brand />
+          {mode === "admin" ? <AdminBrand /> : <Brand />}
         </Link>
         <div className="workspace-label">
           {mode === "admin" ? t("workspace") : t("personalWorkspace")}

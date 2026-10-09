@@ -1,5 +1,25 @@
 # Office Attendance
 
+The public `/` homepage introduces **XHYD** as a multinational business group. Employee sign-in and role-based dashboard routing remain available at `/workspace`; authentication and attendance permissions are unchanged.
+
+Homepage content is centralized in `src/data/company.ts`, with scoped styling and reusable server-rendered sections in `src/components/corporate/`. Navigation, native dialogs, inquiry drafting, and progressive scroll reveals use small client components. The existing XHYD logo, self-hosted Manrope font (SIL OFL), and optimized local imagery avoid external browser dependencies. `public/images/xhyd/provenance.json` records the exact prompts for the original AI-generated illustrative imagery; those visuals do not depict verified XHYD facilities. The world map uses public-domain Natural Earth coastlines.
+
+The public homepage and login panel share `src/components/corporate/brand.css`. Brand red `#C30708` and black `#101010` come from interior pixel samples of the unchanged official `public/company_logo.jpeg`; light red `#F1666A` provides accessible text and controls on dark surfaces. White logo plates preserve the original colors on dark navigation/footer backgrounds. Only illustrative photography receives a CSS grayscale treatment. The global map stays visible on mobile, and motion honors reduced-motion preferences. The editable native `social-card.svg` contains the exact original logo and renders to the matching 1200 × 630 PNG through the existing Sharp dependency.
+
+The admin shell uses the same identity through `src/components/admin-theme.css`, scoped to `.workspace-admin`. Dashboard cards, tables, forms, reports, driver costs, daily expenses, account screens, and body-mounted confirmation dialogs share the palette. The employee workspace keeps its existing presentation. Administrative loading states use the official logo; authentication, navigation destinations, permissions, mutations, and data handling remain unchanged.
+
+Optional verified public details are configured on the server:
+
+- `XHYD_CONTACT_EMAIL`: public partnership email, used for a real email-client handoff.
+- `XHYD_CONTACT_URL`: an existing HTTPS contact destination.
+- `XHYD_SITE_URL`: verified HTTPS corporate origin, enabling canonical and absolute social-sharing image URLs. Configure before the production build.
+
+Missing or invalid contact details show an honest inquiry-drafting alternative with **Copy inquiry**, without sending or storing messages. No office addresses, social accounts, partner logos, or operational statistics are invented. The footer year follows Asia/Dhaka at request time.
+
+Run `pnpm test:homepage` against a running local preview (defaults to `http://localhost:3000`; override with `XHYD_PREVIEW_URL`). These browser checks require no test database and cover responsive layouts, accessible navigation/dialogs, real anchor targets, reduced motion, and public metadata. The existing `pnpm test:e2e` suite retains its disposable-database requirement.
+
+The existing localized root layout uses streamed Suspense rendering: corporate content is present in server HTML, but browsers with JavaScript fully disabled do not display it. The homepage browser suite records this inherited layout limitation explicitly.
+
 English and 简体中文 are available from the language selector. Selection persists across navigation and browser reopening without changing URLs or sessions. See [localization architecture, translation editing, and verification](docs/localization.md). No database migration is needed for this feature.
 
 State management: [architecture, cache matrix and test instructions](docs/state-management.md) · [verified findings and baseline](docs/state-audit.md).
@@ -158,6 +178,5 @@ Then apply the migration to production:
 pnpm db:migrate
 pnpm db:generate
 Your current .env points to production—switch to a development database before running db:dev. Keep generated migration files; don’t manually delete tables.
-
 
 pnpm db:migrate

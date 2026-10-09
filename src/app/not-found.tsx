@@ -18,7 +18,7 @@ function NotFoundContent() {
         <p className="muted" style={{ marginBottom: 25 }}>
           {t("notFoundDescription")}
         </p>
-        <Link href="/" className="button">
+        <Link href="/workspace" className="button">
           {t("back")}
         </Link>
       </section>

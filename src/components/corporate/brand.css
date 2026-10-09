@@ -1,0 +1,19 @@
+/* Shared corporate, sign-in, and admin identity, sampled from company_logo.jpeg.
+   The JPEG stays untouched. A lighter red is reserved for text on dark surfaces. */
+:root {
+  --xhyd-red: #c30708;
+  --xhyd-red-dark: #9f0708;
+  --xhyd-red-light: #f1666a;
+  --xhyd-red-rgb: 195 7 8;
+  --xhyd-black: #101010;
+  --xhyd-charcoal: #181818;
+  --xhyd-ink: var(--xhyd-black);
+  --xhyd-white: #ffffff;
+  --xhyd-soft-white: #f7f7f8;
+  --xhyd-rose: #fff1f1;
+  --xhyd-muted: #66666d;
+  --xhyd-line: #e5e5e8;
+  --xhyd-control-border: #8b8b93;
+  --xhyd-dark-line: #ffffff24;
+  --xhyd-dark-muted: #bdbdc3;
+}

@@ -21,7 +21,7 @@ function ForbiddenContent() {
         <p className="muted" style={{ marginBottom: 25 }}>
           {t("forbiddenDescription")}
         </p>
-        <Link href="/" className="button">
+        <Link href="/workspace" className="button">
           {t("return")}
         </Link>
       </section>

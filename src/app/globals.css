@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@import "tailwindcss" source("../");
+@import "../components/corporate/brand.css";
+@import "../components/admin-theme.css";
 :root {
   --background: #f6f7f4;
   --surface: #fff;

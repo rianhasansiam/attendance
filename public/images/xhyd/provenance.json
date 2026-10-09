@@ -1,0 +1,33 @@
+{
+  "generatedWith": "Built-in image_gen imagegen tool (default mode)",
+  "generatedAt": "2026-10-09",
+  "purpose": "Representative editorial business imagery for the XHYD homepage. These visuals are not photographs of XHYD offices, facilities, or operations.",
+  "processing": "Resized without enlargement and compressed to WebP using existing sharp 0.35.4; quality 85, effort 6. No creative-content edits.",
+  "assets": [
+    {
+      "file": "skyline.webp",
+      "width": 1942,
+      "height": 809,
+      "bytes": 124796,
+      "prompt": "Use case: photorealistic-natural. Asset type: ultra-wide premium multinational corporate homepage hero photograph. Primary request: create a photorealistic Shanghai-inspired international financial district skyline seen across a broad calm river at blue-hour twilight. Composition: panoramic wide landscape approximately 2.4:1 aspect ratio; all visually interesting illuminated modern skyscrapers and dense business architecture concentrated in the RIGHT half and far-right two-thirds, tallest towers on the right; LEFT half must remain dark, quiet, uncluttered open midnight-navy sky and shadowed water suitable for bright headline overlay, with very low visual detail. The horizon sits just below the midpoint. Realistic contemporary blue-glass skyscrapers, crisp slender elegant silhouettes, electric-blue and restrained cyan urban lighting reflected in the river. Professional editorial architectural photography, subtly cinematic but natural, remarkable depth, authentic reflections, rich navy twilight palette, controlled contrast, premium enterprise mood. Camera: tripod-stable waterfront viewpoint, wide lens, realistic atmospheric haze. No people in foreground. No text, signage, logos, watermark, decorative graphic lines, invented brand marks or overlays. Representative business imagery rather than documentation of any particular company office.",
+      "sourceArtifact": "01a1215a-1ae7-73c2-b73b-845c81427bde/exec-8de62a78-6bc2-497c-a41f-5e5278604952.png"
+    },
+    {
+      "file": "architecture.webp",
+      "width": 1000,
+      "height": 1250,
+      "bytes": 197208,
+      "prompt": "Use case: photorealistic-natural. Asset type: premium multinational corporate homepage editorial image for company introduction. Primary request: upward-looking view of striking modern corporate architecture clad in pristine reflective blue glass, elegant tall business towers rising against clear pale-blue daytime sky. Composition: portrait-friendly vertical 4:5 or 3:4 ratio, viewpoint from street level looking up; bold architectural diagonal on the left, a luminous narrow wedge of sky, nuanced blue facade and geometrical glass window grids. Building fills most of the image, distinctive clean contemporary architectural lines, subtle convergence from the wide-angle architectural camera, no distorted impossible geometry. Style: premium professional architectural editorial photograph, highly photorealistic with natural materials and restrained sophisticated navy/electric-blue palette cohesive with a blue-hour financial skyline hero. Lighting: soft bright blue daylight, refined reflections, rich detail, convincing polished glass and steel surfaces. No people, no signage, no words, logos, watermarks, neon graphics or drawn overlays. Representative corporate architecture, never a claimed image of a specific company's offices.",
+      "sourceArtifact": "01a1215a-1ae7-73c2-b73b-845c81427bde/exec-d3c1e359-4f32-428d-80e4-e1bf86f0c15b.png"
+    },
+    {
+      "file": "trade.webp",
+      "width": 1400,
+      "height": 788,
+      "bytes": 249296,
+      "prompt": "Use case: photorealistic-natural. Asset type: premium multinational corporate homepage landscape editorial photograph for international partnerships and trade. Primary request: a cinematic aerial oblique photograph of a contemporary international container port beside deep blue water, with geometrically arranged rows of colorful shipping containers, enormous elegant steel gantry cranes and a large cargo ship moored along the quay. Composition: wide landscape approximately 16:9, elevated drone viewpoint, strong disciplined diagonals from the quay and orderly container rows, water along the right side, rich visual rhythm from terracotta red, muted ochre and navy-blue containers. Clear realistic engineering and scale, no impossible extra structures. Lighting: sophisticated blue-hour dusk with cool navy ambient light and restrained warm port lights, realistic texture, crisp industrial detail, cohesive midnight-blue/electric-blue editorial palette matching premium modern corporate architecture imagery. Professional photorealistic commercial editorial photography, serious global-business mood. No words, logos or brand lettering on ships or containers, no watermark, no graphic overlays, no decorative network lines. Representative international trade imagery, never documentation of a specific company's facilities.",
+      "sourceArtifact": "01a1215a-1ae7-73c2-b73b-845c81427bde/exec-165655be-935e-4edc-a1b1-4ed0a3936451.png"
+    }
+  ],
+  "originalsRetainedUnder": "$CODEX_HOME/generated_images"
+}

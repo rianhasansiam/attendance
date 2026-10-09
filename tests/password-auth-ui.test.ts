@@ -14,6 +14,14 @@ import {
 
 const auth = vi.hoisted(() => ({ signIn: vi.fn(), signOut: vi.fn() }));
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
+// next/font is transformed by Next's compiler, which is absent in Vitest.
+vi.mock("next/font/local", () => ({
+  default: () => ({
+    className: "test-admin-font",
+    variable: "test-admin-font-variable",
+    style: { fontFamily: "Arial" },
+  }),
+}));
 vi.mock("next-auth/react", () => auth);
 vi.mock("next/navigation", () => ({
   useRouter: () => router,
@@ -30,7 +38,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.history.replaceState(null, "", "/login");
-  auth.signIn.mockResolvedValue({ ok: true, url: "/", status: 200 });
+  auth.signIn.mockResolvedValue({ ok: true, url: "/workspace", status: 200 });
   auth.signOut.mockResolvedValue(undefined);
   fetchMock = vi
     .fn<typeof fetch>()
@@ -95,10 +103,10 @@ describe("credentials sign-in", () => {
       email: "person@example.test",
       password,
       redirect: false,
-      redirectTo: "/",
+      redirectTo: "/workspace",
     });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(router.replace).toHaveBeenCalledWith("/workspace");
     expect(router.refresh).toHaveBeenCalledOnce();
     expect(input("password").value).toBe("");
   });

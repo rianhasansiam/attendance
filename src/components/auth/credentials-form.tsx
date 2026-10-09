@@ -35,14 +35,14 @@ export function CredentialsForm() {
         email,
         password,
         redirect: false,
-        redirectTo: "/",
+        redirectTo: "/workspace",
       });
       // Never expose provider errors or use an untrusted callback URL.
       if (!result?.ok || result.error) {
         setError(t("invalidCredentials"));
       } else {
         form.reset();
-        router.replace("/");
+        router.replace("/workspace");
         router.refresh();
       }
     } catch {

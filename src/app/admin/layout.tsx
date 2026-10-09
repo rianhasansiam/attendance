@@ -4,7 +4,7 @@ import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import LoadingWorkspace from "@/app/loading";
+import AdminLoading from "@/components/admin-loading";
 
 export default function AdminLayout({
   children,
@@ -12,7 +12,7 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Suspense fallback={<LoadingWorkspace />}>
+    <Suspense fallback={<AdminLoading />}>
       <AuthenticatedAdminLayout>{children}</AuthenticatedAdminLayout>
     </Suspense>
   );

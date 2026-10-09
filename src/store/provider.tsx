@@ -68,7 +68,7 @@ function IdentityBoundary({
     if (status === "loading" || matches) return;
     // Replace the document on identity change, including server-rendered private
     // profile data and any hidden Activity trees, instead of reusing their state.
-    window.location.replace(session?.user?.id ? "/" : "/login");
+    window.location.replace(session?.user?.id ? "/workspace" : "/login");
   }, [status, matches, session?.user?.id]);
   useEffect(() => {
     const check = () => {

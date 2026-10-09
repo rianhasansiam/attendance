@@ -24,9 +24,9 @@
 .pending {
   justify-content: space-between;
   flex-wrap: wrap;
-  background: #fff6df;
-  color: #74500c;
-  border: 1px solid #ead4a4;
+  background: var(--xhyd-rose);
+  color: var(--xhyd-red-dark);
+  border: 1px solid var(--xhyd-line);
 }
 .historyHeader {
   flex-wrap: wrap;
@@ -87,7 +87,7 @@
   min-width: 0;
 }
 .fieldError {
-  color: #a65040;
+  color: var(--xhyd-red-dark);
   font-size: 12px;
 }
 .retryHelp {

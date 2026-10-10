@@ -1,1 +1,1 @@
-export { default } from "@/components/admin-loading";
+export { default } from "@/components/workspace-loading";

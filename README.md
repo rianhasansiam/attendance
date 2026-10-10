@@ -6,7 +6,7 @@ Homepage content is centralized in `src/data/company.ts`, with scoped styling an
 
 The public homepage and login panel share `src/components/corporate/brand.css`. Brand red `#C30708` and black `#101010` come from interior pixel samples of the unchanged official `public/company_logo.jpeg`; light red `#F1666A` provides accessible text and controls on dark surfaces. White logo plates preserve the original colors on dark navigation/footer backgrounds. Only illustrative photography receives a CSS grayscale treatment. The global map stays visible on mobile, and motion honors reduced-motion preferences. The editable native `social-card.svg` contains the exact original logo and renders to the matching 1200 × 630 PNG through the existing Sharp dependency.
 
-The admin shell uses the same identity through `src/components/admin-theme.css`, scoped to `.workspace-admin`. Dashboard cards, tables, forms, reports, driver costs, daily expenses, account screens, and body-mounted confirmation dialogs share the palette. The employee workspace keeps its existing presentation. Administrative loading states use the official logo; authentication, navigation destinations, permissions, mutations, and data handling remain unchanged.
+The full website shares the XHYD identity: global palette aliases and a self-hosted Manrope font cover all routes, while `src/components/workspace-theme.css` styles every admin and employee shell through `.workspace-theme`. Dashboards, attendance, tables, forms, reports, driver costs, daily expenses, account security, public profiles, error screens, loading states, and body-mounted dialogs use the same red, black, and white palette. Shared workspace logos and branded install icons retain the exact official logo. Authentication, navigation destinations, permissions, mutations, and data handling remain unchanged.
 
 Optional verified public details are configured on the server:
 
@@ -153,7 +153,7 @@ The flag preserves the local environment without pulling storage credentials for
 1. Provision a supported Node LTS runtime and PostgreSQL. Run PostgreSQL on loopback/private network. Use a dedicated application database and role; use a separate migration owner if your operational setup permits. Disable public database access. Configure backups and test restore procedures.
 2. Deploy source and lockfile to `/srv/attendance` owned by an unprivileged `attendance` account. Run `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm db:migrate`, `pnpm db:seed` (first deployment only), and `pnpm build`. Inject environment variables when running migrations and seeding. Build does not embed production secrets.
 3. Store production environment values in `/etc/attendance.env`, readable only by the service account/root. Set `NODE_ENV=production`, HTTPS origins, Google production credentials and a strong `AUTH_SECRET`.
-4. Install the [systemd service example](ops/attendance.service.example), adjusting the Node binary path. `pnpm start` and the example bind Next.js to `127.0.0.1`. If using the standalone bundle instead, copy `public` and `.next/static` into its expected directories and set `HOSTNAME=127.0.0.1`.
+4. Install the [systemd service example](ops/attendance.service.example), adjusting the Node binary path. `pnpm build` prepares the standalone server and copies `public` and `.next/static` into its runtime directories. `pnpm start` and the example launch `.next/standalone/server.js` on `127.0.0.1:3000`; set `PORT` to use another port. Deploy the complete `.next/standalone` directory when distributing only the runtime bundle. `NEXT_TEST_DIST_DIR` selects the same custom build directory for building, packaging, and `pnpm start`.
 5. Install Nginx and a valid TLS certificate. Adapt [ops/nginx.conf.example](ops/nginx.conf.example). Restrict public ingress to 80/443 and reject unknown hosts. Only Nginx may reach Node.
 6. Set `TRUSTED_PROXY_MODE=nginx`. Generate a separate random `TRUSTED_PROXY_SECRET` of at least 32 characters and configure exactly the same value in Nginx's overwritten `X-Attendance-Proxy-Secret` header. Nginx must overwrite `X-Real-IP` with `$remote_addr`. Arbitrary `X-Forwarded-For` is ignored. Keep Nginx configuration containing the secret private.
 7. When using Cloudflare/a load balancer, configure Nginx `set_real_ip_from` only for documented provider ranges and restrict origin ingress. Never accept a user-provided IP header or trust all proxies. Update provider ranges as part of operations.
@@ -162,6 +162,20 @@ The flag preserves the local environment without pulling storage credentials for
 10. Monitor service availability and sanitized errors. Define a retention policy for location/IP/attendance data, protect exports and backups, and review admin access. Append-only event/audit tables cannot be edited/deleted using normal row writes; archival is a separately controlled database operation.
 
 Use Nginx `limit_req_zone`/`limit_req` at the HTTP/server level for ingress abuse protection in addition to application database-backed per-user mutation limits. Scope limits to authentication and write endpoints and test normal office-wide traffic so a shared egress IP is not inadvertently blocked.
+
+For an existing standalone build, run `pnpm build:standalone` to refresh its assets from the matching build, then restart the application. Next.js omits `public` and `.next/static` from standalone output by default; missing copies cause CSS, JavaScript, fonts, and logos to return 404 while the page HTML still loads. The packaging command checks the build IDs and required directories before replacing assets.
+
+For a VPS using PM2 with the application at `/var/www/attendance`, load the production environment through the existing deployment configuration, then use the commands below for the first deployment. This server's `xhyd` process uses port 3003; Nginx's `proxy_pass` must target the same loopback port.
+
+```sh
+cd /var/www/attendance
+pnpm install --frozen-lockfile
+pnpm build
+HOSTNAME=127.0.0.1 PORT=3003 pm2 start .next/standalone/server.js --name xhyd --cwd /var/www/attendance
+pm2 save
+```
+
+For subsequent deployments, run `pnpm build`, then `pm2 restart xhyd` and `pm2 save`. This preserves the process's stored production environment. Use `--update-env` only when intentionally changing that environment. Restart only this application's process. After deployment, confirm the homepage and `/company_logo.jpeg` load, and that a CSS file and a JavaScript file referenced by the current page HTML return HTTP 200 with their correct content types through the public HTTPS domain.
 
 If **Continue with Google** returns HTTP 502 and Nginx logs `upstream sent too big header while reading response header from upstream`, the OAuth response exceeded the [proxy header buffer](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffer_size). Apply the example's `proxy_buffer_size 16k`, `proxy_buffers 4 16k`, and `proxy_busy_buffers_size 32k` settings in the app's `location /` block, keeping `proxy_buffering off` for Next.js streaming. Run `sudo nginx -t`, then `sudo systemctl reload nginx`, and retry sign-in.
 

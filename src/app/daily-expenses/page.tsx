@@ -13,14 +13,14 @@ import {
 } from "@/modules/daily-expenses/permissions";
 import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
-import LoadingWorkspace from "@/app/loading";
+import WorkspaceLoading from "@/components/workspace-loading";
 import { DailyExpensesWorkspace } from "@/components/daily-expenses-workspace";
 
 export default function DailyExpensesPage() {
   // Keep the segment's loading boundary visible before the shared client
   // session gate resolves. Private workspace content still requires server auth.
   return (
-    <Suspense fallback={<LoadingWorkspace />}>
+    <Suspense fallback={<WorkspaceLoading />}>
       <AuthorizedWorkspace />
     </Suspense>
   );

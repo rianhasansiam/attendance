@@ -4,7 +4,7 @@ import { StoreProvider } from "@/store/provider";
 import { AppShell } from "@/components/app-shell";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import LoadingWorkspace from "@/app/loading";
+import WorkspaceLoading from "@/components/workspace-loading";
 
 export default function EmployeeLayout({
   children,
@@ -12,7 +12,7 @@ export default function EmployeeLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Suspense fallback={<LoadingWorkspace />}>
+    <Suspense fallback={<WorkspaceLoading />}>
       <AuthenticatedEmployeeLayout>{children}</AuthenticatedEmployeeLayout>
     </Suspense>
   );

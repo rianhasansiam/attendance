@@ -181,7 +181,7 @@ export function AdminDashboard() {
             <section className="card">
               <div className="card-header">
                 <h2>{t("dashboard.shortcuts")}</h2>
-                <ArrowUpRight size={17} color="#88987f" />
+                <ArrowUpRight size={17} color="var(--muted)" />
               </div>
               <div className="card-body">
                 <div className="quick-links">
@@ -812,7 +812,7 @@ export function AdminSettings() {
                 <h2>{t("settings.organization")}</h2>
                 <p>{t("settings.organizationDescription")}</p>
               </div>
-              <Settings2 size={19} color="#8c9b85" />
+              <Settings2 size={19} color="var(--muted)" />
             </div>
             <form
               className="card-body"
@@ -857,7 +857,7 @@ export function AdminSettings() {
                 <h2>{t("settings.defaultPolicy")}</h2>
                 <p>{t("settings.policyDescription")}</p>
               </div>
-              <ShieldCheck size={19} color="#8c9b85" />
+              <ShieldCheck size={19} color="var(--muted)" />
             </div>
             <form
               className="card-body"

@@ -506,7 +506,7 @@ export function EmployeeDashboard() {
         <section className="card">
           <div className="card-header">
             <h2>{t("dashboard.checks")}</h2>
-            <ShieldCheck size={18} color="#8c9b85" />
+            <ShieldCheck size={18} color="var(--muted)" />
           </div>
           <div className="card-body">
             <Verification
@@ -813,7 +813,7 @@ export function EmployeeDevices() {
               <h2>{t("devices.registerPasskey")}</h2>
               <p>{t("devices.registerDescription")}</p>
             </div>
-            <Fingerprint size={21} color="#8c9b85" />
+            <Fingerprint size={21} color="var(--muted)" />
           </div>
           <div className="card-body">
             <form onSubmit={register}>
@@ -846,7 +846,7 @@ export function EmployeeDevices() {
         </section>
         <section className="card">
           <div className="card-body">
-            <ShieldCheck size={28} color="#7d9877" />
+            <ShieldCheck size={28} color="var(--muted)" />
             <h2 style={{ marginTop: 15 }}>{t("devices.privacyTitle")}</h2>
             <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
               {t("devices.privacyDescription")}
@@ -1080,7 +1080,7 @@ export function EmployeeLeaves() {
       <section className="card">
         <div className="card-header">
           <h2>{t("leaves.yourRequests")}</h2>
-          <CalendarDays size={18} color="#8c9b85" />
+          <CalendarDays size={18} color="var(--muted)" />
         </div>
         {loading ? (
           <Loading />

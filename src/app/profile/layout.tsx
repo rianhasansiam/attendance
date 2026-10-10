@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
-import { CheckCheck } from "lucide-react";
+import Image from "next/image";
 import styles from "./profile.module.css";
 
 export default function PublicProfileLayout({
@@ -31,10 +31,14 @@ async function PublicProfileLayoutContent({
       <div className={styles.page}>
         <header className={styles.header}>
           <div className={styles.brand}>
-            <span className={styles.brandMark}>
-              <CheckCheck size={24} aria-hidden="true" />
-            </span>
-            <span>XHYD</span>
+            <Image
+              className={styles.brandLogo}
+              src="/company_logo.jpeg"
+              alt="XHYD"
+              width={1082}
+              height={205}
+              sizes="(max-width: 540px) 148px, 172px"
+            />
           </div>
           <LanguageSwitcher />
           <Link href="/login" className="button secondary" prefetch={false}>

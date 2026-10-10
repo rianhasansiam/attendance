@@ -3,8 +3,12 @@
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(ellipse at 15% 15%, #eaf2e9 0, transparent 55%),
-    var(--background);
+    radial-gradient(
+      ellipse at 15% 15%,
+      rgb(var(--xhyd-red-rgb) / 0.06) 0,
+      transparent 55%
+    ),
+    var(--xhyd-soft-white);
 }
 .header {
   width: min(100%, 1080px);
@@ -14,23 +18,23 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
 }
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.7px;
+  display: inline-flex;
+  padding: 10px 12px;
+  border: 1px solid var(--xhyd-line);
+  border-radius: 8px;
+  background: var(--xhyd-white);
+  flex-shrink: 0;
 }
-.brandMark {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--green);
-  color: white;
+.brandLogo {
+  display: block;
+  width: 172px;
+  height: auto;
+}
+.header :global(.language-switcher) {
+  margin-left: auto;
 }
 .main {
   width: min(100%, 784px);
@@ -38,15 +42,22 @@
   margin: auto;
 }
 .card {
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--xhyd-white);
+  border: 1px solid var(--xhyd-line);
   border-radius: 24px;
   overflow: hidden;
-  box-shadow: 0 20px 60px #203d2810;
+  box-shadow: 0 20px 60px rgb(16 16 16 / 0.06);
 }
 .cover {
   height: 156px;
-  background: linear-gradient(120deg, #123e30, #247557);
+  background:
+    radial-gradient(
+      ellipse at 100% 0,
+      rgb(var(--xhyd-red-rgb) / 0.22),
+      transparent 70%
+    ),
+    linear-gradient(120deg, var(--xhyd-black), var(--xhyd-charcoal));
+  border-bottom: 3px solid var(--xhyd-red);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -66,10 +77,10 @@
 .avatar {
   width: 120px;
   height: 120px;
-  border: 6px solid white;
+  border: 6px solid var(--xhyd-white);
   border-radius: 50%;
-  background: #eaf3ed;
-  color: var(--green);
+  background: var(--xhyd-rose);
+  color: var(--xhyd-red-dark);
   display: grid;
   place-items: center;
   margin: -60px 0 24px;
@@ -77,7 +88,7 @@
   overflow: hidden;
   font-size: 32px;
   font-weight: 600;
-  box-shadow: 0 4px 12px #123e3010;
+  box-shadow: 0 4px 12px rgb(16 16 16 / 0.06);
 }
 .avatar img {
   width: 100%;
@@ -88,7 +99,7 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: var(--green);
+  color: var(--xhyd-red);
   margin-bottom: 10px;
 }
 .name {
@@ -97,15 +108,15 @@
   letter-spacing: -1.4px;
 }
 .intro {
-  color: #667269;
+  color: var(--xhyd-muted);
   margin-top: 10px;
   font-size: 15px;
 }
 .details {
   margin: 32px 0 0;
   padding: 8px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--xhyd-line);
+  border-bottom: 1px solid var(--xhyd-line);
 }
 .detail {
   padding: 16px 0;
@@ -120,14 +131,14 @@
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: #f3f6f1;
-  color: var(--green);
+  background: var(--xhyd-rose);
+  color: var(--xhyd-red);
   flex-shrink: 0;
 }
 .detail dt {
   position: relative;
   padding-left: 56px;
-  color: #667269;
+  color: var(--xhyd-muted);
   font-size: 12px;
   margin-bottom: 3px;
 }
@@ -141,25 +152,25 @@
 }
 .caption {
   margin-top: 22px;
-  color: #667269;
+  color: var(--xhyd-muted);
   font-size: 11px;
 }
 .footer {
   text-align: center;
   padding: 0 24px 28px;
-  color: #667269;
+  color: var(--xhyd-muted);
   font-size: 12px;
 }
 .loading,
 .unavailable {
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--xhyd-white);
+  border: 1px solid var(--xhyd-line);
   border-radius: 24px;
   padding: 64px 32px;
   text-align: center;
 }
 .loading {
-  color: #667269;
+  color: var(--xhyd-muted);
 }
 .unavailableIcon {
   display: grid;
@@ -167,17 +178,24 @@
   width: 72px;
   height: 72px;
   margin: 0 auto 24px;
-  background: var(--green-light);
-  color: var(--green);
+  background: var(--xhyd-rose);
+  color: var(--xhyd-red);
   border-radius: 50%;
 }
 .unavailable > p:last-child {
-  color: #667269;
+  color: var(--xhyd-muted);
   margin-top: 16px;
 }
 @media (max-width: 540px) {
   .header {
     padding: 20px;
+    gap: 12px;
+  }
+  .brandLogo {
+    width: 148px;
+  }
+  .header :global(.button) {
+    margin-left: auto;
   }
   .main {
     padding: 20px 16px 40px;

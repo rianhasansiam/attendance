@@ -4,18 +4,28 @@ import { getLocale, getMessages } from "next-intl/server";
 import { LocaleProvider } from "@/i18n/provider";
 import { resolveLocale } from "@/i18n/config";
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import { Suspense } from "react";
 import { AlertLifecycle } from "@/components/alert-notification";
 import { PwaStatus } from "@/components/pwa";
 import "sweetalert2/dist/sweetalert2.min.css";
 import "./globals.css";
+
+const siteFont = localFont({
+  src: "../assets/fonts/manrope/Manrope-Variable.ttf",
+  weight: "200 800",
+  display: "swap",
+  variable: "--font-site",
+  fallback: ["Arial", "Helvetica", "sans-serif"],
+});
+
 export const metadata: Metadata = {
-  applicationName: "Attend",
-  appleWebApp: { capable: true, statusBarStyle: "default", title: "Attend" },
+  applicationName: "XHYD",
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "XHYD" },
   icons: { icon: "/icon.svg", apple: "/icons/icon-192.png" },
 };
 export const viewport: Viewport = {
-  themeColor: "#17664d",
+  themeColor: "#101010",
   width: "device-width",
   initialScale: 1,
 };
@@ -34,7 +44,7 @@ async function LocaleDocument({ children }: { children: React.ReactNode }) {
   const messages = await getMessages();
   return (
     <html lang={locale}>
-      <body>
+      <body className={siteFont.variable}>
         <LocaleProvider
           locale={locale}
           messages={{

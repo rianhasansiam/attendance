@@ -14,9 +14,9 @@ export function DocumentMetadata() {
   if (pathname === "/") return null;
   const publicProfile = pathname.startsWith("/profile/");
   const title = publicProfile
-    ? `${navigation("publicProfile")} · Attend`
+    ? `${navigation("publicProfile")} · XHYD`
     : pathname === "/account/security"
-      ? `${auth("security")} · Attend`
+      ? `${auth("security")} · XHYD`
       : auth("title");
   return (
     <>

@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
-    "start": "next start --hostname 127.0.0.1",
+    "build": "prisma generate && next build && node scripts/prepare-standalone.mjs",
+    "build:standalone": "node scripts/prepare-standalone.mjs",
+    "start": "HOSTNAME=127.0.0.1 node \"${NEXT_TEST_DIST_DIR:-.next}/standalone/server.js\"",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",

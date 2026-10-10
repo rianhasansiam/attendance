@@ -1,4 +1,4 @@
-/* Shared corporate, sign-in, and admin identity, sampled from company_logo.jpeg.
+/* Shared identity for the entire XHYD website, sampled from company_logo.jpeg.
    The JPEG stays untouched. A lighter red is reserved for text on dark surfaces. */
 :root {
   --xhyd-red: #c30708;

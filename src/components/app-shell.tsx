@@ -9,7 +9,6 @@ import { clearWorkspaceData } from "@/store/make-store";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
 import { canManageDailyExpenses } from "@/modules/daily-expenses/permissions";
 import Image from "next/image";
-import localFont from "next/font/local";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
@@ -18,7 +17,6 @@ import {
   CalendarDays,
   CarFront,
   ChartNoAxesCombined,
-  CheckCheck,
   ChevronRight,
   ClipboardList,
   Clock3,
@@ -36,15 +34,6 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-
-const adminManrope = localFont({
-  src: "../assets/fonts/manrope/Manrope-Variable.ttf",
-  weight: "200 800",
-  display: "swap",
-  variable: "--admin-font",
-  preload: false,
-  fallback: ["Arial", "Helvetica", "sans-serif"],
-});
 
 const adminNavigation = [
   { label: "overview", href: "dashboard", icon: House },
@@ -81,21 +70,9 @@ const employeeNavigation = [
 ];
 export function Brand() {
   return (
-    <div className="brand">
-      <span className="brand-icon">
-        <CheckCheck size={24} strokeWidth={2.5} />
-      </span>
-
-      <span>XHYD</span>
-    </div>
-  );
-}
-
-function AdminBrand() {
-  return (
-    <div className="brand admin-brand">
+    <div className="brand workspace-brand">
       <Image
-        className="admin-brand-logo"
+        className="workspace-brand-logo"
         src="/company_logo.jpeg"
         alt="XHYD"
         width={1082}
@@ -192,13 +169,7 @@ export function AppShell({
     (item) => pathname === navigationHref(item.href),
   );
   return (
-    <div
-      className={
-        mode === "admin"
-          ? `workspace workspace-admin ${adminManrope.variable}`
-          : "workspace"
-      }
-    >
+    <div className="workspace workspace-theme">
       <a href="#main-content" className="skip-link">
         {t("skip")}
       </a>
@@ -211,7 +182,7 @@ export function AppShell({
       )}
       <aside className={`sidebar ${open ? "is-open" : ""}`}>
         <Link href={`/${mode}/dashboard`} aria-label={t("home")}>
-          {mode === "admin" ? <AdminBrand /> : <Brand />}
+          <Brand />
         </Link>
         <div className="workspace-label">
           {mode === "admin" ? t("workspace") : t("personalWorkspace")}

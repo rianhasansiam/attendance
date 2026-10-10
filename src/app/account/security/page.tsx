@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import LoadingWorkspace from "@/app/loading";
+import WorkspaceLoading from "@/components/workspace-loading";
 import { AppShell } from "@/components/app-shell";
 import { AccountPasswordForm } from "@/components/auth/account-password-form";
 import { PageHeader } from "@/components/ui";
@@ -47,7 +47,7 @@ async function AccountSecurityContent() {
 
 export default function AccountSecurityPage() {
   return (
-    <Suspense fallback={<LoadingWorkspace />}>
+    <Suspense fallback={<WorkspaceLoading />}>
       <AccountSecurityContent />
     </Suspense>
   );

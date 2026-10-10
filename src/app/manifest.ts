@@ -5,14 +5,14 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const locale = await getLocale();
   return {
     name: t("title"),
-    short_name: "Attend",
+    short_name: "XHYD",
     description: t("description"),
     lang: locale,
     start_url: "/employee/dashboard",
     scope: "/",
     display: "standalone",
-    background_color: "#f6f7f4",
-    theme_color: "#17664d",
+    background_color: "#f7f7f8",
+    theme_color: "#101010",
     icons: [
       {
         src: "/icons/icon-192.png",

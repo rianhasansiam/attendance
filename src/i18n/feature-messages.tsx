@@ -5,7 +5,7 @@ export async function FeatureMessages({
   namespaces,
   children,
 }: {
-  namespaces: Array<"admin" | "employee" | "expenses">;
+  namespaces: Array<"admin" | "employee" | "expenses" | "salary">;
   children: ReactNode;
 }) {
   const messages = await getMessages();

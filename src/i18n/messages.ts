@@ -41,6 +41,7 @@ export async function loadMessages(preference: Locale) {
     "employee",
     "expenses",
     "reports",
+    "salary",
   ] as const;
   const messages: AbstractIntlMessages = {};
   for (const namespace of namespaces) {

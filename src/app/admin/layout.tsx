@@ -25,7 +25,7 @@ async function AuthenticatedAdminLayout({
   await connection();
   const user = await requirePageUser("ADMIN");
   return (
-    <FeatureMessages namespaces={["admin", "employee", "expenses"]}>
+    <FeatureMessages namespaces={["admin", "employee", "expenses", "salary"]}>
       <StoreProvider
         identity={{
           id: user.id,

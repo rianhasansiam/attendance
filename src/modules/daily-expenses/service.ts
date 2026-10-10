@@ -72,7 +72,7 @@ function transactionDTO(
   };
 }
 
-function initialConfiguration() {
+export function initialConfiguration() {
   const currency = (process.env.DAILY_EXPENSES_CURRENCY ?? "BDT")
     .trim()
     .toUpperCase();

@@ -40,6 +40,31 @@ beforeEach(() => vi.resetAllMocks());
 const admin = { id: "admin", role: "ADMIN" } as const;
 
 describe("safe browser display DTOs", () => {
+  it("excludes confidential salary audits from ADMIN lists and denies direct access", async () => {
+    mocks.list.mockResolvedValue([]);
+    mocks.detail.mockResolvedValue({
+      id: "salary-audit",
+      resource: "salary-settings",
+      previousState: null,
+      newState: { baseSalary: "30000.00" },
+    });
+    await listRecords(admin, "audit", { page: 1, pageSize: 20, q: "salary" });
+    expect(mocks.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          resource: { not: "salary-settings" },
+          OR: expect.any(Array),
+        },
+      }),
+    );
+    await expect(
+      getRecord(admin, "audit", "salary-audit"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    const superAdmin = { id: "super", role: "SUPER_ADMIN" } as const;
+    expect(await getRecord(superAdmin, "audit", "salary-audit")).toMatchObject({
+      newState: { baseSalary: "30000.00" },
+    });
+  });
   it("returns attendance correction display fields without GPS, IP or credential evidence", async () => {
     const record = {
       id: "attendance",

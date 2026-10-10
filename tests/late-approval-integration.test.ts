@@ -335,7 +335,9 @@ describe.skipIf(!databaseUrl)("late approval PostgreSQL workflow", () => {
         isExcusedLate: true,
         overtimeMinutes: 0,
       });
-      expect(result.summary.overtimeMinutes).toBe(0);
+      // Approval excuses the status; the shared payable-overtime policy keeps
+      // its existing 30-minute adjustment for the actual arrival delay.
+      expect(result.summary.overtimeMinutes).toBe(-30);
       expect((await report(admin, value, "LATE")).total).toBe(0);
       expect((await getAdminDashboard(admin, now)).lateToday).toBe(
         before.lateToday - 1,

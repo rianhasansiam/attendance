@@ -144,6 +144,7 @@ async function reportEntries(
   filters: Filters,
   now = new Date(),
   scopes?: OfficeScope[],
+  employeeIds?: string[],
 ): Promise<Entry[]> {
   const to = filters.to ?? now.toISOString().slice(0, 10);
   const from = filters.from ?? addCalendarDays(to, -29);
@@ -159,6 +160,7 @@ async function reportEntries(
   const attendanceWhere: Prisma.AttendanceWhereInput = {
     attendanceDate: dateRange,
     ...(filters.employeeId ? { employeeId: filters.employeeId } : {}),
+    ...(employeeIds ? { AND: [{ employeeId: { in: employeeIds } }] } : {}),
     ...(filters.departmentId
       ? { employee: { departmentId: filters.departmentId } }
       : {}),
@@ -178,6 +180,7 @@ async function reportEntries(
   };
   const employeeWhere: Prisma.EmployeeWhereInput = {
     ...(filters.employeeId ? { id: filters.employeeId } : {}),
+    ...(employeeIds ? { AND: [{ id: { in: employeeIds } }] } : {}),
     ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
     ...(filters.officeId ? { officeId: filters.officeId } : {}),
     ...(scopes ? { officeId: { in: scopes.map((scope) => scope.id) } } : {}),
@@ -477,9 +480,12 @@ export async function reportRecords(
   actor: Actor,
   filters: Filters,
   now = new Date(),
+  employeeIds?: string[],
 ): Promise<ReportRecord[]> {
   authorizeRole(actor.role, "ADMIN");
-  return hydrateEntries(await reportEntries(filters, now));
+  return hydrateEntries(
+    await reportEntries(filters, now, undefined, employeeIds),
+  );
 }
 
 export async function getAdminDashboard(actor: Actor, now = new Date()) {

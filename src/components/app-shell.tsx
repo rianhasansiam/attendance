@@ -15,6 +15,7 @@ import {
   Building2,
   CalendarCheck2,
   CalendarDays,
+  Calculator,
   CarFront,
   ChartNoAxesCombined,
   ChevronRight,
@@ -42,6 +43,12 @@ const adminNavigation = [
   { label: "lateApprovals", href: "late-approvals", icon: Clock3 },
   { label: "reports", href: "reports", icon: ChartNoAxesCombined },
   { label: "driveCost", href: "drive-cost", icon: CarFront },
+  {
+    label: "salaryCalculator",
+    href: "salary-calculator",
+    icon: Calculator,
+    canAccess: (role: string) => role === "SUPER_ADMIN",
+  },
   {
     label: "dailyExpenses",
     href: "/daily-expenses",

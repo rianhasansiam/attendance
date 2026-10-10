@@ -8,6 +8,7 @@ export const tagTypes = [
   "Devices",
   "Reports",
   "DriveCosts",
+  "Salary",
   "Profile",
   "Audit",
   "DailyExpensesSummary",

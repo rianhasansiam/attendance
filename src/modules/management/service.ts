@@ -306,14 +306,19 @@ export async function listRecords(
       ]);
       break;
     case "audit": {
-      const where = q
-        ? {
-            OR: [
-              { action: { contains: q, mode: "insensitive" as const } },
-              { resource: { contains: q, mode: "insensitive" as const } },
-            ],
-          }
-        : {};
+      const where: Prisma.AuditLogWhereInput = {
+        ...(actor.role !== "SUPER_ADMIN"
+          ? { resource: { not: "salary-settings" } }
+          : {}),
+        ...(q
+          ? {
+              OR: [
+                { action: { contains: q, mode: "insensitive" as const } },
+                { resource: { contains: q, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      };
       result = await Promise.all([
         db.auditLog.findMany({
           where,
@@ -434,6 +439,11 @@ export async function getRecord(actor: Actor, resource: Resource, id: string) {
       break;
   }
   if (!record) throw new DomainError("NOT_FOUND", "Record not found.", 404);
+  if (
+    resource === "audit" &&
+    (record as { resource?: string }).resource === "salary-settings"
+  )
+    assertSuperAdmin(actor);
   return displayRecord(resource, record);
 }
 

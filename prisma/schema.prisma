@@ -82,6 +82,7 @@ model User {
   driveCostBalanceAdditions DriveCostBalanceAddition[]
   dailyExpenseTransactions DailyExpenseTransaction[]
   reviewedLateApprovals LateApprovalRequest[]
+  salarySettingRevisions SalarySetting[]
 }
 model Account {
   id String @id @default(cuid())
@@ -139,6 +140,7 @@ model Employee {
   attendances Attendance[]
   events AttendanceEvent[]
   leaves Leave[]
+  salarySettings SalarySetting[]
   @@index([officeId])
   @@index([departmentId])
 }
@@ -456,4 +458,21 @@ model DailyExpenseTransactionDeletion {
   deletedAt DateTime @default(now())
   ledger DailyExpenseLedger @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
   @@unique([ledgerId, idempotencyKey])
+}
+
+/// Append-only effective-month revisions. A later month never changes an earlier payroll.
+model SalarySetting {
+  id String @id @default(cuid())
+  employeeId String?
+  effectiveMonth DateTime @db.Date
+  revision Int
+  baseSalary Decimal @db.Decimal(18, 2)
+  overtimeHourlyRate Decimal @db.Decimal(18, 2)
+  createdById String?
+  createdAt DateTime @default(now())
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  @@unique([employeeId, effectiveMonth, revision])
+  @@index([employeeId, effectiveMonth(sort: Desc), revision(sort: Desc)])
+  @@index([createdById])
 }

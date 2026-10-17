@@ -52,6 +52,15 @@ enum DailyExpenseTransactionType {
   BALANCE_ADDED
   EXPENSE
 }
+enum CompanyMoneyTransactionType {
+  ADD
+  REMOVE
+}
+enum CompanyMoneyMutationOperation {
+  CREATE
+  UPDATE
+  DELETE
+}
 model User {
   id String @id @default(cuid())
   name String?
@@ -80,6 +89,8 @@ model User {
   auditLogs AuditLog[]
   driveCosts DriveCost[]
   driveCostBalanceAdditions DriveCostBalanceAddition[]
+  companyMoneyTransactions CompanyMoneyTransaction[]
+  companyMoneyMutationReceipts CompanyMoneyMutationReceipt[]
   dailyExpenseTransactions DailyExpenseTransaction[]
   reviewedLateApprovals LateApprovalRequest[]
   salarySettingRevisions SalarySetting[]
@@ -356,6 +367,36 @@ model DriveCostBalanceAddition {
   createdAt DateTime @default(now())
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
   @@index([createdById])
+}
+
+/// Current company money records; administrative corrections retain immutable receipts and audits.
+model CompanyMoneyTransaction {
+  id String @id @default(cuid())
+  version Int @default(1)
+  requestId String @unique @db.Uuid
+  type CompanyMoneyTransactionType
+  amount Decimal @db.Decimal(12, 2)
+  date DateTime @default(dbgenerated("((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Dhaka'::text))::date")) @db.Date
+  note String? @db.VarChar(500)
+  createdById String?
+  createdAt DateTime @default(now())
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  @@index([date(sort: Desc), createdAt(sort: Desc), id(sort: Desc)])
+  @@index([createdById])
+}
+
+/// Durable retry metadata remains after records are edited or physically deleted.
+model CompanyMoneyMutationReceipt {
+  requestId String @id @db.Uuid
+  operation CompanyMoneyMutationOperation
+  transactionId String
+  actorId String?
+  payload Json
+  resultVersion Int
+  createdAt DateTime @default(now())
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([transactionId])
+  @@index([actorId])
 }
 model Leave {
   id String @id @default(cuid())

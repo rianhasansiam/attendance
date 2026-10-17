@@ -1,0 +1,91 @@
+.summaryAmount {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.form > :global(.field) {
+  flex: 1 1 170px;
+  min-width: 0;
+}
+
+.form > .note {
+  flex: 2 1 250px;
+}
+
+.retry {
+  flex-basis: 100%;
+}
+
+.editHeading {
+  display: grid;
+  gap: 6px;
+  margin-top: 20px;
+}
+
+.editHeading p {
+  font-size: 12px;
+}
+
+.deleteRetry {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.managedHistory :global(th:last-child),
+.managedHistory :global(td:last-child) {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line);
+}
+
+.managedHistory :global(th:last-child) {
+  background: var(--background);
+}
+
+@media (max-width: 640px) {
+  .rowActions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.added {
+  color: var(--green);
+}
+
+.removed {
+  color: var(--xhyd-red-dark);
+}
+
+.noteText {
+  display: block;
+  min-width: 140px;
+  max-width: 320px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

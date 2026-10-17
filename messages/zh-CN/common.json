@@ -147,6 +147,7 @@
     "DUPLICATE_HOLIDAY": "该办公地点和日期已设置节假日。",
     "DAILY_EXPENSES_CONFIGURATION": "支出工作区尚未配置，请联系管理员。",
     "IDEMPOTENCY_CONFLICT": "此提交标识已用于其他数据，请重新发起提交。",
+    "INSUFFICIENT_COMPANY_BALANCE": "此更改会使公司余额为负数。",
     "TRANSACTION_CONFLICT": "此记录在打开后已变更，请刷新并核对后再编辑。",
     "CATEGORY_CONFLICT": "已有同名分类，包括已归档的分类。",
     "DEVICE_LIMIT": "请先撤销不再使用的设备，再添加新设备。",

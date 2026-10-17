@@ -24,6 +24,7 @@ import {
   Fingerprint,
   Globe,
   House,
+  Landmark,
   Layers3,
   LogOut,
   Menu,
@@ -43,6 +44,7 @@ const adminNavigation = [
   { label: "lateApprovals", href: "late-approvals", icon: Clock3 },
   { label: "reports", href: "reports", icon: ChartNoAxesCombined },
   { label: "driveCost", href: "drive-cost", icon: CarFront },
+  { label: "companyMoney", href: "company-money", icon: Landmark },
   {
     label: "salaryCalculator",
     href: "salary-calculator",

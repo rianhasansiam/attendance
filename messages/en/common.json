@@ -147,6 +147,7 @@
     "DUPLICATE_HOLIDAY": "A holiday already exists for this office and date.",
     "DAILY_EXPENSES_CONFIGURATION": "The expense workspace is not configured. Contact your administrator.",
     "IDEMPOTENCY_CONFLICT": "This submission was already used for different data. Start a new submission.",
+    "INSUFFICIENT_COMPANY_BALANCE": "This change would make the company balance negative.",
     "TRANSACTION_CONFLICT": "This record changed since you opened it. Refresh and review it before editing again.",
     "CATEGORY_CONFLICT": "A category with this name already exists, including archived categories.",
     "DEVICE_LIMIT": "Revoke an unused device before adding another.",

@@ -68,6 +68,8 @@ Public profiles are available without sign-in at `/profile/<name-slug>`; existin
 
 Super administrators can use **My profile** in the navigation to update their own name, designation, phone, blood group, department, home address and date of birth. The shortcut works with or without an employee record. Saved changes appear on their public profile and refresh the signed-in display; their role, account status and sign-in access are preserved.
 
+**Company Money** is available at `/admin/company-money`. Super administrators can add, remove, edit and delete records; administrators can view the balance and transaction history. Transactions include a selected date, amount and optional note; the date defaults to today in Asia/Dhaka. Edits recalculate the balance using the difference between the old and new record. Deleting an addition reduces the balance, while deleting a removal restores its amount. Changes that would make the balance negative are rejected. Deletion requires confirmation, and audit history and retry receipts remain after a record is removed. History shows the most recent transaction dates first. The ledger uses BDT and is independent of drive costs and daily expenses. Apply `20261015120000_company_money`, `20261017120000_company_money_date` and `20261017130000_company_money_record_management` with `pnpm db:migrate`, regenerate the client with `pnpm db:generate`, and restart the application before opening the page. Existing entries receive their recorded date in Asia/Dhaka.
+
 ## Local setup
 
 Requirements: Node.js 22.12+ (24 LTS recommended), pnpm 12.3.4, and PostgreSQL 16+. Install dependencies and configure environment:

@@ -17,7 +17,10 @@
     "actualCheckIn": "实际签到时间",
     "timezone": "时区",
     "submittedReason": "提交的原因",
-    "submittedAt": "提交时间"
+    "submittedAt": "提交时间",
+    "approvedOvertime": "已批准加班",
+    "requestedOvertime": "申请加班",
+    "overtimeStatus": "加班申请状态"
   },
   "errors": {
     "deviceCancelled": "设备验证已取消或超时，请重试。",
@@ -244,5 +247,43 @@
     "requiredName": "请输入姓名。",
     "tooLong": "{field}不得超过 {maximum, number} 个字符。",
     "teamMember": "团队成员"
+  },
+  "overtimeReason": {
+    "title": "请填写加班原因",
+    "description": "您的工作时间已超过排班结束时间。请填写加班原因。",
+    "scheduledEnd": "排班结束时间",
+    "checkoutPreview": "签退时间预览",
+    "extraDuration": "额外工作时长",
+    "previewNote": "时间与时长来自服务器预览。实际签退时间和申请时长将在验证完成后记录。加班仅在超级管理员批准后计入。",
+    "reason": "加班原因",
+    "required": "请填写有意义的加班原因，长度为 10–1,000 个字符。",
+    "characters": "{count, number}/1,000 个字符 · 至少 10 个字符",
+    "submit": "提交并签退",
+    "submitted": "您已签退。加班申请正在等待超级管理员审批。",
+    "changed": "您的当前考勤已变更。请查看刷新后的考勤，再尝试签退。"
+  },
+  "overtimeRequests": {
+    "eyebrow": "考勤审批",
+    "title": "加班申请",
+    "description": "审核额外工作至少 60 分钟的加班申请。仅已批准的申请计入加班收益。",
+    "department": "部门",
+    "allDepartments": "所有部门",
+    "currentDepartment": "当前所选部门",
+    "searchDepartments": "搜索部门",
+    "search": "员工姓名或编号",
+    "apply": "应用筛选",
+    "invalidRange": "结束日期不得早于开始日期。",
+    "reviewTitle": "审核加班申请",
+    "rejectionReason": "拒绝原因（选填）",
+    "approveTitle": "批准此加班申请？",
+    "approveDescription": "批准全部 {duration} 的加班收益。现有考勤扣减规则仍然适用。",
+    "rejectTitle": "拒绝此加班申请？",
+    "rejectDescription": "申请的 {duration} 将保留在历史中，加班收益计为零。",
+    "approved": "加班申请已批准，正式总计已更新。",
+    "rejected": "加班申请已拒绝，申请仍保留在历史中。",
+    "changed": "此申请已变更。请刷新并重新查看后再作决定。",
+    "reconcile": "请成功刷新申请列表后再作其他决定。",
+    "attendanceChanged": "此申请提交后考勤已变更，无法批准，也不计入加班收益。待处理申请仍可拒绝。",
+    "details": "排班结束：{scheduled} · 实际签退：{checkout} · 申请加班：{duration}"
   }
 }

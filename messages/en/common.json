@@ -161,7 +161,10 @@
     "GEOLOCATION_DENIED": "Location permission is required. Allow location access in your browser and try again.",
     "GEOLOCATION_FAILED": "Your location could not be determined. Move near a window and try again.",
     "GEOLOCATION_STALE": "A fresh location could not be obtained. Please try again.",
-    "VERIFICATION_UNAVAILABLE": "Verification requirements are unavailable. Please try again."
+    "VERIFICATION_UNAVAILABLE": "Verification requirements are unavailable. Please try again.",
+    "OVERTIME_REASON_REQUIRED": "Provide an overtime reason before checking out.",
+    "OVERTIME_ALREADY_REVIEWED": "This overtime request has already been reviewed. Refresh the list.",
+    "OVERTIME_ALREADY_REQUESTED": "This attendance already has an overtime request. Ask a super administrator to review the corrected attendance."
   },
   "confirm": "Confirm",
   "validation": {

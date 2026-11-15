@@ -17,14 +17,6 @@ export function isApiError(error: unknown): error is ApiError {
   );
 }
 
-export function errorMessage(
-  error: unknown,
-  fallback = "Unable to complete the request. Please try again.",
-): string {
-  if (isApiError(error) || error instanceof Error) return error.message;
-  return fallback;
-}
-
 export function isAccessError(error: unknown): boolean {
   return isApiError(error) && (error.status === 401 || error.status === 403);
 }

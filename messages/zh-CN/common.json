@@ -161,7 +161,10 @@
     "GEOLOCATION_DENIED": "需要位置访问权限。请在浏览器中允许定位后重试。",
     "GEOLOCATION_FAILED": "无法确定您的位置。请移至窗边后重试。",
     "GEOLOCATION_STALE": "无法获取最新位置，请重试。",
-    "VERIFICATION_UNAVAILABLE": "暂时无法获取验证要求，请重试。"
+    "VERIFICATION_UNAVAILABLE": "暂时无法获取验证要求，请重试。",
+    "OVERTIME_REASON_REQUIRED": "请先填写加班原因，再签退。",
+    "OVERTIME_ALREADY_REVIEWED": "此加班申请已审核，请刷新列表。",
+    "OVERTIME_ALREADY_REQUESTED": "此考勤已有加班申请，请联系超级管理员审核更正后的考勤。"
   },
   "confirm": "确认",
   "validation": {

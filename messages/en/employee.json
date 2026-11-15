@@ -17,7 +17,10 @@
     "actualCheckIn": "Actual check-in",
     "timezone": "Timezone",
     "submittedReason": "Submitted reason",
-    "submittedAt": "Submitted at"
+    "submittedAt": "Submitted at",
+    "approvedOvertime": "Approved overtime",
+    "requestedOvertime": "Requested overtime",
+    "overtimeStatus": "Overtime request status"
   },
   "errors": {
     "deviceCancelled": "Device verification was cancelled or timed out. Please try again.",
@@ -244,5 +247,43 @@
     "requiredName": "Enter a name.",
     "tooLong": "Use {maximum, number} characters or fewer for {field}.",
     "teamMember": "Team member"
+  },
+  "overtimeReason": {
+    "title": "Overtime Reason Required",
+    "description": "You have worked beyond your scheduled duty time. Please provide a reason for your overtime.",
+    "scheduledEnd": "Scheduled duty end",
+    "checkoutPreview": "Checkout time preview",
+    "extraDuration": "Extra working duration",
+    "previewNote": "Times and duration use the server preview. Final checkout time and requested duration are recorded after verification. Overtime counts only after Super Admin approval.",
+    "reason": "Overtime reason",
+    "required": "Enter a meaningful overtime reason using 10–1,000 characters.",
+    "characters": "{count, number}/1,000 characters · minimum 10",
+    "submit": "Submit & Checkout",
+    "submitted": "You’re checked out. Your overtime request is pending Super Admin approval.",
+    "changed": "Your active attendance changed. Review the refreshed attendance before checking out."
+  },
+  "overtimeRequests": {
+    "eyebrow": "ATTENDANCE REVIEW",
+    "title": "Overtime requests",
+    "description": "Review overtime of at least 60 extra minutes. Only approved requests count toward overtime credits.",
+    "department": "Department",
+    "allDepartments": "All departments",
+    "currentDepartment": "Current department selection",
+    "searchDepartments": "Search departments",
+    "search": "Employee name or ID",
+    "apply": "Apply filters",
+    "invalidRange": "End date must be on or after start date.",
+    "reviewTitle": "Review overtime request",
+    "rejectionReason": "Rejection reason (optional)",
+    "approveTitle": "Approve this overtime request?",
+    "approveDescription": "Approve the full {duration} as overtime credit. Existing attendance deductions still apply.",
+    "rejectTitle": "Reject this overtime request?",
+    "rejectDescription": "The requested {duration} will remain in history and count as zero overtime credit.",
+    "approved": "Overtime request approved. Official totals have been updated.",
+    "rejected": "Overtime request rejected. The request remains in history.",
+    "changed": "This request changed. Refresh and review it again before deciding.",
+    "reconcile": "Refresh these requests successfully before another decision.",
+    "attendanceChanged": "Attendance changed after this request. It cannot be approved and provides no overtime credit. A pending request can still be rejected.",
+    "details": "Scheduled duty end: {scheduled} · Actual checkout: {checkout} · Requested overtime: {duration}"
   }
 }

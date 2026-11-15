@@ -6,26 +6,22 @@
     "dev": "next dev",
     "build": "prisma generate && next build && node scripts/prepare-standalone.mjs",
     "build:standalone": "node scripts/prepare-standalone.mjs",
-    "start": "HOSTNAME=127.0.0.1 node \"${NEXT_TEST_DIST_DIR:-.next}/standalone/server.js\"",
+    "start": "HOSTNAME=127.0.0.1 node .next/standalone/server.js",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:homepage": "playwright test --config playwright.homepage.config.ts",
+    "test:overtime": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/overtime*.test.ts",
+    "test:company-money": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/company-money-report*.test.ts",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate deploy",
     "db:dev": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:cleanup": "tsx scripts/cleanup.ts",
-    "format": "prettier --write src tests scripts prisma/seed.ts *.ts *.mts *.mjs",
-    "format:check": "prettier --check src tests scripts prisma/seed.ts *.ts *.mts *.mjs"
+    "format": "prettier --write src tests scripts prisma/seed.ts *.ts *.mjs",
+    "format:check": "prettier --check src tests scripts prisma/seed.ts *.ts *.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
-    "@neon/config": "^1.7.2",
-    "@neon/env": "^1.4.3",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@reduxjs/toolkit": "^2.12.0",
@@ -51,10 +47,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@formatjs/icu-messageformat-parser": "3.5.12",
-    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
-    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.13.5",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.23.1",
@@ -62,14 +55,11 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
-    "jsdom": "^30.1.1",
-    "pdfjs-dist": "^6.3.289",
     "prettier": "^3.9.8",
     "prisma": "7.10.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
-    "typescript": "^5",
-    "vitest": "^5.0.1"
+    "typescript": "^5"
   },
   "packageManager": "pnpm@12.3.4",
   "engines": {

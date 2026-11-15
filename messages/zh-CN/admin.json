@@ -51,7 +51,7 @@
     "office": "办公室",
     "checkIn": "签到",
     "checkOut": "签退",
-    "overtime": "加班",
+    "overtime": "已批准加班",
     "status": "状态",
     "lateReason": "迟到原因",
     "date": "日期",
@@ -121,7 +121,9 @@
     "actor": "操作人",
     "action": "操作",
     "resource": "资源",
-    "reference": "引用编号"
+    "reference": "引用编号",
+    "requestedOvertime": "申请加班时长",
+    "overtimeRequestStatus": "加班申请"
   },
   "reports": {
     "corrected": "考勤已更新，更正记录已添加到审计日志。",
@@ -137,7 +139,7 @@
     "allStatuses": "所有状态",
     "applyFilters": "应用筛选",
     "overtimeSummary": "加班汇总",
-    "totalOvertime": "总加班时长",
+    "totalOvertime": "加班净结余",
     "attendanceRecords": "考勤记录",
     "results": "报表结果",
     "correctAttendance": "更正考勤",
@@ -147,7 +149,7 @@
     "correctionReason": "更正原因",
     "saveCorrection": "保存更正",
     "page": "第 {page, number} 页 · 时间按浏览器时区显示",
-    "overtimeNote": "统计所选日期范围内的全部 {count, plural, other {# 条匹配记录}}。每条记录的加班时长达到 30 分钟时显示为绿色并计入总计；不足 30 分钟的值仍显示为红色，不作为加班收益计入总计。“迟到（分钟）”大于 5 时固定扣除 30 分钟，不因额外工作或迟到审批而免除。已签退的工作日若不足 8 小时 30 分钟，还需扣除缺少的分钟数。缺勤、休假等非工作日及尚未签退的记录不产生工时不足扣减。{unknown, plural, =0 {} other { # 条加班时长未知的记录不计入加班收益，但已知的迟到和已签退工作日的工时不足扣减仍适用。}}"
+    "overtimeNote": "统计所选日期范围内的全部 {count, plural, other {# 条匹配记录}}。仅与当前考勤一致、经超级管理员批准且至少达到 60 分钟的申请，才按完整申请时长计入加班收益。待审批、已拒绝和未经批准的历史记录不计入加班收益。“迟到（分钟）”大于 5 时仍固定扣除 30 分钟，不因额外工作或迟到审批而免除。已签退的工作日不足 8 小时 30 分钟时，仍扣除缺少的分钟数；非工作日及尚未签退的记录不产生工时不足扣减。{unknown, plural, =0 {} other { # 条历史工时结余未知；基于审批的加班收益和已知扣减仍正常计算。}}"
   },
   "settings": {
     "saved": "工作空间设置已保存。",
@@ -427,6 +429,25 @@
     "deleting": "正在删除…",
     "retryDelete": "重试删除",
     "transactionUpdated": "交易已更新。",
-    "transactionDeleted": "交易已删除。"
+    "transactionDeleted": "交易已删除。",
+    "reportDownloadTitle": "下载报表",
+    "reportDownloadDescription": "选择交易日期，下载包含期初和期末余额的 PDF 报表。日期留空可下载全部期间的报表。",
+    "reportFromDate": "开始日期",
+    "reportToDate": "结束日期",
+    "reportAllTime": "全部期间",
+    "reportValidDates": "请选择有效的报表日期。",
+    "reportDateOrder": "开始日期必须早于或等于结束日期。",
+    "reportTitle": "公司资金报表",
+    "reportDate": "交易日期：{date}",
+    "reportPeriod": "交易日期：{from} 至 {to}",
+    "reportFrom": "交易日期从 {from} 起",
+    "reportThrough": "交易日期截至 {to}",
+    "reportAllDates": "全部交易日期",
+    "reportCurrencyTimezone": "币种：{currency} | 时区：{timezone}",
+    "reportGenerated": "生成时间：{time}",
+    "openingBalance": "期初余额",
+    "closingBalance": "期末余额",
+    "reportRecords": "交易笔数",
+    "reportFooter": "本报表按交易日期列示当前交易记录。"
   }
 }

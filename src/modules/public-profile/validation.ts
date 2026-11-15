@@ -55,5 +55,3 @@ export const publicProfileUpdateSchema = z
     dateOfBirth: birthDate,
   })
   .strict();
-
-export const profileUpdateSchema = publicProfileUpdateSchema;

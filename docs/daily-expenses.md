@@ -64,7 +64,7 @@ The landscape A4 report includes filter scope, currency, business timezone, gene
 
 Exports support at most 10,000 matching records and fail with `REPORT_TOO_LARGE` rather than silently truncating; narrow the filters and try again. The route allows 30 requests per user per minute. The existing PDFKit renderer handles page breaks, long notes, and bundled Bengali fonts. Font files are included for the new route in the standalone build. PDF bytes are downloaded with the shared `PdfDownloadButton` and are not stored in Redux or browser storage. This feature requires no additional database migration.
 
-## Migration and verification
+## Migration
 
 The migration requires ICU-enabled PostgreSQL with `pg_catalog."und-x-icu"` for Unicode-aware category name uniqueness, independent of the database locale.
 
@@ -76,57 +76,4 @@ Migration `prisma/migrations/20260929000000_daily_expense_transaction_deletions/
 
 Migration `prisma/migrations/20260930000000_hard_delete_daily_expenses/migration.sql` changes Delete to physical deletion, creates minimal immutable deletion receipts, and removes the `deletedAt` column. It also permanently removes every previously soft-deleted transaction after copying its retry metadata into a receipt. Existing audit logs and active transactions are preserved. Stop application writers before applying the migration, then regenerate Prisma Client and restart the updated application; the old application is incompatible with the removed column. The migration locks the transaction table and performs the conversion atomically. Database guards require an active super admin for physical deletion, create receipts atomically, and prevent recreating a deleted submission; transaction-scoped locks serialize creation retries with deletion.
 
-Use only a disposable, non-production PostgreSQL database with `test` in its database name for verification. Set `TEST_DATABASE_URL` to its connection string, then run:
-
-```sh
-DATABASE_URL="$TEST_DATABASE_URL" pnpm db:migrate
-pnpm db:validate
-pnpm db:generate
-pnpm typecheck
-pnpm lint
-TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test
-TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm exec playwright test tests/e2e/daily-expenses.spec.ts
-pnpm build
-```
-
-The daily-expenses integration suite creates an isolated temporary schema, applies actual migrations, and exercises real PostgreSQL constraints, transactions, atomic auditing, concurrent idempotency, and aggregate correctness. Browser tests use only the isolated database and cover session access, saves, history filters, safe retries, failed refreshes, responsive layout, and keyboard dialogs. Chromium must be installed for Playwright.
-
-## Implementation verification record
-
-Verified on 2026-09-24 using a dedicated local PostgreSQL cluster on `127.0.0.1:55438`; the final database was `daily_expenses_final_test`. Production was not migrated, reset, or deployed. Existing unrelated working-tree work was preserved.
-
-The final commands and results were:
-
-| Command                                                                                                | Result                                                                                                              |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL=postgresql://rianhasansiam@127.0.0.1:55438/daily_expenses_final_test pnpm db:migrate`    | All 9 additive migrations applied to the new isolated database.                                                     |
-| `pnpm db:validate`                                                                                     | Passed.                                                                                                             |
-| `pnpm db:generate`                                                                                     | Passed; Prisma Client 7.10.0 generated.                                                                             |
-| `pnpm typecheck`                                                                                       | Passed.                                                                                                             |
-| `pnpm lint`                                                                                            | Passed.                                                                                                             |
-| `TEST_DATABASE_URL=postgresql://rianhasansiam@127.0.0.1:55438/daily_expenses_final_test pnpm test`     | 38 test files, 510 tests passed, including 26 real PostgreSQL Daily Expenses tests.                                 |
-| `TEST_DATABASE_URL=postgresql://rianhasansiam@127.0.0.1:55438/daily_expenses_final_test pnpm test:e2e` | 36 browser tests passed, including 8 Daily Expenses scenarios and existing attendance/drive-cost/session workflows. |
-| `DATABASE_URL=postgresql://rianhasansiam@127.0.0.1:55438/daily_expenses_final_test pnpm build`         | Production build passed, including all Daily Expenses routes.                                                       |
-| `git diff --check`                                                                                     | Passed.                                                                                                             |
-
-Desktop and 390px mobile screenshots were visually reviewed. No checks were disabled. Node Web Crypto experimental warnings, an existing `pg` concurrent-query deprecation warning in the broader suite, and Next development cache-bypass notices were non-blocking. The new workspace's instant-navigation warning was resolved by placing its loading/authentication boundary at the page level. No verification checks remain blocked.
-
-Operational limitations are deliberate: one two-decimal currency per immutable ledger; ICU-enabled PostgreSQL is required; there is no live cross-user subscription or recovery of an unconfirmed in-memory submission after the browser/session is discarded. Apply the reviewed migration through the application's normal release process before using this feature on an existing deployment.
-
-### Super-admin edit verification
-
-Verified on 2026-09-24 with a fresh disposable PostgreSQL cluster on `127.0.0.1:55439`. All 10 migrations applied successfully to the local test databases. The full Vitest suite passed (38 files, 529 tests), including 34 Daily Expenses database tests. All 10 Daily Expenses browser tests passed, including ADMIN denial, super-admin expense/balance edits, retained creators, refreshed totals, audit snapshots, and stale-edit recovery. Prisma validation, TypeScript, ESLint, and the production build also passed. These test runs did not alter the configured remote database.
-
-The edit migration was subsequently applied to the configured application database on 2026-09-24 to resolve history loading against the missing `version` column. A read-only query using the application's Prisma model confirmed that history loads successfully and records have valid versions.
-
-### Super-admin deletion verification
-
-Verified on 2026-09-24 with disposable local PostgreSQL databases and all 11 migrations. The full suite passed (38 files, 547 tests), including 42 Daily Expenses database tests. All 13 Daily Expenses browser tests passed, covering deletion authorization, confirmation/cancellation, expense and balance adjustments, audit snapshots, retries after a lost response, and stale-record recovery. Prisma validation, TypeScript, ESLint, production build, and diff checks passed.
-
-The deletion migration was then applied to the configured application database. Read-only history and summary queries passed, including consistency between the current balance and its component totals. The local development server was restarted to load the regenerated Prisma Client. No existing application records were deleted during verification.
-
-### PDF report verification
-
-Verified on 2026-09-24 using disposable local PostgreSQL databases. All 39 test files and 561 tests passed, including 46 Daily Expenses database tests and exact report totals for 10,000 maximum-size amounts. All 16 Daily Expenses browser scenarios passed across the initial run and the targeted rerun of a corrected PDF exclusion assertion. The PDF cases cover super-admin access, all five applied filters, every history page, deleted/nonmatching record exclusion, long Bengali notes, and empty selections.
-
-The six-page filtered fixture and one-page empty fixture were rendered and visually inspected for complete text, legible Bengali glyphs, table wrapping, headers, and page numbers. TypeScript, ESLint, production build, and diff checks passed; both Bengali font files were confirmed in the new route's trace and standalone output. The running local report route correctly rejects unauthenticated requests with no-store JSON. No schema migration or remote data mutation was needed for PDF downloads.
+Operational limits include one two-decimal currency per immutable ledger and ICU-enabled PostgreSQL. There is no live cross-user subscription or recovery of an unconfirmed in-memory submission after the browser or session is discarded.

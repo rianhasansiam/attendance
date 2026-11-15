@@ -18,9 +18,11 @@ import {
   companyMoneyListSchema,
   companyMoneyUpdateSchema,
   companyMoneyDeleteSchema,
+  companyMoneyReportQuerySchema,
   type CompanyMoneyInput,
   type CompanyMoneyOverview,
   type CompanyMoneyTransactionRecord,
+  type CompanyMoneyReportData,
 } from "./contracts";
 
 const transactionInclude = {
@@ -85,6 +87,72 @@ export async function getCompanyMoneyOverview(
         total,
         page,
         pageSize,
+      };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
+const MAX_COMPANY_MONEY_REPORT_ROWS = 10000;
+
+export async function getCompanyMoneyReportData(
+  actor: Actor,
+  raw: unknown = {},
+): Promise<CompanyMoneyReportData> {
+  authorizeRole(actor.role, "ADMIN");
+  const filters = companyMoneyReportQuerySchema.parse(raw);
+  return db.$transaction(
+    async (tx) => {
+      const generatedAt = new Date().toISOString();
+      const items = await tx.companyMoneyTransaction.findMany({
+        where: {
+          date: {
+            ...(filters.from
+              ? { gte: new Date(`${filters.from}T00:00:00.000Z`) }
+              : {}),
+            ...(filters.to
+              ? { lte: new Date(`${filters.to}T00:00:00.000Z`) }
+              : {}),
+          },
+        },
+        include: transactionInclude,
+        orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        take: MAX_COMPANY_MONEY_REPORT_ROWS + 1,
+      });
+      if (items.length > MAX_COMPANY_MONEY_REPORT_ROWS)
+        throw new DomainError(
+          "REPORT_TOO_LARGE",
+          "Choose a narrower date range to export 10,000 company money transactions or fewer.",
+        );
+
+      const before = filters.from
+        ? Prisma.sql`"date" < ${filters.from}::date`
+        : Prisma.sql`FALSE`;
+      const within = filters.from
+        ? Prisma.sql`"date" >= ${filters.from}::date`
+        : Prisma.sql`TRUE`;
+      const through = filters.to
+        ? Prisma.sql`WHERE "date" <= ${filters.to}::date`
+        : Prisma.empty;
+      // PostgreSQL numeric keeps even an unbounded opening balance exact.
+      // Current records, details and balances share this repeatable-read snapshot.
+      const [summary] = await tx.$queryRaw<
+        Omit<CompanyMoneyReportData["summary"], "count">[]
+      >(Prisma.sql`
+        SELECT
+          ROUND(COALESCE(SUM(CASE WHEN "type" = 'ADD' THEN "amount" ELSE -"amount" END)
+            FILTER (WHERE ${before}), 0), 2)::text AS "openingBalance",
+          ROUND(COALESCE(SUM("amount") FILTER (WHERE "type" = 'ADD' AND ${within}), 0), 2)::text AS "totalAdded",
+          ROUND(COALESCE(SUM("amount") FILTER (WHERE "type" = 'REMOVE' AND ${within}), 0), 2)::text AS "totalRemoved",
+          ROUND(COALESCE(SUM(CASE WHEN "type" = 'ADD' THEN "amount" ELSE -"amount" END), 0), 2)::text AS "closingBalance"
+        FROM "CompanyMoneyTransaction"
+        ${through}
+      `);
+      return {
+        filters,
+        generatedAt,
+        summary: { ...summary, count: items.length },
+        items: items.map(transactionDTO),
       };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

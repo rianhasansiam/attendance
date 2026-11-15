@@ -28,6 +28,12 @@ export type AttendanceReportRow = JsonRecord & {
   checkOutAt: string | null;
   workedMinutes: number;
   overtimeMinutes: number | null;
+  approvedOvertimeMinutes: number;
+  requestedOvertimeMinutes: number | null;
+  overtimeRequestStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
+  overtimeApprovalMatchesAttendance: boolean;
+  overtimeRequestId?: string | null;
+  overtimeRequestUpdatedAt?: string | null;
   lateMinutes: number;
   lateReason: string | null;
   status: AttendanceStatus;

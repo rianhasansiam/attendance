@@ -20,7 +20,7 @@
     "statusFilter": "Status: {status}",
     "records": "Records",
     "totalWorked": "Total worked",
-    "totalOvertime": "Total overtime",
+    "totalOvertime": "Net overtime balance",
     "duration": "{sign}{hours, number}h {minutes, number}m",
     "overtimeTotal": "{duration} ({minutes, number} min)",
     "date": "Date",
@@ -29,7 +29,7 @@
     "checkIn": "Check in",
     "checkOut": "Check out",
     "worked": "Worked",
-    "overtime": "Overtime",
+    "overtime": "Approved overtime / request",
     "actualLate": "Actual late (min)",
     "status": "Status",
     "lateReason": "Late reason",
@@ -38,9 +38,11 @@
     "approvalMismatch": "Approval no longer matches attendance",
     "unknown": "Unknown",
     "scheduledDay": "Scheduled day",
-    "footer": "Times use each row's shift timezone. Daily overtime retains its existing calculation after actual late minutes. Overtime of at least 30 minutes per record is green and counted; smaller values are red and excluded as credits. Negative overtime shows a work-hour shortfall. Actual late (min) greater than 5 deducts a fixed 30 minutes, regardless of extra work or late approval; exactly 5 does not. Completed workdays below 8h 30m also deduct the missing worked minutes. Open attendance and nonworking days have no shortage deduction.",
-    "unknownOvertime": "Total excludes {count, plural, one {# record} other {# records}} with unknown overtime from credits; known late and completed-day shortage deductions still apply.",
-    "deleted": "Deleted Info"
+    "footer": "Times use each row’s shift timezone. Overtime requires at least 60 completed minutes after scheduled duty end and matching Super Admin approval; the full requested duration is credited. Pending, rejected, stale and historical unapproved requests earn zero credit. Actual late (min) greater than 5 still deducts a fixed 30 minutes, regardless of extra work or late approval. Completed workdays below 8h 30m also deduct the missing worked minutes. Open attendance and nonworking days have no shortage deduction.",
+    "unknownOvertime": "{count, plural, one {# historical work-hour balance is unknown} other {# historical work-hour balances are unknown}}; approval-based credit and known attendance deductions are included normally.",
+    "deleted": "Deleted Info",
+    "requestedOvertime": "Requested: {duration}",
+    "overtimeRequest": "Overtime: {status}"
   },
   "status": {
     "PRESENT": "PRESENT",

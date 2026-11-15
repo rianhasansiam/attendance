@@ -1,10 +1,7 @@
 import type { z } from "zod";
 import type { reportFilterSchema } from "@/modules/management/validation";
 import { addCalendarDays } from "@/modules/shifts/calculations";
-import {
-  countedOvertimeMinutes,
-  isCountedOvertime,
-} from "@/modules/attendance/overtime-policy";
+import { countedOvertimeMinutes } from "@/modules/attendance/overtime-policy";
 import type { ReportRecord } from "./service";
 import { resolveLocale } from "@/i18n/config";
 import { createReportTranslator } from "./translations";
@@ -88,11 +85,12 @@ export async function attendanceReportPdf(
   for (const row of records) {
     worked += row.workedMinutes;
     if (row.overtimeMinutes === null) unknown++;
-    overtime += countedOvertimeMinutes(
-      row.overtimeMinutes,
-      row.lateMinutes,
-      row.checkInAt && row.checkOutAt ? row.workedMinutes : null,
-    );
+    overtime += countedOvertimeMinutes({
+      approvedOvertimeMinutes: row.approvedOvertimeMinutes,
+      lateMinutes: row.lateMinutes,
+      completedWorkedMinutes:
+        row.checkInAt && row.checkOutAt ? row.workedMinutes : null,
+    });
   }
   const bytes = await createReportPdf({
     locale,
@@ -117,10 +115,10 @@ export async function attendanceReportPdf(
       { label: t("attendance.checkIn"), width: 65 },
       { label: t("attendance.checkOut"), width: 65 },
       { label: t("attendance.worked"), width: 57 },
-      { label: t("attendance.overtime"), width: 66 },
+      { label: t("attendance.overtime"), width: 84 },
       { label: t("attendance.actualLate"), width: 40, align: "right" },
       { label: t("attendance.status"), width: 72 },
-      { label: t("attendance.lateReason"), width: 100 },
+      { label: t("attendance.lateReason"), width: 82 },
     ],
     rows: records.map((row) => {
       const zone = row.shift.timezone;
@@ -135,6 +133,9 @@ export async function attendanceReportPdf(
         value
           ? `${date(value, zone)}\n${new Intl.DateTimeFormat(locale, { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(value)}`
           : "-";
+      const overtimeNote = row.overtimeRequestStatus
+        ? `\n${t("attendance.requestedOvertime", { duration: duration(row.requestedOvertimeMinutes!) })}\n${t("attendance.overtimeRequest", { status: t(`approval.${row.overtimeRequestStatus}`) })}${row.overtimeApprovalMatchesAttendance ? "" : `\n${t("attendance.approvalMismatch")}`}`
+        : "";
       return [
         date(row.attendanceDate),
         row.employee
@@ -144,9 +145,7 @@ export async function attendanceReportPdf(
         punch(row.checkInAt),
         punch(row.checkOutAt),
         duration(row.workedMinutes),
-        row.overtimeMinutes === null
-          ? t("attendance.unknown")
-          : duration(row.overtimeMinutes),
+        `${duration(row.approvedOvertimeMinutes)}${overtimeNote}`,
         number.format(row.lateMinutes),
         `${t(`status.${row.status}`)}${approvalNote}${row.derived ? `\n${t("attendance.scheduledDay")}` : ""}`,
         row.lateReason || "-",
@@ -159,11 +158,7 @@ export async function attendanceReportPdf(
       undefined,
       undefined,
       undefined,
-      row.overtimeMinutes === null
-        ? undefined
-        : isCountedOvertime(row.overtimeMinutes)
-          ? "#176B4A"
-          : "#B42318",
+      row.approvedOvertimeMinutes > 0 ? "#176B4A" : "#B42318",
     ]),
     footerNote:
       t("attendance.footer") +

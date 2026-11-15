@@ -491,6 +491,7 @@ async function assertCurrentCorrectionAccess(
   actor: Actor,
   tx: Prisma.TransactionClient,
 ) {
+  await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${actor.id} FOR SHARE`;
   const currentActor = await tx.user.findUnique({
     where: { id: actor.id },
     select: { id: true, role: true, status: true },
@@ -510,12 +511,20 @@ export async function correctAttendance(
   input: z.infer<typeof correctionSchema>,
 ) {
   assertSuperAdmin(actor);
+  const target = await db.attendance.findUnique({
+    where: { id },
+    select: { employeeId: true },
+  });
+  if (!target)
+    throw new DomainError("NOT_FOUND", "Attendance record not found.", 404);
   return db.$transaction(
     async (tx) => {
+      if (target.employeeId)
+        await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${target.employeeId} FOR UPDATE`;
       await assertCurrentCorrectionAccess(actor, tx);
       const previous = await tx.attendance.findUnique({
         where: { id },
-        include: { shift: true },
+        include: { shift: true, lateApproval: true, overtimeRequest: true },
       });
       if (!previous)
         throw new DomainError("NOT_FOUND", "Attendance record not found.", 404);
@@ -528,7 +537,7 @@ export async function correctAttendance(
       const result = await tx.attendance.update({
         where: { id },
         data: calculateCorrection(previous, input),
-        include: { lateApproval: true },
+        include: { lateApproval: true, overtimeRequest: true },
       });
       await tx.attendanceEvent.create({
         data: {
@@ -550,7 +559,10 @@ export async function correctAttendance(
       );
       return result;
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 15_000,
+    },
   );
 }
 
@@ -562,6 +574,7 @@ export async function createAttendanceCorrection(
   const attendanceDate = utcDate(input.attendanceDate);
   return db.$transaction(
     async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${input.employeeId} FOR UPDATE`;
       await assertCurrentCorrectionAccess(actor, tx);
       const employee = await tx.employee.findUnique({
         where: { id: input.employeeId },
@@ -598,6 +611,7 @@ export async function createAttendanceCorrection(
           attendanceDate,
           ...data,
         },
+        include: { lateApproval: true, overtimeRequest: true },
       });
       await tx.attendanceEvent.create({
         data: {
@@ -619,6 +633,9 @@ export async function createAttendanceCorrection(
       );
       return result;
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 15_000,
+    },
   );
 }

@@ -1,6 +1,6 @@
 # Check-in and checkout performance
 
-Implemented against baseline commit `635c7f1`. The changes are limited to attendance confirmation, verification scheduling, display-cache invalidation and opt-in measurements. No dependency, production configuration, deployment, schema or migration changes are required. Existing unrelated daily-expenses edits are preserved.
+Attendance confirmation, verification scheduling, display-cache invalidation and opt-in measurements share the following request flow.
 
 ## Revised request flow
 
@@ -57,7 +57,7 @@ These metrics are nested/overlapping and are not additive. They are not individu
 
 ## Reproducible device measurement
 
-No real-device baseline or percentage speedup is claimed. Unit tests verify that confirmation needs no second day GET and that verification branches overlap; those assertions are not physical latency measurements.
+Measure physical device latency separately from request counts and verification scheduling.
 
 1. Use an isolated test deployment/database and real enrolled/approved test credentials. Keep the same browser, device, network, office policy, server mode and database placement for each comparison. Do not disable required security checks to benchmark them. Use separate attendance fixtures for each sample because completed records cannot be checked in again.
 2. For a baseline, run commit `635c7f1` in a separate checkout. Record the click and the attendance timestamp/button-state change using the browser Performance panel with screenshots. Include the options, attendance POST and dashboard GET requests in the recording. The old success banner alone is not the endpoint: the comparison is the updated attendance display and correct button state.
@@ -67,46 +67,4 @@ No real-device baseline or percentage speedup is claimed. Unit tests verify that
 6. Count requests from click to updated display: one options request, at most one attendance POST, and no success-triggered employee-day GET. A focus/poll/manual GET can still occur independently. Check that history/admin/report views refresh through their defined mechanisms.
 7. Simulate a lost POST response and failed recovery GET, then restore connectivity. Both buttons must stay locked until the intended action is observed. Separately fail a later refresh after confirmed success: saved times and the appropriate action state must remain visible.
 
-Physical browser acceptance remains necessary for iOS Safari and Android/desktop passkey providers, device-specific Permissions API behavior, first-time location prompts, OS cancellation, actual GPS acquisition and user-activation requirements. Automated Chromium workflows and mocked ceremonies do not prove physical-device behavior.
-
-## Validation coverage
-
-Tests cover all four passkey/GPS policy combinations, either parallel completion order, both branch failures, safe first permission, GPS denial/timeout/staleness, server accuracy rejection, passkey cancellation, expired/consumed challenges, double clicks, stale reads, queued invalidation, account/reset/unmount guards, overnight records, late reasons, uncertain outcomes and evidence exclusion from Redux/logs. PostgreSQL suites exercise actual locks, constraints, signed assertions, policy changes and atomic success/rejection behavior. Final automated checks against disposable local PostgreSQL (existing migrations applied only to those test databases):
-
-- `TEST_DATABASE_URL=<isolated local test DB> DATABASE_URL=<same DB> pnpm exec vitest run`: **47 files, 676 tests passed, no skips** (19.23 seconds for this suite run; not an attendance latency benchmark).
-- `pnpm lint`: passed with no errors or warnings.
-- `pnpm typecheck`: passed.
-- Prettier check of all changed TypeScript/TSX files: passed.
-- `pnpm build`: passed with explicit local test database and test auth configuration; attendance APIs remain dynamic.
-- `TEST_DATABASE_URL=<separate isolated local test DB> DATABASE_URL=<same DB> pnpm exec playwright test tests/e2e/workflows.spec.ts tests/e2e/overtime.spec.ts`: **15 browser workflows passed**. This covers attendance, late reasons, overnight/overtime display, reports, access and navigation.
-
-These commands used `DOTENV_CONFIG_PATH` pointing to a nonexistent temporary file for Prisma/Vitest fixture setup and explicit local database URLs. The application `.env` was not edited. Existing WebCrypto experimental and PostgreSQL driver deprecation notices did not fail the checks. No physical-device timings, real Google-provider sign-in, production load or cold remote database behavior were measured.
-
-## Changed files
-
-| File                                                 | Purpose                                                                                                       |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `src/lib/client/attendance-timing.ts`                | Opt-in client stage spans and confirmed-display timing; allowlisted output only                               |
-| `src/lib/server-timing.ts`                           | Opt-in fixed-name server timing response headers                                                              |
-| `src/lib/client/attendance-ceremony.ts`              | Fresh options policy, permission-aware parallel evidence collection, freshness and sibling cancellation       |
-| `src/components/employee-workspace.tsx`              | Immediate confirmed cache update, late prompt, timing completion and guarded recovery/lifecycle state         |
-| `src/lib/client/attendance-recovery.ts`              | Verify the intended transition in authoritative recovery data                                                 |
-| `src/store/features/attendance/api.ts`               | Whitelisted merged day/recent cache, old-read fencing and scoped invalidation                                 |
-| `src/store/features/reports/api.ts`                  | Admin summary tag aligned with selective invalidation                                                         |
-| `src/modules/attendance/http.ts`                     | Time the existing HTTP guards and attach opt-in metrics                                                       |
-| `src/modules/attendance/service.ts`                  | Measure existing policy/challenge/transaction/verification/write boundaries without changing attendance rules |
-| `src/modules/webauthn/service.ts`                    | Return current geofence requirement with options and measure existing options work                            |
-| `src/app/api/webauthn/authenticate/options/route.ts` | Opt-in timing around existing options guards/service                                                          |
-| `tests/attendance-client.test.ts`                    | Rendered confirmation, late/overnight flows, recovery, Activity/session, old-read and privacy regressions     |
-| `tests/attendance-cache.test.ts`                     | Preserved metadata, scoped invalidation, old/replacement reads and reset guards                               |
-| `tests/attendance-ceremony.test.ts`                  | Policy combinations, overlap, permissions, cancellation, freshness and one POST                               |
-| `tests/attendance-recovery.test.ts`                  | Exact intended transition, original overnight record and invalid/backdated results                            |
-| `tests/attendance-timing.test.ts`                    | Client opt-in, overlap interpretation and privacy                                                             |
-| `tests/server-timing.test.ts`                        | Server opt-in and nested/failed-phase timing                                                                  |
-| `tests/attendance-server-timing.test.ts`             | Transaction completion, separate challenge consumption and rejection invariants                               |
-| `tests/webauthn-options.test.ts`                     | Fresh policy combinations and existing HTTP security boundaries                                               |
-| `tests/attendance-http.test.ts`                      | Timing headers and unchanged canonical response/rejection behavior                                            |
-| `tests/employee-drive-query.test.ts`                 | Updated request count after eliminating unnecessary employee-day invalidation                                 |
-| `docs/state-management.md`                           | Updated cache/flow/security documentation                                                                     |
-| `docs/attendance-performance.md`                     | This implementation, measurement and validation record                                                        |
-| `README.md`                                          | Link to the current attendance performance notes                                                              |
+Physical browser acceptance remains necessary for iOS Safari and Android/desktop passkey providers, device-specific Permissions API behavior, first-time location prompts, OS cancellation, actual GPS acquisition and user-activation requirements.

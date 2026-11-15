@@ -1,6 +1,6 @@
 # State management and data flow
 
-The authenticated employee and administration workspaces use Redux Toolkit 2.12 and React Redux 9.3. Interactive resource data belongs to one RTK Query API; existing server modules, Auth.js database sessions, routes, permissions and financial/attendance calculations remain authoritative. See the [audit and baseline](state-audit.md) for the verified defects and preserved invariants, and the [application architecture](architecture.md) for the broader security model.
+The authenticated employee and administration workspaces use Redux Toolkit 2.12 and React Redux 9.3. Interactive resource data belongs to one RTK Query API; existing server modules, Auth.js database sessions, routes, permissions and financial/attendance calculations remain authoritative. See the [application architecture](architecture.md) for the broader security model.
 
 ## Data flow
 
@@ -120,7 +120,7 @@ Writes disable duplicate submissions using pending state and ref guards. Attenda
 The intentional exceptions are:
 
 - OAuth stays in Auth.js. The profile stays server-rendered through the authorized employee module; its freshness helper refreshes that server output without a duplicate profile API subscription.
-- WebAuthn registration/authentication and precise GPS live only in `src/lib/client/attendance-ceremony.ts` and the focused `request.ts` helper. Raw assertions, challenges and location evidence never become Redux mutation arguments or actions. Workspace/Activity cleanup aborts pending ceremonies and checks cancellation before any subsequent evidence submission. Each attempt obtains a new challenge; the helper never retries a consumed challenge. After the attendance transaction commits, the UI dispatches an allowlisted attendance display record into the existing employee-day cache, preserving employee/office/shift/network/device metadata and updating recent records by the returned ID/date. The confirmation path does not wait for another dashboard GET. An older running day-query thunk is aborted and settled locally before the merged cache is upserted, so a late transport response cannot overwrite confirmation. Queries started after the commit may complete normally. Scoped invalidation refreshes HISTORY, admin SUMMARY, attendance events, Reports and Audit; DAY retains mount/focus/reconnect/manual/polling freshness. See [attendance performance](attendance-performance.md) for permission handling, timings and validation.
+- WebAuthn registration/authentication and precise GPS live only in `src/lib/client/attendance-ceremony.ts` and the focused `request.ts` helper. Raw assertions, challenges and location evidence never become Redux mutation arguments or actions. Workspace/Activity cleanup aborts pending ceremonies and checks cancellation before any subsequent evidence submission. Each attempt obtains a new challenge; the helper never retries a consumed challenge. After the attendance transaction commits, the UI dispatches an allowlisted attendance display record into the existing employee-day cache, preserving employee/office/shift/network/device metadata and updating recent records by the returned ID/date. The confirmation path does not wait for another dashboard GET. An older running day-query thunk is aborted and settled locally before the merged cache is upserted, so a late transport response cannot overwrite confirmation. Queries started after the commit may complete normally. Scoped invalidation refreshes HISTORY, admin SUMMARY, attendance events, Reports and Audit; DAY retains mount/focus/reconnect/manual/polling freshness. See [attendance performance](attendance-performance.md) for permission handling, timings and device measurement.
 - `PdfDownloadButton` performs the authorized no-store fetch locally. Blob data and object URLs stay outside Redux; temporary links are removed and URLs revoked. Unmount/logout aborts pending downloads and prevents late responses from starting a download. Auth failures still notify the workspace lifecycle boundary.
 
 Server response boundaries use attendance/device display projections. Corrections return safe attendance fields, and audit/event display snapshots redact verification evidence without modifying stored audit records. These protections are important because RTK Query stores successful DTOs in browser memory.
@@ -133,69 +133,4 @@ Sessions, authorization decisions, attendance eligibility, operational policy/de
 
 The supplied systemd/Nginx configuration describes one Node process. Actual deployed topology was not inspected. For multiple workers/replicas without coordinated tag invalidation, set `REFERENCE_DISPLAY_CACHE=disabled` in every worker so reference reads go directly to PostgreSQL. No Redis, remote cache or other infrastructure is required. Direct database edits bypass both application invalidation paths; use application mutations, expect the configured label expiry, or disable that small display cache as appropriate.
 
-This refactor requires no schema migration or stored-data conversion. Existing migrations were applied only to a disposable local PostgreSQL test database. No live infrastructure, process or database was changed. Rollback consists of reverting this application/dependency change and deploying the previous compatible bundle through the normal deployment process; preserve the focused authorization and sensitive-response fixes if rolling back only Redux. Do not revert unrelated concurrent feature files or their migrations as part of this rollback.
-
-## Test commands and verification record
-
-Install from the existing lockfile and run the ordinary checks:
-
-```sh
-pnpm install --frozen-lockfile
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm db:validate
-pnpm db:generate
-pnpm build
-git diff --check
-```
-
-Without `TEST_DATABASE_URL`, PostgreSQL-specific suites intentionally skip; unit mocks are not evidence for row locks, constraints, triggers or transaction isolation. For those checks, configure/export `TEST_DATABASE_URL` to an explicitly disposable, non-production database with `test` in its database name. Check that target before running the following migration command. Do not use a production connection or reset a shared database.
-
-```sh
-: "${TEST_DATABASE_URL:?Set an isolated non-production PostgreSQL test database}"
-DATABASE_URL="$TEST_DATABASE_URL" pnpm db:migrate
-TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test
-TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test:e2e
-```
-
-With `TEST_DATABASE_URL` set, Vitest runs test files sequentially to avoid unrelated suites colliding through PostgreSQL SERIALIZABLE predicate locks. Concurrency tests still execute simultaneous operations inside their own suites. Run the Vitest and Playwright database suites separately, not concurrently against the same test database.
-
-Playwright starts a separate development server on localhost port 3100 using `.next-e2e`; leave that port free. Its fixtures create ordinary users and database sessions only in the isolated database; the production application has no test authentication endpoint. Browser dependencies can be installed with `pnpm exec playwright install chromium` when needed.
-
-Focused regression commands:
-
-```sh
-pnpm exec vitest run tests/store.test.ts tests/store-lifecycle.test.ts tests/management-query.test.ts tests/employee-drive-query.test.ts tests/attendance-client.test.ts
-pnpm exec vitest run tests/server-entrypoints.test.ts tests/server-display-boundaries.test.ts tests/api.test.ts tests/cache-invalidation.test.ts
-TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm exec playwright test tests/e2e/state-management.spec.ts
-```
-
-Coverage includes independent stores, stable provider/hydration behavior, Activity cleanup and reveal, hidden/offline polling, deduplication, filter-aware keys, dependent invalidation, 401/403 handling, late-response fencing, sensitive ceremony boundaries, two-tab Auth.js logout, revoked-session detection, authorization and safe server DTOs. Existing PostgreSQL suites cover actual attendance concurrency, challenge replay, immutable history, corrections and Decimal calculations.
-
-The baseline and its exact results are recorded in [state-audit.md](state-audit.md). The older [verification record](verification.md) describes earlier work and is not evidence that this refactor passed. Final commands/results, including any blocked checks, must be recorded below after the final workspace is verified. Real Google consent, physical passkeys/GPS/network behavior and the live deployment remain environment acceptance checks.
-
-### Final verification
-
-Verification ran in the shared workspace and in a frozen verification copy at `/tmp/attendance-rtk-verify.ygixpf7o`. The copy contains this refactor with the original attendance schema; concurrent daily-expense feature code/schema work was excluded without changing the shared worktree. Dependencies were installed from the same lockfile with `pnpm install --offline --frozen-lockfile`. Browser-test URLs/port in the copy were changed from 3100 to 3101 because the concurrent task used 3100.
-
-A new temporary PostgreSQL 18.6 cluster listened only on `127.0.0.1:55481`, with database `attendance_rtk_test` and test-only local authentication. Existing eight migrations were applied with `DATABASE_URL='postgresql://test_runner@127.0.0.1:55481/attendance_rtk_test' pnpm db:migrate`. The configured production/Neon connection was never used for migrations or tests.
-
-| Command                                                                                          | Final result                                                | Scope                                                                               |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `pnpm lint`                                                                                      | Passed, no lint errors                                      | Shared workspace and verification copy                                              |
-| `pnpm typecheck`                                                                                 | Passed                                                      | Shared workspace and verification copy                                              |
-| `pnpm db:validate`                                                                               | Passed                                                      | Shared workspace and original-schema verification copy                              |
-| `pnpm build`                                                                                     | Passed; includes `prisma generate` and optimized Next build | Shared workspace and verification copy                                              |
-| `pnpm test` without a database variable                                                          | 457 passed, 53 skipped in 38 files                          | Shared workspace, including concurrent feature unit tests; DB skips are intentional |
-| `TEST_DATABASE_URL='postgresql://test_runner@127.0.0.1:55481/attendance_rtk_test' pnpm test`     | 423 passed in 34 files, no skips                            | Frozen refactor copy, real PostgreSQL                                               |
-| `TEST_DATABASE_URL='postgresql://test_runner@127.0.0.1:55481/attendance_rtk_test' pnpm test:e2e` | 28 passed (49.8 seconds)                                    | Frozen refactor copy, browser port 3101, real PostgreSQL                            |
-| `git diff --check`                                                                               | Passed                                                      | Shared workspace                                                                    |
-
-Browser coverage includes both PDF download flows, exact totals and pagination, route reveals, two-tab logout with a delayed old response, server-side session revocation, optional employee profiles, role restrictions, and attendance workflows. The temporary PostgreSQL cluster was stopped after verification.
-
-Earlier failures were investigated and resolved: new test fixtures needed the selected session expiry, background status messages required a precise success locator, and the PDF fixture needed the existing employee search when lookup options exceed 100. The revocation test now deletes its fixture session at the next actual protected request, avoiding a race where Auth.js correctly detected expiry before the test could click Refresh. Parallel database suites caused real SERIALIZABLE conflicts between unrelated fixtures; database-enabled Vitest now runs files sequentially while its explicit concurrency tests still race requests. Early whole-workspace checks were also interrupted by unfinished concurrent daily-expense modules and stale generated route types; that unrelated source was preserved, and subsequent whole-workspace checks passed.
-
-`pnpm peers check` still reports the pre-existing Auth.js optional SimpleWebAuthn v9 peer expectations against the installed v14 packages. No major dependency was changed to hide those warnings. Node emitted experimental Web Crypto/ML-DSA warnings during tests, and Next development tests emitted informational cache-bypass warnings. No live Google consent, physical authenticator/GPS behavior or deployment was verified.
-
-Implementation references: [Redux Toolkit App Router guidance](https://redux-toolkit.js.org/usage/nextjs), [RTK Query listener cleanup](https://redux-toolkit.js.org/rtk-query/api/setupListeners), and the installed Next.js 16.3.5 guides under `node_modules/next/dist/docs/`.
+State management requires no schema migration or stored-data conversion. Rollback uses the previous compatible application bundle through the normal deployment process. Preserve authorization and sensitive-response protections when changing client state management.

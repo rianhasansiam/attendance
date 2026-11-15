@@ -51,7 +51,7 @@
     "office": "Office",
     "checkIn": "Check in",
     "checkOut": "Check out",
-    "overtime": "Overtime",
+    "overtime": "Approved overtime",
     "status": "Status",
     "lateReason": "Late reason",
     "date": "Date",
@@ -121,7 +121,9 @@
     "actor": "Actor",
     "action": "Action",
     "resource": "Resource",
-    "reference": "Reference"
+    "reference": "Reference",
+    "requestedOvertime": "Requested overtime",
+    "overtimeRequestStatus": "Overtime request"
   },
   "reports": {
     "corrected": "Attendance updated. The correction has been added to the audit log.",
@@ -137,7 +139,7 @@
     "allStatuses": "All statuses",
     "applyFilters": "Apply filters",
     "overtimeSummary": "Overtime summary",
-    "totalOvertime": "Total overtime",
+    "totalOvertime": "Net overtime balance",
     "attendanceRecords": "Attendance records",
     "results": "Report results",
     "correctAttendance": "Correct attendance",
@@ -147,7 +149,7 @@
     "correctionReason": "Reason for correction",
     "saveCorrection": "Save correction",
     "page": "Page {page, number} · Times shown in your browser timezone",
-    "overtimeNote": "Across all {count, plural, one {# matching record} other {# matching records}} in the selected date range. Overtime of at least 30 minutes per record is green and counted; smaller values stay red and are excluded as credits. Late (min) greater than 5 deducts a fixed 30 minutes, regardless of extra work or late approval. Completed workdays below 8h 30m also deduct the missing minutes. Shortage is calculated after checkout; open attendance and nonworking days have no shortage deduction.{unknown, plural, =0 {} one { Excludes # record with unknown overtime from credits; known late and completed-day shortage deductions still apply.} other { Excludes # records with unknown overtime from credits; known late and completed-day shortage deductions still apply.}}"
+    "overtimeNote": "Across all {count, plural, one {# matching record} other {# matching records}} in the selected date range. Only matching Super Admin approvals count the full requested duration of at least 60 minutes. Pending, rejected and unapproved historical records earn zero overtime credit. Late (min) greater than 5 still deducts a fixed 30 minutes, regardless of extra work or late approval. Completed workdays below 8h 30m also deduct the missing minutes; open attendance and nonworking days have no shortage deduction.{unknown, plural, =0 {} one { # historical work-hour balance is unknown; approval-based credit and known deductions remain authoritative.} other { # historical work-hour balances are unknown; approval-based credit and known deductions remain authoritative.}}"
   },
   "settings": {
     "saved": "Workspace settings saved.",
@@ -427,6 +429,25 @@
     "deleting": "Deleting…",
     "retryDelete": "Retry deletion",
     "transactionUpdated": "Transaction updated.",
-    "transactionDeleted": "Transaction deleted."
+    "transactionDeleted": "Transaction deleted.",
+    "reportDownloadTitle": "Download report",
+    "reportDownloadDescription": "Choose transaction dates for a PDF statement with opening and closing balances. Leave dates blank for an all-time report.",
+    "reportFromDate": "From date",
+    "reportToDate": "To date",
+    "reportAllTime": "All time",
+    "reportValidDates": "Choose valid report dates.",
+    "reportDateOrder": "The start date must be on or before the end date.",
+    "reportTitle": "Company money report",
+    "reportDate": "Transaction date: {date}",
+    "reportPeriod": "Transaction dates: {from} to {to}",
+    "reportFrom": "Transaction dates from {from}",
+    "reportThrough": "Transaction dates through {to}",
+    "reportAllDates": "All transaction dates",
+    "reportCurrencyTimezone": "Currency: {currency} | Timezone: {timezone}",
+    "reportGenerated": "Generated: {time}",
+    "openingBalance": "Opening balance",
+    "closingBalance": "Closing balance",
+    "reportRecords": "Transactions",
+    "reportFooter": "This statement reflects current transaction records by transaction date."
   }
 }

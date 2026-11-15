@@ -1,4 +1,5 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { calculateEligibleOvertime } from "@/modules/attendance/overtime-policy";
 
 export interface ShiftDefinition {
   startTime: string;
@@ -102,7 +103,11 @@ export function calculateOvertime(
     Math.floor((checkOutAt.getTime() - checkInAt.getTime()) / 60_000),
   );
   return {
-    rawOvertimeMinutes: Math.max(0, Math.min(workedMinutes, endBalanceMinutes)),
+    rawOvertimeMinutes: calculateEligibleOvertime(
+      checkInAt,
+      checkOutAt,
+      scheduledEndAt,
+    ),
     // Lateness already includes any arrival delay after shift end. Subtract it
     // from the end balance once, while never crediting more time than worked.
     overtimeMinutes: Math.min(

@@ -47,8 +47,11 @@ export function PdfDownloadButton({
         !response.headers.get("Content-Type")?.includes("application/pdf")
       ) {
         const body = await response.json().catch(() => null);
-        signalAccessFailure(response.status, body?.error?.code || "");
-        throw new Error(t("pdfFailed"));
+        const code =
+          typeof body?.error?.code === "string" ? body.error.code : "";
+        signalAccessFailure(response.status, code);
+        // Localize recognized API codes without displaying arbitrary server text.
+        throw Object.assign(new Error(), { code });
       }
       const blob = await response.blob();
       if (controller.signal.aborted) return;

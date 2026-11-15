@@ -241,7 +241,7 @@ export function AdminDashboard() {
                   format: "time",
                 },
                 {
-                  key: "overtimeMinutes",
+                  key: "approvedOvertimeMinutes",
                   label: t("labels.overtime"),
                   format: "overtime-duration",
                 },
@@ -278,9 +278,19 @@ const getReportColumns = (t: AdminTranslator) => [
     format: "duration" as const,
   },
   {
-    key: "overtimeMinutes",
+    key: "approvedOvertimeMinutes",
     label: t("labels.overtime"),
     format: "overtime-duration" as const,
+  },
+  {
+    key: "requestedOvertimeMinutes",
+    label: t("labels.requestedOvertime"),
+    format: "nullable-duration" as const,
+  },
+  {
+    key: "overtimeRequestStatus",
+    label: t("labels.overtimeRequestStatus"),
+    format: "badge" as const,
   },
   { key: "lateMinutes", label: t("labels.actualLate") },
   {

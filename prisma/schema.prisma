@@ -35,6 +35,11 @@ enum LateApprovalStatus {
   APPROVED
   REJECTED
 }
+enum OvertimeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
 enum ChallengePurpose {
   REGISTRATION
   CHECK_IN
@@ -93,6 +98,7 @@ model User {
   companyMoneyMutationReceipts CompanyMoneyMutationReceipt[]
   dailyExpenseTransactions DailyExpenseTransaction[]
   reviewedLateApprovals LateApprovalRequest[]
+  reviewedOvertimeRequests OvertimeRequest[]
   salarySettingRevisions SalarySetting[]
 }
 model Account {
@@ -289,6 +295,7 @@ model Attendance {
   shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   events AttendanceEvent[]
   lateApproval LateApprovalRequest?
+  overtimeRequest OvertimeRequest?
   @@unique([employeeId, attendanceDate])
   @@index([officeId, attendanceDate])
   @@index([status, attendanceDate])
@@ -311,6 +318,27 @@ model LateApprovalRequest {
   attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
   reviewedBy User? @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
   @@index([status, requestedAt(sort: Desc), id(sort: Desc)])
+  @@index([reviewedById])
+}
+model OvertimeRequest {
+  id String @id @default(cuid())
+  attendanceId String @unique
+  status OvertimeRequestStatus @default(PENDING)
+  /// Immutable attendance facts; a decision never applies to corrected punches.
+  checkInAt DateTime
+  scheduledEndAt DateTime
+  checkOutAt DateTime
+  requestedMinutes Int
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reviewedById String?
+  reviewedAt DateTime?
+  rejectionReason String? @db.VarChar(1000)
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  reviewedBy User? @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([reviewedById])
 }
 model AttendanceEvent {

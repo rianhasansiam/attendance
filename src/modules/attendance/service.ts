@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { DomainError } from "@/lib/errors";
+import { writeAudit } from "@/modules/audit/service";
 import { measureServerTiming, type ServerTiming } from "@/lib/server-timing";
 import { locationSchema, verifyGeofence } from "@/modules/geofence/service";
 import {
@@ -26,6 +27,10 @@ import {
 } from "@/modules/webauthn/service";
 import { authenticationResponseSchema } from "@/modules/webauthn/validation";
 import { resolveAttendancePolicy } from "./policy";
+import {
+  calculateEligibleOvertime,
+  MINIMUM_ELIGIBLE_OVERTIME_MINUTES,
+} from "./overtime-policy";
 
 export const attendanceEvidenceSchema = z
   .object({
@@ -34,7 +39,21 @@ export const attendanceEvidenceSchema = z
     location: locationSchema.optional(),
   })
   .strict();
-export type AttendanceEvidence = z.infer<typeof attendanceEvidenceSchema>;
+export const checkoutEvidenceSchema = attendanceEvidenceSchema.extend({
+  attendanceId: z.string().trim().min(1).max(100),
+  overtimeReason: z
+    .string()
+    .trim()
+    .min(10)
+    .max(1000)
+    .refine((value) => Array.from(value).length >= 10, {
+      message: "Provide an overtime reason of at least 10 characters.",
+    })
+    .optional(),
+});
+export type AttendanceEvidence =
+  | z.infer<typeof attendanceEvidenceSchema>
+  | z.infer<typeof checkoutEvidenceSchema>;
 export type AttendanceAction = "CHECK_IN" | "CHECK_OUT";
 
 export const lateReasonSchema = z
@@ -200,6 +219,54 @@ export function resolveShiftAssignment(
   });
 }
 
+/** An informational preview. The final locked write uses its own server time. */
+export async function previewCheckout(actor: EmployeeActor) {
+  const attendance = await db.attendance.findFirst({
+    where: {
+      employeeId: actor.employee.id,
+      checkInAt: { not: null },
+      checkOutAt: null,
+    },
+    select: {
+      id: true,
+      attendanceDate: true,
+      checkInAt: true,
+      checkOutAt: true,
+      scheduledEndAt: true,
+      shift: true,
+    },
+  });
+  assertAttendanceState("CHECK_OUT", attendance);
+  const serverTime = new Date();
+  const scheduledEndAt =
+    attendance!.scheduledEndAt ??
+    getShiftWindow(
+      serverTime,
+      attendance!.shift,
+      attendance!.attendanceDate.toISOString().slice(0, 10),
+    ).endsAt;
+  const extraMinutes = calculateEligibleOvertime(
+    attendance!.checkInAt!,
+    serverTime,
+    scheduledEndAt,
+  );
+  if (extraMinutes === null)
+    throw new DomainError(
+      "NO_ACTIVE_SHIFT",
+      "A valid duty schedule is required before checking out.",
+      409,
+    );
+  return {
+    attendanceId: attendance!.id,
+    employeeName: actor.name || actor.email,
+    scheduledEndAt,
+    serverTime,
+    extraMinutes,
+    eligible: extraMinutes >= MINIMUM_ELIGIBLE_OVERTIME_MINUTES,
+    timezone: attendance!.shift.timezone,
+  };
+}
+
 export async function recordAttendance(
   actor: EmployeeActor,
   action: AttendanceAction,
@@ -209,6 +276,9 @@ export async function recordAttendance(
 ) {
   const ip = extractClientIp(headers, getEnv());
   try {
+    const checkout =
+      action === "CHECK_OUT" ? checkoutEvidenceSchema.parse(evidence) : null;
+    evidence = checkout ?? attendanceEvidenceSchema.parse(evidence);
     const initialOffice = await measureServerTiming(
       timing,
       "initial_policy",
@@ -312,7 +382,7 @@ export async function recordAttendance(
                       checkInAt: { not: null },
                       checkOutAt: null,
                     },
-                    include: { shift: true },
+                    include: { shift: true, overtimeRequest: true },
                   }),
               );
               if (action === "CHECK_IN" && openAttendance)
@@ -323,6 +393,12 @@ export async function recordAttendance(
                 );
               if (action === "CHECK_OUT")
                 assertAttendanceState(action, openAttendance);
+              if (checkout && checkout.attendanceId !== openAttendance!.id)
+                throw new DomainError(
+                  "ATTENDANCE_CHANGED",
+                  "Your active attendance changed. Refresh and try checkout again.",
+                  409,
+                );
               const assignment = resolveShiftAssignment(employee.shifts, now);
               const shift =
                 action === "CHECK_OUT"
@@ -357,6 +433,34 @@ export async function recordAttendance(
                         }),
                     );
               assertAttendanceState(action, existing);
+              const requestedMinutes = checkout
+                ? calculateEligibleOvertime(
+                    existing!.checkInAt!,
+                    now,
+                    existing!.scheduledEndAt ?? window.endsAt,
+                  )
+                : null;
+              if (checkout && requestedMinutes === null)
+                throw new DomainError(
+                  "NO_ACTIVE_SHIFT",
+                  "A valid duty schedule is required before checking out.",
+                  409,
+                );
+              const requestOvertime =
+                requestedMinutes !== null &&
+                requestedMinutes >= MINIMUM_ELIGIBLE_OVERTIME_MINUTES;
+              if (requestOvertime && !checkout?.overtimeReason)
+                throw new DomainError(
+                  "OVERTIME_REASON_REQUIRED",
+                  "Provide an overtime reason before checking out.",
+                  409,
+                );
+              if (requestOvertime && openAttendance?.overtimeRequest)
+                throw new DomainError(
+                  "OVERTIME_ALREADY_REQUESTED",
+                  "This attendance already has an overtime request. Ask a super administrator to complete the attendance correction.",
+                  409,
+                );
               const { credentialId, distance } = await measureServerTiming(
                 timing,
                 "verification",
@@ -455,9 +559,42 @@ export async function recordAttendance(
                           existing!.lateMinutes,
                           existing!.scheduledEndAt ?? window.endsAt,
                         ),
+                        ...(requestOvertime
+                          ? {
+                              overtimeRequest: {
+                                create: {
+                                  checkInAt: existing!.checkInAt!,
+                                  scheduledEndAt:
+                                    existing!.scheduledEndAt ?? window.endsAt,
+                                  checkOutAt: now,
+                                  requestedMinutes: requestedMinutes!,
+                                  reason: checkout!.overtimeReason!,
+                                },
+                              },
+                            }
+                          : {}),
                       },
                       select: attendanceDisplaySelect,
                     });
+                  }
+                  if (requestOvertime && record.overtimeRequest) {
+                    await tx.attendanceEvent.create({
+                      data: {
+                        employeeId: employee.id,
+                        attendanceId: record.id,
+                        type: "OVERTIME_REQUESTED",
+                        metadata: { requestId: record.overtimeRequest.id },
+                      },
+                    });
+                    await writeAudit(
+                      actor.id,
+                      "OVERTIME_REQUESTED",
+                      "OvertimeRequest",
+                      record.overtimeRequest.id,
+                      undefined,
+                      record.overtimeRequest,
+                      tx,
+                    );
                   }
                   await tx.attendanceEvent.create({
                     data: {
@@ -637,13 +774,18 @@ export async function employeeDashboard(
       ? sanitizeAttendance(record)
       : {
           attendanceDate: day,
-          status: fallbackStatus,
           checkInAt: null,
           checkOutAt: null,
           lateMinutes: 0,
           lateReason: null,
           workedMinutes: 0,
-          overtimeMinutes: 0,
+          ...attendanceOutcome({
+            status: fallbackStatus,
+            checkInAt: null,
+            checkOutAt: null,
+            lateMinutes: 0,
+            overtimeMinutes: 0,
+          }),
         },
     recent: records.map(sanitizeAttendance),
     devices,

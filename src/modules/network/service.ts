@@ -25,16 +25,6 @@ export function matchesNetwork(ip: string, network: string): boolean {
   }
 }
 
-export function isValidNetwork(network: string): boolean {
-  try {
-    if (network.includes("/")) ipaddr.parseCIDR(network);
-    else if (!normalizeIp(network)) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export interface ProxyConfiguration {
   TRUSTED_PROXY_MODE: string;
   TRUSTED_PROXY_SECRET?: string;

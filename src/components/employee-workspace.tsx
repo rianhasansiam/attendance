@@ -68,12 +68,15 @@ import {
 } from "@/store/features/leave/api";
 import {
   recordAttendance,
+  readCheckoutPreview,
   registerDevice,
   UncertainCeremonyError,
   isAmbiguousWrite,
+  type CheckoutInput,
 } from "@/lib/client/attendance-ceremony";
 import { useUrlFilters, pageFromSearch } from "@/lib/client/use-url-filters";
 import { LateReasonDialog } from "./late-reason-dialog";
+import { OvertimeReasonDialog } from "./overtime-reason-dialog";
 import {
   beginAttendanceTiming,
   type AttendanceTimingTrace,
@@ -83,7 +86,10 @@ import {
   recoveredAttendance,
   type AttendanceIntent,
 } from "@/lib/client/attendance-recovery";
-import type { AttendanceRecord } from "@/store/features/attendance/contracts";
+import type {
+  AttendanceRecord,
+  CheckoutPreview,
+} from "@/store/features/attendance/contracts";
 
 type AttendanceAttempt = {
   controller: AbortController;
@@ -111,9 +117,19 @@ function useAttendanceColumns() {
       format: "duration" as const,
     },
     {
-      key: "overtimeMinutes",
-      label: t("columns.overtime"),
+      key: "approvedOvertimeMinutes",
+      label: t("columns.approvedOvertime"),
       format: "overtime-duration" as const,
+    },
+    {
+      key: "requestedOvertimeMinutes",
+      label: t("columns.requestedOvertime"),
+      format: "nullable-duration" as const,
+    },
+    {
+      key: "overtimeRequestStatus",
+      label: t("columns.overtimeStatus"),
+      format: "badge" as const,
     },
     { key: "lateMinutes", label: t("columns.lateMinutes") },
     {
@@ -139,6 +155,8 @@ export function EmployeeDashboard() {
   const submitting = useRef(false);
   const attempt = useRef<AttendanceAttempt | null>(null);
   const recovery = useRef<AttendanceAttempt | null>(null);
+  const [checkoutPreview, setCheckoutPreview] =
+    useState<CheckoutPreview | null>(null);
   const [busy, setBusy] = useEmployeeMessage();
   useEffect(
     () => () => {
@@ -148,6 +166,7 @@ export function EmployeeDashboard() {
       // Clear transient work so a revealed dashboard is not stuck as busy.
       submitting.current = false;
       setBusy("");
+      setCheckoutPreview(null);
     },
     [setBusy],
   );
@@ -178,7 +197,7 @@ export function EmployeeDashboard() {
       current.timing.finish(outcome);
     }
   }, [visibleConfirmation, busy, data?.today, store]);
-  async function refreshDay() {
+  async function refreshDay(forceFresh = false) {
     let pending = recovery.current;
     if (
       pending?.controller.signal.aborted &&
@@ -198,7 +217,7 @@ export function EmployeeDashboard() {
     if (pending && !isCurrent(pending)) return;
     if (pending) setBusy("dashboard.checking");
     try {
-      if (pending) {
+      if (pending || forceFresh) {
         // A read that began before the uncertain write is not a recovery read.
         const running = dispatch(
           attendanceApi.util.getRunningQueryThunk("employeeDay", undefined),
@@ -207,7 +226,7 @@ export function EmployeeDashboard() {
           running.abort();
           await running;
         }
-        if (!isCurrent(pending)) return;
+        if (pending && !isCurrent(pending)) return;
       }
       const read = () => refresh().unwrap();
       const day = pending
@@ -277,7 +296,9 @@ export function EmployeeDashboard() {
     [setSuccess],
   );
   const reasonDialog =
-    pendingReason && dismissedReasonId !== pendingReasonId ? (
+    pendingReason &&
+    dismissedReasonId !== pendingReasonId &&
+    !checkoutPreview ? (
       <LateReasonDialog
         key={pendingReasonId}
         attendance={pendingReason}
@@ -285,8 +306,31 @@ export function EmployeeDashboard() {
         onSaved={saveReason}
       />
     ) : null;
-  async function attend(action: "CHECK_IN" | "CHECK_OUT") {
-    if (submitting.current || needsReconcile || !data) return;
+  const overtimeDialog = checkoutPreview ? (
+    <OvertimeReasonDialog
+      key={`${checkoutPreview.attendanceId}:${checkoutPreview.serverTime}`}
+      preview={checkoutPreview}
+      error={actionError}
+      onClose={() => setCheckoutPreview(null)}
+      onSubmit={(reason) =>
+        attend("CHECK_OUT", {
+          attendanceId: checkoutPreview.attendanceId,
+          overtimeReason: reason,
+        })
+      }
+    />
+  ) : null;
+  async function attend(
+    action: "CHECK_IN" | "CHECK_OUT",
+    checkout?: CheckoutInput,
+  ) {
+    if (
+      submitting.current ||
+      needsReconcile ||
+      !data ||
+      (checkoutPreview && !checkout)
+    )
+      return;
     const timing = beginAttendanceTiming(action);
     setActionError("");
     setSuccess("");
@@ -305,8 +349,30 @@ export function EmployeeDashboard() {
     attempt.current = current;
     setBusy("ceremony.preparing");
     try {
+      if (action === "CHECK_OUT") {
+        if (!checkout) {
+          const preview = await readCheckoutPreview(controller.signal);
+          if (!isCurrent(current)) return;
+          if (preview.attendanceId !== current.intent.before?.id) {
+            await refreshDay(true);
+            if (isCurrent(current))
+              setActionError({ key: "overtimeReason.changed" });
+            timing.finish("failed");
+            return;
+          }
+          if (preview.eligible) {
+            setCheckoutPreview(preview);
+            timing.finish("cancelled");
+            return;
+          }
+          checkout = { attendanceId: preview.attendanceId };
+        }
+        // Collect a fresh passkey challenge and GPS only after the reason is ready.
+        setCheckoutPreview(null);
+      }
       const record = await recordAttendance({
         action,
+        checkout,
         timing,
         progress: (message) => {
           if (isCurrent(current)) setBusy(message);
@@ -324,7 +390,11 @@ export function EmployeeDashboard() {
       if (!applied || !isCurrent(current)) return;
       if (action === "CHECK_IN") setDismissedReasonId("");
       setSuccess(
-        action === "CHECK_IN" ? "dashboard.checkedIn" : "dashboard.checkedOut",
+        action === "CHECK_IN"
+          ? "dashboard.checkedIn"
+          : record.overtimeRequestStatus === "PENDING"
+            ? "overtimeReason.submitted"
+            : "dashboard.checkedOut",
       );
       setVisibleConfirmation({
         record,
@@ -342,7 +412,30 @@ export function EmployeeDashboard() {
         recovery.current = current;
         setNeedsReconcile(true);
         await refreshDay();
-      } else timing.finish("failed");
+      } else {
+        timing.finish("failed");
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? error.code
+            : "";
+        if (action === "CHECK_OUT" && code === "OVERTIME_REASON_REQUIRED") {
+          try {
+            const preview = await readCheckoutPreview(controller.signal);
+            if (isCurrent(current)) {
+              setCheckoutPreview(preview);
+              setActionError("");
+            }
+          } catch (previewError) {
+            if (isCurrent(current)) setActionError(previewError);
+          }
+        } else if (
+          action === "CHECK_OUT" &&
+          ["ATTENDANCE_CHANGED", "NOT_CHECKED_IN"].includes(String(code))
+        ) {
+          setCheckoutPreview(null);
+          await refreshDay(true);
+        }
+      }
     } finally {
       if (attempt.current === current) {
         submitting.current = false;
@@ -354,6 +447,7 @@ export function EmployeeDashboard() {
     return (
       <>
         {reasonDialog}
+        {overtimeDialog}
         <Loading />
       </>
     );
@@ -367,6 +461,7 @@ export function EmployeeDashboard() {
         <ErrorNotice message={error} />
         <Refresh onClick={() => void refreshDay()} />
         {reasonDialog}
+        {overtimeDialog}
       </>
     );
   const office = data.employee.office as DataRow;
@@ -415,6 +510,7 @@ export function EmployeeDashboard() {
         </div>
       )}
       {reasonDialog}
+      {overtimeDialog}
       <div className="content-grid">
         <div className="checkin-card">
           <p className="eyebrow">

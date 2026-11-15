@@ -1,19 +1,13 @@
 # Architecture and implementation map
 
-For the current Redux/RTK Query data flow, cache ownership, authentication cleanup and verification, see [State management and data flow](state-management.md) and the [state audit](state-audit.md). The baseline below records the original application implementation.
+For Redux/RTK Query data flow, cache ownership and authentication cleanup, see [State management and data flow](state-management.md).
 
-## Baseline inspection
-
-The repository began as an untouched Next.js 16.3.5 App Router starter, React 19.2.8, strict TypeScript, Tailwind CSS 4, ESLint 9, and pnpm 12. It had no database, models, authentication, routes, or business modules. The supplied plan is `implimentation_plan.md` (the filename has a spelling difference from the request). Existing working functionality was limited to the starter page.
-
-## Changes and module boundaries
-
-Replace the starter `app/` with `src/app/` and update the TypeScript alias, package scripts, dependency lock, Next configuration, README, and ignore rules. Add:
+## Module boundaries
 
 ```text
 src/
   app/                  Server pages, client presentation, thin API routes
-    login/              Google-only authentication
+    login/              Google and application-password authentication
     employee/           Dashboard, history, devices, profile, leave
     admin/              Dashboard, management, reports, audit, settings
     api/                Auth.js, attendance, WebAuthn, admin and employee endpoints
@@ -27,17 +21,16 @@ src/
     geofence/           Haversine and accuracy verification
     network/            Authenticated ingress and CIDR matching
     webauthn/           Registration, assertion and single-use challenge storage
-    reports/            Derived day statuses and CSV/Excel export
+    reports/            Derived day statuses and PDF export
     audit/              Transactional structured audit writes
   lib/                  Lazy DB, configuration, authorization, errors, API, rate limits
-  auth.ts               Google provider, restricted Prisma adapter and DB sessions
+  auth.ts               Auth.js providers and session integration
 prisma/                 Schema, initial migration and authorized admin seed
 scripts/                Expired security-state maintenance
-tests/                  Domain, integration and browser checks
 ops/                    Nginx and systemd deployment examples
 ```
 
-The dependency set adds Auth.js, Prisma PostgreSQL adapter, Zod, SimpleWebAuthn, IP/CIDR utilities, timezone date utilities, and ExcelJS. Vitest and Playwright handle verification. Prisma CLI/client/adapter use compatible 7.10 versions; the registry's Prisma 8 release candidate is deliberately not used. Auth.js's v5 integration is currently distributed with the `beta` version label and is pinned in package.json/lockfile; evaluate upstream release notes during upgrades.
+The application uses Auth.js, Prisma with the PostgreSQL adapter, Zod, SimpleWebAuthn, IP/CIDR and timezone utilities, Redux Toolkit, PDFKit, and DOCX generation. Package versions and the resolved dependency graph are recorded in `package.json` and `pnpm-lock.yaml`.
 
 ## Data design
 
@@ -47,7 +40,7 @@ The migration adds SQL checks, one-open-attendance partial uniqueness and immuta
 
 ## Identity and authorization
 
-Google OAuth (PKCE, state, nonce) establishes verified email and subject. A centralized policy checks an existing local user, ACTIVE status, subject binding and optional Google Workspace `hd` plus email domain. Public user creation is disabled at adapter level. Only a verified Google identity can link to a pre-provisioned email; no password, OTP, magic link or passkey login provider exists. Google tokens are discarded after authentication. Database sessions have a seven-day lifetime, with activity-based renewal writes throttled to once per hour and secure HttpOnly/SameSite cookies managed by Auth.js. Session responses use an explicit public field allowlist.
+Auth.js supports Google OAuth and optional application passwords for pre-provisioned accounts. Google linking requires the authorized local email, a verified Google identity, and the configured Workspace domain when present. Public registration is disabled. The JWT session strategy stores a session ID backed by the database revocation registry; roles and account status are read from the database. Session responses use an explicit public field allowlist. See [Application passwords](application-passwords.md) for identity, session and password rules.
 
 Every protected request re-reads the user and current role. Employee, admin and super-admin helpers are centralized. Management updates invalidate sessions on email/status/role changes. Elevated roles and global settings require super-admin permissions. Client navigation is convenience only.
 
@@ -64,7 +57,3 @@ Browser inputs are evidence, never authoritative flags. Strict Zod objects rejec
 A browser-reported GPS position can be spoofed. Passkeys can synchronize between devices; an approved credential is not proof of unique physical hardware. Cryptographic user verification proves control of the passkey, not a specific biometric. The combined policy reduces abuse but cannot guarantee physical presence against a fully compromised endpoint. Configure appropriate operational review and approval practices.
 
 Security headers include a baseline CSP; Next.js hydration currently needs inline scripts/styles. A deployment requiring a stricter nonce CSP should add per-request nonces and validate all routes. GPS/IP evidence and employee records are sensitive operational data: restrict database access, define retention, encrypt backups and do not publicly cache protected responses.
-
-## Implementation and verification order
-
-Inspection and framework guide review → schema and migration → configuration/Auth.js/RBAC → management and core domain modules → WebAuthn/GPS/network pipeline → transactional check-in/out → responsive dashboards and reports → security tests → PWA → VPS deployment instructions. Validation includes TypeScript, ESLint, Vitest, schema validation, a production build, fresh PostgreSQL migration, actual concurrency tests and browser smoke checks. Live Google OAuth and physical authenticator acceptance require deployment credentials and a user device.

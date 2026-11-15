@@ -11,6 +11,12 @@ export type AttendanceRecord = {
   isExcusedLate?: boolean;
   lateApprovalStatus?: "PENDING" | "APPROVED" | "REJECTED" | null;
   rawOvertimeMinutes?: number | null;
+  approvedOvertimeMinutes: number;
+  requestedOvertimeMinutes: number | null;
+  overtimeRequestStatus: OvertimeRequestStatus | null;
+  overtimeApprovalMatchesAttendance: boolean;
+  overtimeRequestId?: string | null;
+  overtimeRequestUpdatedAt?: string | null;
   lateMinutes: number;
   lateReason: string | null;
   workedMinutes: number;
@@ -25,6 +31,63 @@ export type DeviceMetadata = {
   deviceType: string;
   backedUp: boolean;
   createdAt: string;
+};
+
+export type CheckoutPreview = {
+  attendanceId: string;
+  employeeName: string;
+  scheduledEndAt: string;
+  serverTime: string;
+  extraMinutes: number;
+  eligible: boolean;
+  timezone: string;
+};
+
+export type OvertimeRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type OvertimeRequest = {
+  id: string;
+  attendanceId: string;
+  requestedMinutes: number;
+  reason: string;
+  checkInAt: string;
+  scheduledEndAt: string;
+  checkOutAt: string;
+  status: OvertimeRequestStatus;
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  reviewedBy: { id: string; name: string | null; email: string } | null;
+  matchesAttendance: boolean;
+  attendance: {
+    id: string;
+    attendanceDate: string;
+    checkInAt: string | null;
+    checkOutAt: string | null;
+    scheduledEndAt: string | null;
+    employee: {
+      id: string;
+      employeeCode: string;
+      user: { name: string | null; email: string };
+      department: { id: string; name: string } | null;
+    } | null;
+    shift: { timezone: string };
+  };
+};
+export type OvertimeRequestQuery = {
+  page: number;
+  pageSize: number;
+  status?: OvertimeRequestStatus;
+  search?: string;
+  from?: string;
+  to?: string;
+  departmentId?: string;
+};
+export type OvertimeRequestPage = {
+  items: OvertimeRequest[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 export type EmployeeDay = {

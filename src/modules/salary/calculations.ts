@@ -2,7 +2,6 @@ import { Prisma } from "@prisma/client";
 import {
   SALARY_MONTHLY_DIVISOR,
   salaryAmountSchema,
-  salaryMonthBounds,
   salaryRangeSchema,
 } from "./contracts";
 
@@ -84,8 +83,4 @@ export function countSalaryPayableDays(
     weekendDates,
     configuredWeekendDays: weekdays,
   };
-}
-
-export function payrollMonthBounds(period: string) {
-  return salaryMonthBounds(period);
 }

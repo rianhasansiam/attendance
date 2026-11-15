@@ -24,8 +24,7 @@ This follows the [next-intl App Router integration](https://next-intl.dev/docs/g
 | `src/app/*`, `src/components/*`, `src/store/use-query-view.ts`        | Localized layouts, authentication, workspaces, forms, feedback, query errors, accessibility labels, dates, and numbers.      |
 | `src/modules/reports/*`, expense report modules and API routes        | Locale-aware human-readable PDF exports while preserving JSON/data contracts.                                                |
 | `src/assets/fonts/NotoSansCJKsc-Regular.otf`, accompanying license    | Server-only Chinese PDF glyphs, alongside existing Latin/Bengali fonts.                                                      |
-| `tests/*`, `tests/e2e/localization.spec.ts`                           | Dictionary, fallback, formatting, error, export, state-preservation, and browser regression coverage.                        |
-| `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`               | Compatible `next-intl`, ICU validation parser, and explicit optional build-script settings.                                  |
+| `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`               | Compatible `next-intl` and explicit optional build-script settings.                                  |
 
 ## Editing translations
 
@@ -35,11 +34,11 @@ Translations live in matching JSON files under `messages/en/` and `messages/zh-C
 2. Use `useTranslations("namespace")` in client/shared components or `await getTranslations("namespace")` in async Server Components. Keep complete sentences together and interpolate dynamic values.
 3. Use ICU plurals/selects when grammar or status varies. Keep interpolation names identical in both dictionaries.
 4. Keep stored names, notes, custom categories, addresses, API identifiers, enum values, and audit JSON unchanged. Translate only display labels.
-5. Run `pnpm exec vitest run tests/localization.test.ts` and `pnpm typecheck`. Typed keys are declared in `src/i18n/types.d.ts`.
+5. Run `pnpm typecheck` and review both languages in the affected interface. Typed keys are declared in `src/i18n/types.d.ts`.
 
 When adding an entirely new namespace, register it in `src/i18n/messages.ts`, the type declaration, and the relevant `FeatureMessages` provider. Keep feature dictionaries out of the shared login payload.
 
-The loader explicitly merges missing Chinese entries with English and logs the missing paths during development. Tests compare all keys and parsed ICU arguments, reject empty messages, and validate ICU syntax. A missing message never renders a raw key; the runtime error handler provides a safe English fallback if both dictionaries lack a key.
+The loader explicitly merges missing Chinese entries with English and logs the missing paths during development. A missing message never renders a raw key; the runtime error handler provides a safe English fallback if both dictionaries lack a key.
 
 API errors use an allowlist of public messages and stable error codes in `src/i18n/errors.ts`. Unknown internal errors display a generic localized message. Add new public error translations to `common.errors` or `common.validation`; do not surface arbitrary server exception text.
 
@@ -55,33 +54,4 @@ Browser date pickers, native HTML validation bubbles, password-manager UI, biome
 
 If local switching works but production displays “Could not change the language”, inspect the `POST /api/locale` response. A `403` with `INVALID_ORIGIN` means the request's browser origin did not pass validation. The original locale handler compared against Next.js's internal request URL, which rejected valid public origins behind the documented Nginx/loopback deployment. The corrected handler uses `AUTH_URL`.
 
-Deploy the updated application code, rebuild with `pnpm build`, and restart the application through the existing deployment process. Confirm the production process's `AUTH_URL` is its public HTTPS origin (for example, `https://attendance.example.com`), matching `WEBAUTHN_ORIGIN` as required by the existing environment validator. This fix needs no database migration or Nginx configuration change. Regression tests cover proxy requests, secure cookies behind TLS termination, local HTTP, and rejected foreign/forged origins.
-
-The proxy regression reproduced five failures before the fix. After the fix, `pnpm exec vitest run tests/localization.test.ts` passed all 21 tests. `pnpm test` passed 1,056 tests, with 197 database tests intentionally skipped because no test database was configured for this follow-up. `pnpm lint`, `pnpm typecheck`, `pnpm format:check`, and `pnpm build` also passed. A local production server on `127.0.0.1:3117` accepted both language updates with simulated Nginx headers and the configured public HTTPS origin, emitted secure cookies, rendered the corresponding HTML language on the next request, and rejected a forged foreign origin. That smoke check used dummy configuration and no database connection. The actual production server was not changed or inspected.
-
-## Verification
-
-Automated coverage includes dictionary/ICU completeness, explicit fallback, locale allowlisting and cookie attributes, safe error mapping, preserved financial amounts/timezones/overtime, live form and feedback translation, PDF text/glyph bounds, and browser language persistence/state/authorization on desktop and mobile.
-
-Browser and database integration tests require a disposable PostgreSQL database whose name includes `test`. They must not use the application's production database. See the main README for database setup and the test commands.
-
-### Validation record — 2026-09-28
-
-The following checks were actually run. Database tests used two separate databases in a disposable local PostgreSQL cluster on port `55479`; the production database and `.env` were not changed. Existing migrations were applied only to these test databases. No deployment or new schema migration was performed. The temporary database and browser test servers were stopped after validation.
-
-| Exact command                                                                                    | Final result                                                                          |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `pnpm install --frozen-lockfile`                                                                 | Passed; no `--force` or `--legacy-peer-deps` used.                                    |
-| `pnpm lint`                                                                                      | Passed, no lint errors or warnings.                                                   |
-| `pnpm typecheck`                                                                                 | Passed, route generation and TypeScript checks.                                       |
-| `pnpm format:check`                                                                              | Passed.                                                                               |
-| `pnpm db:validate`                                                                               | Passed.                                                                               |
-| `pnpm build`                                                                                     | Passed, production compilation and route generation.                                  |
-| `TEST_DATABASE_URL='postgresql://i18n_test@127.0.0.1:55479/attendance_i18n_unit_test' pnpm test` | Passed: 93 suites, 1,246 tests, no skipped tests.                                     |
-| `TEST_DATABASE_URL='postgresql://i18n_test@127.0.0.1:55479/attendance_i18n_test' pnpm test:e2e`  | Passed: 101 browser tests, including all 16 localization scenarios; no skipped tests. |
-| `pnpm exec prettier --check docs/localization.md messages/**/*.json`                             | Passed.                                                                               |
-| `git diff --check`                                                                               | Passed.                                                                               |
-
-PDF verification included automated text/glyph and page-bound checks plus visual inspection of English/Chinese reports with Bengali user content and a long Chinese entry spanning three pages. Browser screenshots covered representative desktop/mobile login, reports, navigation, and employee screens in both languages.
-
-Non-failing diagnostics included Node experimental Web Crypto warnings and PostgreSQL client deprecation warnings. Next.js development validation also logged `NEXT_REDIRECT` diagnostics for intentionally denied admin navigation; the browser authorization and runtime-error checks passed, and production builds completed. Framework validation has not been disabled.
+Deploy the updated application code, rebuild with `pnpm build`, and restart the application through the existing deployment process. Confirm the production process's `AUTH_URL` is its public HTTPS origin (for example, `https://attendance.example.com`), matching `WEBAUTHN_ORIGIN` as required by the existing environment validator. This fix needs no database migration or Nginx configuration change.

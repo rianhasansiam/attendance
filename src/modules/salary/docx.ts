@@ -111,7 +111,16 @@ function status(row: SalaryAttendanceDTO) {
     WEEKEND: "Weekend",
   };
   const label = labels[row.status] ?? row.status;
-  return row.isExcusedLate ? `${label}\nLate arrival excused` : label;
+  const notes = [label];
+  if (row.isExcusedLate) notes.push("Late arrival excused");
+  if (row.overtimeRequestStatus) {
+    notes.push(
+      `Overtime ${row.overtimeRequestStatus.toLowerCase()}: ${duration(row.requestedOvertimeMinutes ?? 0)} requested, ${duration(row.approvedOvertimeMinutes)} approved`,
+    );
+    if (!row.overtimeApprovalMatchesAttendance)
+      notes.push("Approval no longer matches attendance");
+  }
+  return notes.join("\n");
 }
 
 function cell(
@@ -500,7 +509,7 @@ export async function salaryStatementDocx(
       },
     ),
     text(
-      `Office weekends: ${weekendNames}. Excluded from base pay. Payable overtime includes all selected attendance records.`,
+      `Office weekends: ${weekendNames}. Excluded from base pay. Payable overtime uses matching Super Admin approvals, then deducts existing late and completed-workday shortages across the selected attendance records. Pending, rejected and historical unapproved requests earn no overtime credit.`,
       { spacing: { after: 90 } },
     ),
     text(
@@ -513,7 +522,7 @@ export async function salaryStatementDocx(
   if (data.payableOvertimeMinutes < 0)
     children.push(
       text(
-        "The payable overtime balance includes the attendance system's existing signed time adjustments.",
+        "Attendance deductions exceed approved overtime credit in this date range, producing a negative payable overtime balance.",
         { spacing: { after: 100 } },
       ),
     );

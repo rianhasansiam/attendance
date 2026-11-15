@@ -9,6 +9,9 @@ import type {
   LateApprovalPage,
   LateApprovalQuery,
   LateApprovalRequest,
+  OvertimeRequest,
+  OvertimeRequestPage,
+  OvertimeRequestQuery,
 } from "./contracts";
 
 // Derived from attendance/service, reports/service, and management/workflows.
@@ -19,6 +22,8 @@ export const attendanceChangedTags = [
   { type: "Management", id: "events:LIST" },
   "Reports",
   "Audit",
+  "OvertimeRequests",
+  "Salary",
 ] as const;
 export const devicesChangedTags = ["Devices", "Attendance", "Audit"] as const;
 
@@ -93,7 +98,40 @@ export const attendanceApi = baseApi.injectEndpoints({
       invalidatesTags: (_result, error) =>
         error
           ? []
-          : ["LateApprovals", "Attendance", "Dashboard", "Reports", "Audit"],
+          : [
+              "LateApprovals",
+              "Attendance",
+              "Dashboard",
+              "Reports",
+              "Salary",
+              "Audit",
+            ],
+    }),
+    overtimeRequests: build.query<OvertimeRequestPage, OvertimeRequestQuery>({
+      query: (params) => ({ url: "/api/admin/overtime-requests", params }),
+      providesTags: ["OvertimeRequests"],
+    }),
+    reviewOvertimeRequest: build.mutation<
+      OvertimeRequest,
+      { id: string; status: "APPROVED" | "REJECTED"; rejectionReason?: string }
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/api/admin/overtime-requests/${encodeURIComponent(id)}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: (_result, error) =>
+        error
+          ? []
+          : [
+              "OvertimeRequests",
+              "Attendance",
+              "Dashboard",
+              "Reports",
+              "Salary",
+              "Audit",
+              { type: "Management", id: "events:LIST" },
+            ],
     }),
   }),
 });
@@ -129,6 +167,13 @@ function displayRecord(record: AttendanceRecord): AttendanceRecord {
     lateReason: record.lateReason,
     workedMinutes: record.workedMinutes,
     overtimeMinutes: record.overtimeMinutes,
+    approvedOvertimeMinutes: record.approvedOvertimeMinutes ?? 0,
+    requestedOvertimeMinutes: record.requestedOvertimeMinutes ?? null,
+    overtimeRequestStatus: record.overtimeRequestStatus ?? null,
+    overtimeApprovalMatchesAttendance:
+      record.overtimeApprovalMatchesAttendance ?? false,
+    overtimeRequestId: record.overtimeRequestId ?? null,
+    overtimeRequestUpdatedAt: record.overtimeRequestUpdatedAt ?? null,
   };
 }
 
@@ -220,4 +265,6 @@ export const {
   useSaveLateReasonMutation,
   useLateApprovalsQuery,
   useReviewLateApprovalMutation,
+  useOvertimeRequestsQuery,
+  useReviewOvertimeRequestMutation,
 } = attendanceApi;

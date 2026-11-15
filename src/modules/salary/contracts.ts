@@ -195,6 +195,10 @@ export type SalaryAttendanceDTO = {
   checkInAt: string | null;
   checkOutAt: string | null;
   workedMinutes: number;
+  requestedOvertimeMinutes: number | null;
+  approvedOvertimeMinutes: number;
+  overtimeRequestStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
+  overtimeApprovalMatchesAttendance: boolean;
   payableOvertimeMinutes: number;
   status: string;
   actualStatus: string;

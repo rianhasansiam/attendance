@@ -42,6 +42,12 @@ const adminNavigation = [
   { label: "employees", href: "employees", icon: Users },
   { label: "attendance", href: "attendance", icon: CalendarCheck2 },
   { label: "lateApprovals", href: "late-approvals", icon: Clock3 },
+  {
+    label: "overtimeRequests",
+    href: "overtime-requests",
+    icon: Clock3,
+    canAccess: (role: string) => role === "SUPER_ADMIN",
+  },
   { label: "reports", href: "reports", icon: ChartNoAxesCombined },
   { label: "driveCost", href: "drive-cost", icon: CarFront },
   { label: "companyMoney", href: "company-money", icon: Landmark },

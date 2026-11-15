@@ -46,10 +46,8 @@ Only the configured trusted Nginx ingress may supply `x-real-ip`; arbitrary forw
 
 Password sign-in does not replace attendance verification. Attendance still requires a live session, eligible account, session-bound challenge, passkey, approved device, and the configured location and office-network checks. The account may have a Google binding or an application password; all required attendance evidence is unchanged.
 
-## Deployment and validation
+## Deployment
 
 The existing `20260926130000_application_passwords` migration provides nullable `User.passwordHash`. Password-recovery removal and the updated employee creation flow need no new database migration. Keep the historical `PasswordResetToken` model and table for compatibility with existing migrations, cleanup and account deletion. No public handler can issue or consume those tokens.
 
 Install the updated lockfile, regenerate Prisma when required by your deployment, build, and restart all application instances so removed routes are no longer served. Argon2's native dependency remains required. Existing OAuth, origin, trusted-proxy and WebAuthn configuration remains required; SMTP variables are unused.
-
-Relevant tests cover credential login and Google linking, role checks, password policy and hashing, initial employee provisioning, current-password verification, session revocation, database throttling, and absence of the removed recovery pages and endpoints. Database and browser tests use a separate disposable test database. Live Google consent and physical authenticators require deployment-specific acceptance checks.

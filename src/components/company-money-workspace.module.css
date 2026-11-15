@@ -41,6 +41,29 @@
   margin-top: 16px;
 }
 
+.reportHeading {
+  display: grid;
+  gap: 6px;
+}
+
+.reportControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.reportControls > :global(.field) {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.reportControls > :global(.button),
+.reportControls > :last-child {
+  margin-top: 25px;
+}
+
 .rowActions {
   display: flex;
   justify-content: flex-end;
@@ -61,6 +84,20 @@
 }
 
 @media (max-width: 640px) {
+  .reportControls > :global(.field) {
+    flex-basis: 100%;
+  }
+
+  .reportControls > :global(.button),
+  .reportControls > :last-child {
+    flex: 1 1 140px;
+    margin-top: 0;
+  }
+
+  .reportControls > :last-child > :global(.button) {
+    width: 100%;
+  }
+
   .rowActions {
     flex-direction: column;
     align-items: stretch;

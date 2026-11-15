@@ -220,12 +220,17 @@ function attendanceDTO(record: ReportRecord): SalaryAttendanceDTO {
     checkInAt: record.checkInAt?.toISOString() ?? null,
     checkOutAt: record.checkOutAt?.toISOString() ?? null,
     workedMinutes: record.workedMinutes,
-    // Keep exactly the shared report policy, including its signed adjustments.
-    payableOvertimeMinutes: countedOvertimeMinutes(
-      record.overtimeMinutes,
-      record.lateMinutes,
-      record.checkInAt && record.checkOutAt ? record.workedMinutes : null,
-    ),
+    requestedOvertimeMinutes: record.requestedOvertimeMinutes,
+    approvedOvertimeMinutes: record.approvedOvertimeMinutes,
+    overtimeRequestStatus: record.overtimeRequestStatus,
+    overtimeApprovalMatchesAttendance: record.overtimeApprovalMatchesAttendance,
+    // Keep the same approved credit and attendance deductions as reports.
+    payableOvertimeMinutes: countedOvertimeMinutes({
+      approvedOvertimeMinutes: record.approvedOvertimeMinutes,
+      lateMinutes: record.lateMinutes,
+      completedWorkedMinutes:
+        record.checkInAt && record.checkOutAt ? record.workedMinutes : null,
+    }),
     status: record.status,
     actualStatus: record.actualStatus,
     lateMinutes: record.lateMinutes,
@@ -302,19 +307,6 @@ async function salarySources(
     const unknownOvertimeRecords = report.filter(
       (record) => record.overtimeMinutes === null,
     ).length;
-    if (
-      report.some(
-        (record) =>
-          record.overtimeMinutes === null &&
-          record.checkInAt &&
-          record.checkOutAt,
-      )
-    )
-      throw new DomainError(
-        "SALARY_OVERTIME_UNKNOWN",
-        `Completed attendance has unknown overtime for ${employee.employeeCode}. Correct the legacy attendance and recalculate before issuing a statement.`,
-        409,
-      );
     const attendance = report.map(attendanceDTO);
     const payableOvertimeMinutes = attendance.reduce(
       (total, row) => total + row.payableOvertimeMinutes,

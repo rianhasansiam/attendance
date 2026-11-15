@@ -28,10 +28,12 @@ function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
           width={1082}
           height={205}
           sizes="126px"
-      className={`${styles.wordmarkImage} m-auto`}
+          className={`${styles.wordmarkImage} m-auto`}
         />
       </span>
-      <span className={styles.brandTagline}>XianHao Yida Technology Co. Ltd.</span>
+      <span className={styles.brandTagline}>
+        XianHao Yida Technology Co. Ltd.
+      </span>
     </a>
   );
 }

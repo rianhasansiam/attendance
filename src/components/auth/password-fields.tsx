@@ -4,9 +4,6 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
-export const PASSWORD_HINT =
-  "Use 12–128 characters. Long passphrases are welcome.";
-
 export function validateNewPassword(password: string, confirmation: string) {
   if (password.length < 12 || password.length > 128)
     return "Use a password between 12 and 128 characters.";

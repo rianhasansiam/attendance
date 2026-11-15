@@ -16,6 +16,8 @@ type Domain =
   | "Reference"
   | "Attendance"
   | "LateApprovals"
+  | "OvertimeRequests"
+  | "Salary"
   | "Dashboard"
   | "Leave"
   | "Devices"
@@ -58,6 +60,8 @@ const dependencies: Partial<
       "Profile",
       "Attendance",
       "LateApprovals",
+      "OvertimeRequests",
+      "Salary",
       "Dashboard",
       "Reports",
       "Devices",
@@ -73,6 +77,8 @@ const dependencies: Partial<
       "Profile",
       "Attendance",
       "LateApprovals",
+      "OvertimeRequests",
+      "Salary",
       "Dashboard",
       "Reports",
       "Devices",
@@ -84,7 +90,7 @@ const dependencies: Partial<
   departments: {
     lists: ["employees", "assignments", "leaves", "events"],
     reference: "departments",
-    domains: ["Profile", "Dashboard", "Reports"],
+    domains: ["Profile", "OvertimeRequests", "Salary", "Dashboard", "Reports"],
   },
   offices: {
     lists: [
@@ -96,16 +102,38 @@ const dependencies: Partial<
       "events",
     ],
     reference: "offices",
-    domains: ["Profile", "Attendance", "Dashboard", "Reports"],
+    domains: [
+      "Profile",
+      "Attendance",
+      "OvertimeRequests",
+      "Salary",
+      "Dashboard",
+      "Reports",
+    ],
   },
   shifts: {
     lists: ["assignments", "employees"],
     reference: "shifts",
-    domains: ["Profile", "Attendance", "LateApprovals", "Dashboard", "Reports"],
+    domains: [
+      "Profile",
+      "Attendance",
+      "LateApprovals",
+      "OvertimeRequests",
+      "Salary",
+      "Dashboard",
+      "Reports",
+    ],
   },
   assignments: {
     lists: ["employees"],
-    domains: ["Profile", "Attendance", "Dashboard", "Reports"],
+    domains: [
+      "Profile",
+      "Attendance",
+      "OvertimeRequests",
+      "Salary",
+      "Dashboard",
+      "Reports",
+    ],
   },
   networks: { lists: ["offices"], domains: ["Attendance"] },
   holidays: { domains: ["Attendance", "Dashboard", "Reports"] },

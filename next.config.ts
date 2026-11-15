@@ -4,8 +4,6 @@ import { cacheProfiles } from "./src/lib/cache/profiles";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   cacheLife: cacheProfiles,
-  // Isolate browser tests from a running developer server's build directory.
-  distDir: process.env.NEXT_TEST_DIST_DIR || ".next",
   poweredByHeader: false,
   output: "standalone",
   serverExternalPackages: [
@@ -18,6 +16,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/admin/reports": ["./src/assets/fonts/*"],
     "/api/admin/drive-costs/report": ["./src/assets/fonts/*"],
+    "/api/admin/company-money/report": ["./src/assets/fonts/*"],
     "/api/daily-expenses/report": ["./src/assets/fonts/*"],
   },
   async headers() {

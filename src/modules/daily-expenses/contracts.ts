@@ -207,8 +207,6 @@ export type TransactionUpdateInput = z.input<typeof transactionUpdateSchema>;
 export type TransactionDeleteInput = z.input<typeof transactionDeleteSchema>;
 export type CategoryCreateInput = z.input<typeof categoryCreateSchema>;
 export type CategoryUpdateInput = z.input<typeof categoryUpdateSchema>;
-export type HistoryQuery = z.input<typeof historyQuerySchema>;
-export type ParsedHistoryQuery = z.output<typeof historyQuerySchema>;
 export type DailyExpenseReportFilters = z.output<
   typeof dailyExpenseReportQuerySchema
 >;
@@ -226,12 +224,4 @@ export function todayInTimezone(
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((entry) => entry.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-/** Format text directly, retaining every cent even beyond Number.MAX_SAFE_INTEGER. */
-export function formatMoney(amount: string, currency: string): string {
-  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(amount);
-  if (!match) throw new Error("Invalid decimal money value.");
-  const [, sign, whole, fraction = ""] = match;
-  return `${sign}${currency} ${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${fraction.padEnd(2, "0")}`;
 }

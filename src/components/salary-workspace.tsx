@@ -249,6 +249,9 @@ export function SalaryWorkspace() {
   const from = requestedFrom || data?.from || bounds.from;
   const to = requestedTo || data?.to || bounds.to;
   const filterKey = `${period}|${from}|${to}|${params.get("search") || ""}|${params.get("departmentId") || ""}|${params.get("officeId") || ""}`;
+  // A preview belongs to one completed list read. Refetches and filter changes
+  // immediately hide it, even when RTK Query retains the previous list data.
+  const snapshotSource = `${filterKey}|${page}|${active}|${result.requestId || ""}|${result.fulfilledTimeStamp || ""}|${view.isFetching}`;
   const filters: Filters = {
     period,
     from,
@@ -284,19 +287,25 @@ export function SalaryWorkspace() {
     overtimeHourlyRate?: boolean;
   }>({});
   const [snapshots, setSnapshots] = useState<
-    Record<string, SalaryCalculationDTO>
+    Record<string, { source: string; calculation: SalaryCalculationDTO }>
   >({});
   const [selectedBreakdown, setSelectedBreakdown] = useState<string>();
   const [busy, setBusy] = useState<Busy>(null);
   const controlsDisabled =
-    !!busy || !active || !hydrated || (!period && view.loading);
+    !!busy ||
+    !active ||
+    !hydrated ||
+    view.isFetching ||
+    (!period && view.loading);
   const [feedback, setFeedback] = useState<"saved" | "calculated" | null>(null);
   const [actionError, setActionError] = useState<{
     error?: unknown;
     key: "saveFailed" | "calculationFailed" | "downloadFailed" | "stale";
   }>();
   const fence = useRef(false);
+  const operation = useRef<object | null>(null);
   const mounted = useRef(true);
+  const sourceGeneration = useRef({});
   const downloadRequest = useRef<AbortController | null>(null);
   const downloadUrls = useRef(new Set<string>());
   const [saveSettings] = useSaveSalarySettingsMutation();
@@ -306,15 +315,36 @@ export function SalaryWorkspace() {
     const urls = downloadUrls.current;
     return () => {
       mounted.current = false;
+      operation.current = null;
+      fence.current = false;
       downloadRequest.current?.abort();
+      downloadRequest.current = null;
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
+      // Activity retains component state while removing its effects. Release
+      // the old operation and previews before this workspace can be revealed.
+      setBusy(null);
+      setSnapshots({});
+      setSelectedBreakdown(undefined);
     };
   }, []);
+  useEffect(() => {
+    sourceGeneration.current = {};
+    downloadRequest.current?.abort();
+    return () => {
+      // Activity hides routes by cleaning up effects while retaining state.
+      // Fence a calculation or download that resolves after that transition.
+      sourceGeneration.current = {};
+      downloadRequest.current?.abort();
+    };
+  }, [snapshotSource]);
 
   function calculationFor(row: EmployeeRow) {
+    const snapshot = snapshots[snapshotKey(row.employee.id, period, from, to)];
     const calculation =
-      snapshots[snapshotKey(row.employee.id, period, from, to)];
+      !view.isFetching && snapshot?.source === snapshotSource
+        ? snapshot.calculation
+        : undefined;
     return calculation &&
       calculation.salaryDivisor === SALARY_MONTHLY_DIVISOR &&
       salaryAmountSchema.safeParse(calculation.monthlyBaseSalary).success &&
@@ -330,14 +360,21 @@ export function SalaryWorkspace() {
       : undefined;
   }
   function begin(next: NonNullable<Busy>) {
-    if (fence.current || !active) return false;
+    if (fence.current || !active || view.isFetching) return null;
+    const current = {};
+    operation.current = current;
     fence.current = true;
     setBusy(next);
     setActionError(undefined);
     setFeedback(null);
-    return true;
+    return current;
   }
-  function finish() {
+  function isCurrentOperation(current: object) {
+    return mounted.current && operation.current === current;
+  }
+  function finish(current: object) {
+    if (operation.current !== current) return;
+    operation.current = null;
     fence.current = false;
     if (mounted.current) setBusy(null);
   }
@@ -362,13 +399,17 @@ export function SalaryWorkspace() {
     update({ ...draft, page: 1 });
   }
   async function refresh() {
-    if (!begin({ kind: "refresh" })) return;
+    const current = begin({ kind: "refresh" });
+    if (!current) return;
+    sourceGeneration.current = {};
+    setSnapshots({});
+    setSelectedBreakdown(undefined);
     try {
       await view.refresh().unwrap();
     } catch {
       /* The query view supplies the refresh error and retains current data. */
     } finally {
-      finish();
+      finish(current);
     }
   }
   function openSettings(row: EmployeeRow) {
@@ -393,11 +434,12 @@ export function SalaryWorkspace() {
       ).success,
     };
     setFieldErrors(errors);
-    if (
-      Object.values(errors).some(Boolean) ||
-      !begin({ kind: "save", employeeId: settings.row.employee.id })
-    )
-      return;
+    if (Object.values(errors).some(Boolean)) return;
+    const current = begin({
+      kind: "save",
+      employeeId: settings.row.employee.id,
+    });
+    if (!current) return;
     try {
       await saveSettings({
         employeeId: settings.row.employee.id,
@@ -405,32 +447,31 @@ export function SalaryWorkspace() {
         baseSalary: settings.baseSalary.trim(),
         overtimeHourlyRate: settings.overtimeHourlyRate.trim(),
       }).unwrap();
-      if (!mounted.current) return;
+      if (!isCurrentOperation(current)) return;
       setSnapshots({});
       setSelectedBreakdown(undefined);
       setSettings(null);
       setFeedback("saved");
     } catch (error) {
-      if (mounted.current) setActionError({ error, key: "saveFailed" });
-      // Writes are never replayed automatically; an uncertain save is verified by a read.
-      void view.refresh();
+      if (isCurrentOperation(current)) {
+        setActionError({ error, key: "saveFailed" });
+        // Writes are never replayed automatically; verify an uncertain save by a read.
+        void view.refresh();
+      }
     } finally {
-      finish();
+      finish(current);
     }
   }
   async function calculate(rows: EmployeeRow[]) {
     const configured = rows.filter((row) => row.settings);
-    if (
-      !period ||
-      rangePending ||
-      !configured.length ||
-      !begin({
-        kind: "calculate",
-        ...(rows.length === 1 ? { employeeId: rows[0].employee.id } : {}),
-      })
-    )
-      return;
+    if (!period || rangePending || !configured.length) return;
+    const current = begin({
+      kind: "calculate",
+      ...(rows.length === 1 ? { employeeId: rows[0].employee.id } : {}),
+    });
+    if (!current) return;
     const employeeIds = configured.map((row) => row.employee.id);
+    const generation = sourceGeneration.current;
     try {
       const calculated = await calculateSalary({
         period,
@@ -438,9 +479,17 @@ export function SalaryWorkspace() {
         to,
         employeeIds,
       }).unwrap();
-      if (!mounted.current) return;
+      if (
+        !isCurrentOperation(current) ||
+        generation !== sourceGeneration.current
+      )
+        return;
       setSnapshots((previous) => {
-        const next = { ...previous };
+        const next = Object.fromEntries(
+          Object.entries(previous).filter(
+            ([, snapshot]) => snapshot.source === snapshotSource,
+          ),
+        );
         for (const item of calculated.items) {
           if (
             item.period === period &&
@@ -448,20 +497,30 @@ export function SalaryWorkspace() {
             item.to === to &&
             employeeIds.includes(item.employee.id)
           )
-            next[snapshotKey(item.employee.id, period, from, to)] = item;
+            next[snapshotKey(item.employee.id, period, from, to)] = {
+              source: snapshotSource,
+              calculation: item,
+            };
         }
         return next;
       });
       setFeedback("calculated");
     } catch (error) {
-      if (mounted.current) setActionError({ error, key: "calculationFailed" });
+      if (
+        isCurrentOperation(current) &&
+        generation === sourceGeneration.current
+      )
+        setActionError({ error, key: "calculationFailed" });
     } finally {
-      finish();
+      finish(current);
     }
   }
   async function download(calculation: SalaryCalculationDTO) {
-    if (!begin({ kind: "download", employeeId: calculation.employee.id }))
-      return;
+    const current = begin({
+      kind: "download",
+      employeeId: calculation.employee.id,
+    });
+    if (!current) return;
     const controller = new AbortController();
     downloadRequest.current = controller;
     try {
@@ -489,7 +548,7 @@ export function SalaryWorkspace() {
         if (
           ["SALARY_SOURCE_CHANGED", "SALARY_CALCULATION_EXPIRED"].includes(code)
         ) {
-          if (mounted.current) {
+          if (isCurrentOperation(current)) {
             setSnapshots((previous) => {
               const next = { ...previous };
               delete next[
@@ -516,7 +575,7 @@ export function SalaryWorkspace() {
         signature[1] !== 0x4b
       )
         throw new Error("Invalid salary document.");
-      if (controller.signal.aborted || !mounted.current) return;
+      if (controller.signal.aborted || !isCurrentOperation(current)) return;
       const url = URL.createObjectURL(blob);
       downloadUrls.current.add(url);
       const link = document.createElement("a");
@@ -534,7 +593,7 @@ export function SalaryWorkspace() {
         downloadUrls.current.delete(url);
       }, 1000);
     } catch (error) {
-      if (!controller.signal.aborted && mounted.current)
+      if (!controller.signal.aborted && isCurrentOperation(current))
         setActionError({
           error,
           key:
@@ -543,8 +602,9 @@ export function SalaryWorkspace() {
               : "downloadFailed",
         });
     } finally {
-      downloadRequest.current = null;
-      finish();
+      if (downloadRequest.current === controller)
+        downloadRequest.current = null;
+      finish(current);
     }
   }
 
@@ -593,7 +653,11 @@ export function SalaryWorkspace() {
           }
         />
       )}
-      {feedback && <Notice>{t(feedback)}</Notice>}
+      {feedback &&
+        (feedback !== "calculated" ||
+          Object.values(snapshots).some(
+            (snapshot) => snapshot.source === snapshotSource,
+          )) && <Notice>{t(feedback)}</Notice>}
       {data?.ongoing && (
         <div className={`notice ${styles.ongoing}`} role="status">
           {t("ongoing")}

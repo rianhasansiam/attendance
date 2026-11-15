@@ -21,6 +21,15 @@ const lateApprovalSelect = {
   checkInAt: true,
   lateMinutes: true,
 } satisfies Prisma.LateApprovalRequestSelect;
+const overtimeRequestSelect = {
+  id: true,
+  status: true,
+  checkInAt: true,
+  scheduledEndAt: true,
+  checkOutAt: true,
+  requestedMinutes: true,
+  updatedAt: true,
+} satisfies Prisma.OvertimeRequestSelect;
 const officeSelect = {
   id: true,
   name: true,
@@ -60,6 +69,7 @@ const attendanceSelect = {
   workedMinutes: true,
   overtimeMinutes: true,
   lateApproval: { select: lateApprovalSelect },
+  overtimeRequest: { select: overtimeRequestSelect },
   employee: { select: employeeSelect },
   office: { select: officeSelect },
   shift: { select: shiftSelect },
@@ -78,6 +88,7 @@ const candidateSelect = {
   workedMinutes: true,
   overtimeMinutes: true,
   lateApproval: { select: lateApprovalSelect },
+  overtimeRequest: { select: overtimeRequestSelect },
   employee: { select: { employeeCode: true } },
   shift: { select: shiftSelect },
 } satisfies Prisma.AttendanceSelect;
@@ -89,7 +100,7 @@ type DetailedAttendance = Prisma.AttendanceGetPayload<{
 }>;
 export type ReportRecord = Omit<
   DetailedAttendance,
-  "scheduledEndAt" | "lateApproval"
+  "scheduledEndAt" | "lateApproval" | "overtimeRequest"
 > &
   ReturnType<typeof attendanceOutcome<AttendanceStatus>> & { derived: boolean };
 type Entry =
@@ -396,6 +407,7 @@ async function reportEntries(
             workedMinutes: 0,
             overtimeMinutes: 0,
             lateApproval: null,
+            overtimeRequest: null,
           },
           true,
         ),
@@ -455,6 +467,7 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
       workedMinutes,
       overtimeMinutes,
       lateApproval,
+      overtimeRequest,
       shift,
     } = entry.record;
     return sanitizedRecord(
@@ -470,6 +483,7 @@ async function hydrateEntries(entries: Entry[]): Promise<ReportRecord[]> {
         workedMinutes,
         overtimeMinutes,
         lateApproval,
+        overtimeRequest,
         shift,
       },
       false,
@@ -569,17 +583,18 @@ export async function getReport(actor: Actor, filters: Filters, locale = "en") {
   if (filters.format === "json") {
     const summary = { overtimeMinutes: 0, unknownOvertimeRecords: 0 };
     for (const entry of entries) {
-      const overtimeMinutes = entry.derived
-        ? entry.record.overtimeMinutes
-        : attendanceOutcome(entry.record).overtimeMinutes;
-      if (overtimeMinutes === null) summary.unknownOvertimeRecords++;
-      summary.overtimeMinutes += countedOvertimeMinutes(
-        overtimeMinutes,
-        entry.record.lateMinutes,
-        entry.record.checkInAt && entry.record.checkOutAt
-          ? entry.record.workedMinutes
-          : null,
-      );
+      const outcome = entry.derived
+        ? entry.record
+        : attendanceOutcome(entry.record);
+      if (outcome.overtimeMinutes === null) summary.unknownOvertimeRecords++;
+      summary.overtimeMinutes += countedOvertimeMinutes({
+        approvedOvertimeMinutes: outcome.approvedOvertimeMinutes,
+        lateMinutes: entry.record.lateMinutes,
+        completedWorkedMinutes:
+          entry.record.checkInAt && entry.record.checkOutAt
+            ? entry.record.workedMinutes
+            : null,
+      });
     }
     return {
       items: await hydrateEntries(

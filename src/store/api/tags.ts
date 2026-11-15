@@ -3,6 +3,7 @@ export const tagTypes = [
   "Reference",
   "Attendance",
   "LateApprovals",
+  "OvertimeRequests",
   "Dashboard",
   "Leave",
   "Devices",

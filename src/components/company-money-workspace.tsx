@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Check, Minus, Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { formatInTimeZone } from "date-fns-tz";
+import { PdfDownloadButton } from "./pdf-download-button";
 import {
   Empty,
   ErrorNotice,
@@ -19,6 +20,7 @@ import { formatMoney } from "@/i18n/format-money";
 import { useErrorMessage } from "@/i18n/errors";
 import { isAmbiguousWrite } from "@/lib/client/attendance-ceremony";
 import { confirmAction } from "@/lib/client/alerts";
+import { companyMoneyReportQuerySchema } from "@/modules/company-money/contracts";
 import type {
   CompanyMoneyInput,
   CompanyMoneyTransactionRecord,
@@ -65,6 +67,8 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
   const formatter = useFormatter();
   const errorMessage = useErrorMessage();
   const [page, setPage] = useState(1);
+  const [reportFrom, setReportFrom] = useState("");
+  const [reportTo, setReportTo] = useState("");
   const query = useCompanyMoneyQuery(
     { page, pageSize: PAGE_SIZE },
     useFreshness(true),
@@ -97,6 +101,29 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
   const createDraft = useRef<Draft | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const locked = busy || confirming || retryPending;
+  const reportFilters = {
+    ...(reportFrom ? { from: reportFrom } : {}),
+    ...(reportTo ? { to: reportTo } : {}),
+  };
+  const invalidReportFrom = !companyMoneyReportQuerySchema.safeParse(
+    reportFrom ? { from: reportFrom } : {},
+  ).success;
+  const invalidReportTo = !companyMoneyReportQuerySchema.safeParse(
+    reportTo ? { to: reportTo } : {},
+  ).success;
+  const invalidReportOrder =
+    !invalidReportFrom &&
+    !invalidReportTo &&
+    !!reportFrom &&
+    !!reportTo &&
+    reportFrom > reportTo;
+  const reportDateError =
+    invalidReportFrom || invalidReportTo
+      ? t("reportValidDates")
+      : invalidReportOrder
+        ? t("reportDateOrder")
+        : "";
+  const reportQuery = new URLSearchParams(reportFilters).toString();
   const pendingDelete = activeKind === "delete";
   const money = (value: string) =>
     formatMoney(value, "৳", locale).replace("৳ ", "৳");
@@ -523,6 +550,78 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
               )}
             </form>
           </>
+        )}
+      </section>
+      <section
+        className="card card-body"
+        aria-labelledby="company-money-report-heading"
+      >
+        <div className={styles.reportHeading}>
+          <h2 id="company-money-report-heading">{t("reportDownloadTitle")}</h2>
+          <p id="company-money-report-description" className="muted">
+            {t("reportDownloadDescription")}
+          </p>
+        </div>
+        <div className={styles.reportControls}>
+          <div className="field">
+            <label htmlFor="company-money-report-from">
+              {t("reportFromDate")}
+            </label>
+            <input
+              id="company-money-report-from"
+              type="date"
+              min="0001-01-01"
+              max="9999-12-31"
+              value={reportFrom}
+              disabled={locked}
+              aria-invalid={invalidReportFrom}
+              aria-describedby={
+                reportDateError
+                  ? "company-money-report-date-error"
+                  : "company-money-report-description"
+              }
+              onChange={(event) => setReportFrom(event.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="company-money-report-to">{t("reportToDate")}</label>
+            <input
+              id="company-money-report-to"
+              type="date"
+              min="0001-01-01"
+              max="9999-12-31"
+              value={reportTo}
+              disabled={locked}
+              aria-invalid={invalidReportTo || invalidReportOrder}
+              aria-describedby={
+                reportDateError
+                  ? "company-money-report-date-error"
+                  : "company-money-report-description"
+              }
+              onChange={(event) => setReportTo(event.target.value)}
+            />
+          </div>
+          <button
+            className="button secondary"
+            type="button"
+            disabled={locked || (!reportFrom && !reportTo)}
+            onClick={() => {
+              setReportFrom("");
+              setReportTo("");
+            }}
+          >
+            {t("reportAllTime")}
+          </button>
+          <PdfDownloadButton
+            href={`/api/admin/company-money/report${reportQuery ? `?${reportQuery}` : ""}`}
+            filename="company-money-report.pdf"
+            disabled={locked || !data || !!reportDateError}
+          />
+        </div>
+        {reportDateError && (
+          <div id="company-money-report-date-error">
+            <ErrorNotice message={reportDateError} notify={false} />
+          </div>
         )}
       </section>
       <section

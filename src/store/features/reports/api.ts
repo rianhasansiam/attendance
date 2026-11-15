@@ -30,7 +30,16 @@ export const reportsApi = baseApi.injectEndpoints({
       invalidatesTags: (_result, error) =>
         error
           ? []
-          : ["Attendance", "LateApprovals", "Dashboard", "Reports", "Audit"],
+          : [
+              "Attendance",
+              "LateApprovals",
+              "OvertimeRequests",
+              "Dashboard",
+              "Reports",
+              "Salary",
+              "Audit",
+              { type: "Management", id: "events:LIST" },
+            ],
     }),
   }),
 });

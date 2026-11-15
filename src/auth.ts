@@ -24,7 +24,7 @@ type AuthorizedIdentity =
       passwordHash: string;
     };
 
-export const { handlers, auth, signIn, signOut } = NextAuth(() => {
+export const { handlers, auth, signIn } = NextAuth(() => {
   const env = getEnv();
   const base = PrismaAdapter(db);
   // This proof exists only during this request, never in callback user data,

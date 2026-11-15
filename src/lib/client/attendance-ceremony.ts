@@ -11,6 +11,7 @@ import {
 } from "./attendance-timing";
 import type {
   AttendanceRecord,
+  CheckoutPreview,
   DeviceMetadata,
 } from "@/store/features/attendance/contracts";
 
@@ -48,6 +49,13 @@ class AttendanceCeremonyError extends Error {
 }
 
 const locationFreshnessMs = 30_000;
+export type CheckoutInput = { attendanceId: string; overtimeReason?: string };
+
+/** Read authoritative eligibility before collecting passkey or location evidence. */
+export function readCheckoutPreview(signal?: AbortSignal) {
+  return api<CheckoutPreview>("/api/attendance/check-out", { signal });
+}
+
 type LocationFix = {
   location: { latitude: number; longitude: number; accuracy: number };
   receivedAt: number;
@@ -166,11 +174,13 @@ async function verifyWithDevice<T>(
 // No Redux imports, dispatches, retries, retained request objects, or logging.
 export async function recordAttendance({
   action,
+  checkout,
   progress,
   signal,
   timing = beginAttendanceTiming(action),
 }: {
   action: "CHECK_IN" | "CHECK_OUT";
+  checkout?: CheckoutInput;
   progress: (
     message:
       | "ceremony.preparing"
@@ -276,6 +286,7 @@ export async function recordAttendance({
               challengeId: challenge.challengeId,
               response,
               location: fix?.location,
+              ...(action === "CHECK_OUT" ? checkout : {}),
             }),
           },
         ),

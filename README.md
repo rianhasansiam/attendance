@@ -16,17 +16,15 @@ Optional verified public details are configured on the server:
 
 Missing or invalid contact details show an honest inquiry-drafting alternative with **Copy inquiry**, without sending or storing messages. No office addresses, social accounts, partner logos, or operational statistics are invented. The footer year follows Asia/Dhaka at request time.
 
-Run `pnpm test:homepage` against a running local preview (defaults to `http://localhost:3000`; override with `XHYD_PREVIEW_URL`). These browser checks require no test database and cover responsive layouts, accessible navigation/dialogs, real anchor targets, reduced motion, and public metadata. The existing `pnpm test:e2e` suite retains its disposable-database requirement.
+The localized root layout uses streamed Suspense rendering: corporate content is present in server HTML, but browsers with JavaScript fully disabled do not display it.
 
-The existing localized root layout uses streamed Suspense rendering: corporate content is present in server HTML, but browsers with JavaScript fully disabled do not display it. The homepage browser suite records this inherited layout limitation explicitly.
+English and 简体中文 are available from the language selector. Selection persists across navigation and browser reopening without changing URLs or sessions. See [localization architecture and translation editing](docs/localization.md). No database migration is needed for this feature.
 
-English and 简体中文 are available from the language selector. Selection persists across navigation and browser reopening without changing URLs or sessions. See [localization architecture, translation editing, and verification](docs/localization.md). No database migration is needed for this feature.
-
-State management: [architecture, cache matrix and test instructions](docs/state-management.md) · [verified findings and baseline](docs/state-audit.md).
+See [state management and the cache matrix](docs/state-management.md) for workspace data flow.
 
 A modular Next.js application for administrator-authorized employees, passkey-confirmed attendance, office geofencing and network verification. Includes employee/admin interfaces, management workflows, PDF reports, and append-only audit history.
 
-See the [performance audit and measurements](docs/performance.md) for query changes, display-only Next.js caching, invalidation rules, and validation results. The [check-in/out performance notes](docs/attendance-performance.md) describe immediate confirmed display, concurrent verification, opt-in timing, and device measurement steps.
+The [check-in/out performance notes](docs/attendance-performance.md) describe immediate confirmed display, concurrent verification, opt-in timing, and device measurement steps.
 
 Late check-ins prompt the employee to enter a reason after attendance is recorded. The prompt uses the shift's existing grace period, preserves the check-in time, and returns on the dashboard until a reason is saved. Reasons appear in employee history, administrator attendance records, and PDF reports. Apply the included `20260921000000_attendance_late_reason` migration with `pnpm db:migrate` before running this version against an existing database.
 
@@ -36,9 +34,9 @@ Each attendance record whose displayed **Late (min) is greater than 5 subtracts 
 
 Completed attendance with both check-in and checkout must reach **8 hours 30 minutes (510 worked minutes)**. Each completed day below that target deducts `510 - workedMinutes` from total overtime, in addition to any fixed late deduction. Working 8 hours deducts 30 minutes; working 8 hours 29 minutes deducts 1; exactly 8 hours 30 minutes or more has no shortage deduction. A completed 8-hour day with Late (min) greater than 5 therefore deducts 60 minutes in total. The fixed 510-minute target applies regardless of configured shift length. Open attendance, absence, leave, holidays and weekends without completed punches have no shortage deduction. Completed historical records with unknown overtime can still have a shortage because their worked minutes are known. Corrections recalculate deductions; removing checkout removes the shortage deduction while retaining any late deduction.
 
-Daily overtime retains its existing signed work-hour balance: time after scheduled end offsets actual late minutes, while early departure or lateness not made up shows a negative value. Employee/admin attendance tables and PDF reports display this balance. Each record with at least 30 minutes of overtime is green and contributes its full duration to report totals. Smaller credits, zero, and negative shortfalls stay visible in red and do not contribute overtime credits. Totals sum qualifying credits and subtract fixed late deductions and completed-day shortages across all filtered pages; the displayed negative daily balance is not deducted again. Early arrival does not earn overtime. Scheduled boundaries are captured at check-in, including overnight shifts, so later Shift edits do not change them. No new database migration is needed for these total rules.
+Overtime requires **60 completed minutes of work beyond the captured scheduled duty end** and Super Admin approval. Eligible checkout requires a 10–1,000-character reason and creates a Pending request atomically with checkout. Pending, Rejected, outdated, and unrequested overtime earns zero credit. Approval credits the full requested duration: 75 minutes earns 75 minutes before the separate late and completed-day shortage deductions above. Early arrival earns no overtime. Overnight shifts use their saved schedule snapshots. Existing signed work-hour balances remain stored as historical facts; official tables, PDF reports, and salary use approved credit.
 
-Previously completed records without a historical scheduled-end snapshot show `—` (Unknown in PDFs), including after corrections. Legacy open records establish their schedule at checkout using the linked shift and original business date. Apply `20260927120000_signed_overtime` with `pnpm db:migrate` before running this version if not already applied: it permits negative balances and recalculates known historical overtime. This records time only; it does not calculate overtime pay or approval.
+Super Admins review requests at **Attendance → Overtime requests**, with employee, status, date, and department filters. Self-review is allowed. Decisions are final and audited. Corrections preserve the original request; its approval applies only while its captured punches and scheduled end match attendance. Historical and manually completed records without requests earn zero credit, including records whose original schedule is unknown. Legacy open attendance establishes its schedule at checkout using its linked shift and business date. Apply the additive `20261114000000_overtime_approval` migration before starting this version. See [overtime workflow, migration, and verification](docs/overtime-approval.md).
 
 Administrators, super administrators, and users with the Manage Driver role can use **Drive Cost** to record dated trips and calculate costs by trip date: before September 26, 2026, rates are ৳5/km in-time and ৳10/km overtime; from September 26, 2026 onward, they are ৳5.50/km and ৳11/km. One-way or round-trip totals are rounded once to two decimal places (half up). Rates and totals are derived on the server, saved as exact decimals, and recorded in the audit log. The trip list and cost calculator each support All, Paid, and Unpaid filters; their PDF downloads use the applied filters.
 
@@ -48,7 +46,7 @@ The `MANAGE_DRIVER` role has all employee access plus **Drive Cost** in the empl
 
 Choose **Round trip (×2)** for office → destination → office and enter the one-way kilometers. The cost is kilometers × rate × 2, and the list, calculator, and PDF show the total distance including the return journey. Existing records stay one-way. Apply `20260924000000_drive_cost_round_trips` with `pnpm db:migrate`, then run `pnpm db:generate` before starting the updated application.
 
-Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits, and [verification](docs/verification.md) for completed checks and live acceptance steps. The original specification is [implimentation_plan.md](implimentation_plan.md).
+Read [architecture](docs/architecture.md) for module boundaries, security decisions, and known trust limits.
 
 **Users & employees** at `/admin/employees` combines the former Employees and All Users pages. Admins and Super Admins can search every account by name, email or employee ID, including accounts without employee records. Accounts without an employee record show **—** for employee ID, department and office; attendance and employee-edit actions require an employee record. Old `/admin/users` links redirect here and preserve search and pagination. This page merge needs no database migration.
 
@@ -69,6 +67,10 @@ Public profiles are available without sign-in at `/profile/<name-slug>`; existin
 Super administrators can use **My profile** in the navigation to update their own name, designation, phone, blood group, department, home address and date of birth. The shortcut works with or without an employee record. Saved changes appear on their public profile and refresh the signed-in display; their role, account status and sign-in access are preserved.
 
 **Company Money** is available at `/admin/company-money`. Super administrators can add, remove, edit and delete records; administrators can view the balance and transaction history. Transactions include a selected date, amount and optional note; the date defaults to today in Asia/Dhaka. Edits recalculate the balance using the difference between the old and new record. Deleting an addition reduces the balance, while deleting a removal restores its amount. Changes that would make the balance negative are rejected. Deletion requires confirmation, and audit history and retry receipts remain after a record is removed. History shows the most recent transaction dates first. The ledger uses BDT and is independent of drive costs and daily expenses. Apply `20261015120000_company_money`, `20261017120000_company_money_date` and `20261017130000_company_money_record_management` with `pnpm db:migrate`, regenerate the client with `pnpm db:generate`, and restart the application before opening the page. Existing entries receive their recorded date in Asia/Dhaka.
+
+Admin and Super Admin can download a **Company Money PDF report** from the report panel. Choose inclusive transaction-date boundaries, leave either boundary blank for an open-ended report, or select **All time** to clear both dates. These controls apply to the report download. The PDF includes every matching current transaction across history pages, plus opening balance, additions, removals, closing balance and transaction count in BDT. Recorded and generation times use Asia/Dhaka. Statements reflect current records, so corrections and deletions can change a later download for the same dates. All-time reports include future-dated entries; historical opening and closing balances may be negative even when the overall balance is nonnegative. Exports are limited to 10,000 matching transactions; narrow the dates for larger ledgers. This feature requires no additional migration.
+
+Run the Company Money report checks with `pnpm test:company-money`.
 
 ## Local setup
 
@@ -117,45 +119,26 @@ Only super administrators can register employee accounts, using **Admin → User
 
 An optional initial application password (12–128 characters, with confirmation) enables password sign-in on the same account. A Google-only employee can also set one later from Account security after signing in. There is no public registration or forgot-password system. Password saves revoke all sessions. Administrative email changes clear the application password and revoke sessions, OAuth links and registered credentials; use verified Google sign-in for the updated identity before setting a new password. See [application password setup and security behavior](docs/application-passwords.md) for provisioning, password policy and rate limits. SMTP is not required, and optional employee passwords need no new database migration.
 
-## Commands and verification
+## Development checks
 
 ```sh
 pnpm typecheck
 pnpm lint
-pnpm test
+pnpm format:check
 pnpm db:validate
 pnpm build
 ```
 
-PostgreSQL integration tests are opt-in via `TEST_DATABASE_URL` and must use a disposable test database with the migration applied. They add uniquely named fixtures, exercise real constraints, and do not target production:
+## Neon database
 
-```sh
-DATABASE_URL="$TEST_DATABASE_URL" pnpm db:migrate
-TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test
-```
-
-`TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test:e2e` runs browser checks. Install Chromium first with `pnpm exec playwright install chromium`; see `playwright.config.ts` and `tests/e2e` for the isolated test environment. Real Google login and a physical authenticator require credentials and user interaction; automated tests do not claim to validate Google's live consent flow or every device's biometric interface.
-
-## Neon database and function
-
-This workspace is linked to Neon project `lucky-hat-77060397`, branch `production`. [neon.ts](neon.ts) declares the `api` function from [hello.ts](hello.ts), which returns `Hello from Neon Functions`. The attendance application uses the Neon database through `DATABASE_URL`.
-
-Prisma CLI commands automatically derive Neon's direct endpoint from `DATABASE_URL` for migrations. The application keeps the configured pooled connection. An explicit `DATABASE_URL` override also selects the target for Prisma commands, including disposable test databases.
-
-Deploy the function with:
-
-```sh
-neon deploy --no-env-pull
-```
-
-The flag preserves the local environment without pulling storage credentials for the project's existing bucket. Object storage is not configured for this application, and no AWS account or `AWS_*` environment variables are required.
+The attendance application uses PostgreSQL through `DATABASE_URL`. Prisma CLI commands automatically derive Neon's direct endpoint from a Neon pooled URL for migrations; the application keeps its configured pooled connection. An explicit `DATABASE_URL` override selects the target for Prisma commands.
 
 ## VPS deployment
 
 1. Provision a supported Node LTS runtime and PostgreSQL. Run PostgreSQL on loopback/private network. Use a dedicated application database and role; use a separate migration owner if your operational setup permits. Disable public database access. Configure backups and test restore procedures.
 2. Deploy source and lockfile to `/srv/attendance` owned by an unprivileged `attendance` account. Run `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm db:migrate`, `pnpm db:seed` (first deployment only), and `pnpm build`. Inject environment variables when running migrations and seeding. Build does not embed production secrets.
 3. Store production environment values in `/etc/attendance.env`, readable only by the service account/root. Set `NODE_ENV=production`, HTTPS origins, Google production credentials and a strong `AUTH_SECRET`.
-4. Install the [systemd service example](ops/attendance.service.example), adjusting the Node binary path. `pnpm build` prepares the standalone server and copies `public` and `.next/static` into its runtime directories. `pnpm start` and the example launch `.next/standalone/server.js` on `127.0.0.1:3000`; set `PORT` to use another port. Deploy the complete `.next/standalone` directory when distributing only the runtime bundle. `NEXT_TEST_DIST_DIR` selects the same custom build directory for building, packaging, and `pnpm start`.
+4. Install the [systemd service example](ops/attendance.service.example), adjusting the Node binary path. `pnpm build` prepares the standalone server and copies `public` and `.next/static` into its runtime directories. `pnpm start` and the example launch `.next/standalone/server.js` on `127.0.0.1:3000`; set `PORT` to use another port. Deploy the complete `.next/standalone` directory when distributing only the runtime bundle.
 5. Install Nginx and a valid TLS certificate. Adapt [ops/nginx.conf.example](ops/nginx.conf.example). Restrict public ingress to 80/443 and reject unknown hosts. Only Nginx may reach Node.
 6. Set `TRUSTED_PROXY_MODE=nginx`. Generate a separate random `TRUSTED_PROXY_SECRET` of at least 32 characters and configure exactly the same value in Nginx's overwritten `X-Attendance-Proxy-Secret` header. Nginx must overwrite `X-Real-IP` with `$remote_addr`. Arbitrary `X-Forwarded-For` is ignored. Keep Nginx configuration containing the secret private.
 7. When using Cloudflare/a load balancer, configure Nginx `set_real_ip_from` only for documented provider ranges and restrict origin ingress. Never accept a user-provided IP header or trust all proxies. Update provider ranges as part of operations.

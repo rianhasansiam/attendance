@@ -1,23 +1,11 @@
 import { cp, readFile, rm, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectDir = fileURLToPath(new URL("../", import.meta.url));
-const distDir = process.env.NEXT_TEST_DIST_DIR || ".next";
-const buildDir = resolve(projectDir, distDir);
-const buildRelativeDir = relative(projectDir, buildDir);
-
-if (
-  isAbsolute(distDir) ||
-  !buildRelativeDir ||
-  buildRelativeDir === ".." ||
-  buildRelativeDir.startsWith("../")
-) {
-  throw new Error("The build directory must be inside the project directory.");
-}
-
+const buildDir = join(projectDir, ".next");
 const standaloneDir = join(buildDir, "standalone");
-const runtimeBuildDir = join(standaloneDir, buildRelativeDir);
+const runtimeBuildDir = join(standaloneDir, ".next");
 const publicDir = join(projectDir, "public");
 const staticDir = join(buildDir, "static");
 

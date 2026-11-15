@@ -45,19 +45,45 @@ export type CompanyMoneyOverview = {
   pageSize: number;
 };
 
+export type CompanyMoneyReportFilters = { from?: string; to?: string };
+
+export type CompanyMoneyReportData = {
+  filters: CompanyMoneyReportFilters;
+  generatedAt: string;
+  summary: {
+    openingBalance: string;
+    totalAdded: string;
+    totalRemoved: string;
+    closingBalance: string;
+    count: number;
+  };
+  items: CompanyMoneyTransactionRecord[];
+};
+
+const transactionDateSchema = z.string().refine((value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < "0001-01-01") return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return (
+    Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+  );
+}, "Enter a valid date in YYYY-MM-DD format.");
+
+export const companyMoneyReportQuerySchema = z
+  .object({
+    from: transactionDateSchema.optional(),
+    to: transactionDateSchema.optional(),
+  })
+  .strict()
+  .refine((value) => !value.from || !value.to || value.from <= value.to, {
+    message: "The start date must be on or before the end date.",
+    path: ["to"],
+  });
+
 export const companyMoneyInputSchema = z
   .object({
     requestId: z.uuid(),
     type: z.enum(["ADD", "REMOVE"]),
-    date: z.string().refine((value) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < "0001-01-01")
-        return false;
-      const date = new Date(`${value}T00:00:00.000Z`);
-      return (
-        Number.isFinite(date.getTime()) &&
-        date.toISOString().slice(0, 10) === value
-      );
-    }, "Enter a valid date in YYYY-MM-DD format."),
+    date: transactionDateSchema,
     amount: z
       .string()
       .trim()

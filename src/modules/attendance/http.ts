@@ -8,6 +8,7 @@ import { measureServerTiming, requestServerTiming } from "@/lib/server-timing";
 import type { EmployeeActor } from "@/modules/webauthn/service";
 import {
   attendanceEvidenceSchema,
+  checkoutEvidenceSchema,
   lateReasonSchema,
   recordAttendance,
   saveLateReason,
@@ -72,7 +73,10 @@ export async function handleAttendanceRequest(
       await measureServerTiming(timing, "rate_limit", () =>
         rateLimit(rateLimitKey, 15, 60),
       );
-      evidence = await readJson(request, attendanceEvidenceSchema);
+      evidence =
+        action === "CHECK_OUT"
+          ? await readJson(request, checkoutEvidenceSchema)
+          : await readJson(request, attendanceEvidenceSchema);
     } catch (error) {
       await logAttendanceRejection(action, actor, error);
       throw error;

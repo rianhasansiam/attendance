@@ -10,7 +10,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test:overtime": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/overtime*.test.ts",
-    "test:company-money": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/company-money-report*.test.ts",
+    "test:company-money": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/company-money-*.test.ts",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate deploy",

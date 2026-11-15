@@ -13,6 +13,7 @@ export type CompanyMoneyInput = {
 export type CompanyMoneyListArgs = {
   page?: number;
   pageSize?: number;
+  search?: string;
 };
 
 export type CompanyMoneyUpdateInput = CompanyMoneyInput & {
@@ -127,5 +128,6 @@ export const companyMoneyListSchema = z
   .object({
     page: pageNumber(100000, 1),
     pageSize: pageNumber(100, 20),
+    search: z.string().trim().max(200).optional(),
   })
   .strict();

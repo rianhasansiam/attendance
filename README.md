@@ -70,7 +70,9 @@ Super administrators can use **My profile** in the navigation to update their ow
 
 Admin and Super Admin can download a **Company Money PDF report** from the report panel. Choose inclusive transaction-date boundaries, leave either boundary blank for an open-ended report, or select **All time** to clear both dates. These controls apply to the report download. The PDF includes every matching current transaction across history pages, plus opening balance, additions, removals, closing balance and transaction count in BDT. Recorded and generation times use Asia/Dhaka. Statements reflect current records, so corrections and deletions can change a later download for the same dates. All-time reports include future-dated entries; historical opening and closing balances may be negative even when the overall balance is nonnegative. Exports are limited to 10,000 matching transactions; narrow the dates for larger ledgers. This feature requires no additional migration.
 
-Run the Company Money report checks with `pnpm test:company-money`.
+Use **Search transactions** above the Company Money history to find a case-insensitive part of a note or an exact transaction amount. For example, `100`, `100.00` and `1,000.50` search their respective amounts; numeric text also matches notes. Select **Search** or press Enter to apply, and **Clear** to restore all transactions. Searches cover every history page and start on page one. Balance cards continue to show the full ledger totals, and PDF statements use their selected transaction dates.
+
+Run the Company Money search and report checks with `pnpm test:company-money`.
 
 ## Local setup
 

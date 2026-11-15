@@ -24,6 +24,7 @@ import {
   type CompanyMoneyTransactionRecord,
   type CompanyMoneyReportData,
 } from "./contracts";
+import { companyMoneyHistoryWhere } from "./filters";
 
 const transactionInclude = {
   createdBy: { select: { name: true, email: true } },
@@ -69,13 +70,15 @@ export async function getCompanyMoneyOverview(
   raw: unknown = {},
 ): Promise<CompanyMoneyOverview> {
   authorizeRole(actor.role, "ADMIN");
-  const { page, pageSize } = companyMoneyListSchema.parse(raw);
+  const { page, pageSize, search } = companyMoneyListSchema.parse(raw);
+  const where = companyMoneyHistoryWhere(search);
   // History, count and totals use the same snapshot during concurrent changes.
   return db.$transaction(
     async (tx) => {
       const summary = await totals(tx);
-      const total = await tx.companyMoneyTransaction.count();
+      const total = await tx.companyMoneyTransaction.count({ where });
       const items = await tx.companyMoneyTransaction.findMany({
+        where,
         include: transactionInclude,
         orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * pageSize,

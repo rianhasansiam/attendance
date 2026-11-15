@@ -1,7 +1,15 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { Check, Minus, Pencil, Plus, Trash2, Wallet } from "lucide-react";
+import {
+  Check,
+  Minus,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { formatInTimeZone } from "date-fns-tz";
 import { PdfDownloadButton } from "./pdf-download-button";
@@ -67,10 +75,16 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
   const formatter = useFormatter();
   const errorMessage = useErrorMessage();
   const [page, setPage] = useState(1);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
   const query = useCompanyMoneyQuery(
-    { page, pageSize: PAGE_SIZE },
+    {
+      page,
+      pageSize: PAGE_SIZE,
+      ...(appliedSearch ? { search: appliedSearch } : {}),
+    },
     useFreshness(true),
   );
   const { data, loading, error, refresh, isFetching } = useQueryView(query);
@@ -132,6 +146,24 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
       dateStyle: "medium",
       timeZone: "UTC",
     });
+
+  function applySearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (locked || editing || submitting.current || pendingMutation.current)
+      return;
+    const search = searchDraft.trim();
+    setSearchDraft(search);
+    setAppliedSearch(search);
+    setPage(1);
+  }
+
+  function clearSearch() {
+    if (locked || editing || submitting.current || pendingMutation.current)
+      return;
+    setSearchDraft("");
+    setAppliedSearch("");
+    setPage(1);
+  }
 
   function restoreCreateDraft() {
     if (createDraft.current) {
@@ -634,6 +666,48 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
             <p className="muted">{t("historyDescription")}</p>
           </div>
         </div>
+        <form
+          className={styles.historySearch}
+          role="search"
+          aria-label={t("searchTransactions")}
+          onSubmit={applySearch}
+        >
+          <div className="field">
+            <label htmlFor="company-money-search">{t("searchLabel")}</label>
+            <input
+              id="company-money-search"
+              name="search"
+              type="search"
+              maxLength={200}
+              value={searchDraft}
+              disabled={locked || !!editing}
+              placeholder={t("searchPlaceholder")}
+              aria-describedby="company-money-search-hint"
+              onChange={(event) => setSearchDraft(event.target.value)}
+            />
+          </div>
+          <div className={styles.searchActions}>
+            <button
+              className="button"
+              type="submit"
+              disabled={locked || !!editing}
+            >
+              <Search size={16} aria-hidden="true" />
+              {t("search")}
+            </button>
+            <button
+              className="button secondary"
+              type="button"
+              disabled={locked || !!editing || (!searchDraft && !appliedSearch)}
+              onClick={clearSearch}
+            >
+              {t("clearSearch")}
+            </button>
+          </div>
+          <p id="company-money-search-hint" className="muted">
+            {t("searchHint")}
+          </p>
+        </form>
         {loading ? (
           <Loading />
         ) : data ? (
@@ -743,8 +817,10 @@ export function CompanyMoneyWorkspace({ canManage }: { canManage: boolean }) {
               />
             ) : (
               <Empty
-                title={t("emptyTitle")}
-                description={t("emptyDescription")}
+                title={t(appliedSearch ? "searchEmptyTitle" : "emptyTitle")}
+                description={t(
+                  appliedSearch ? "searchEmptyDescription" : "emptyDescription",
+                )}
               />
             )}
             <Pagination

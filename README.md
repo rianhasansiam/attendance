@@ -74,6 +74,8 @@ Use **Search transactions** above the Company Money history to find a case-insen
 
 Run the Company Money search and report checks with `pnpm test:company-money`.
 
+Office Work task management is available at `/office-work` for `SUPER_ADMIN`, `MANAGE_DRIVER`, and `EMPLOYEE`. See [Office Work setup, permissions, workflow, API, and verification](docs/office-work.md). Apply `20261121140000_office_work_tracker` before opening the feature, then regenerate the Prisma client and restart the application. Run its checks with `pnpm test:office-work`; real database tests require a disposable local `TEST_DATABASE_URL`.
+
 ## Local setup
 
 Requirements: Node.js 22.12+ (24 LTS recommended), pnpm 12.3.4, and PostgreSQL 16+. Install dependencies and configure environment:

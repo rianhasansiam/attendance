@@ -66,6 +66,16 @@ enum CompanyMoneyMutationOperation {
   UPDATE
   DELETE
 }
+enum OfficeWorkStatus {
+  PENDING
+  PROCESSING
+  DONE
+}
+enum OfficeWorkPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
 model User {
   id String @id @default(cuid())
   name String?
@@ -100,6 +110,8 @@ model User {
   reviewedLateApprovals LateApprovalRequest[]
   reviewedOvertimeRequests OvertimeRequest[]
   salarySettingRevisions SalarySetting[]
+  assignedOfficeWork OfficeWorkTask[] @relation("OfficeWorkAssignee")
+  createdOfficeWork OfficeWorkTask[] @relation("OfficeWorkCreator")
 }
 model Account {
   id String @id @default(cuid())
@@ -454,6 +466,7 @@ model AuditLog {
   actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
   @@index([createdAt])
   @@index([resource, resourceId])
+  @@index([resource, resourceId, createdAt(sort: Desc), id(sort: Desc)], map: "AuditLog_resource_history_idx")
 }
 model RateLimit {
   key String @id
@@ -544,4 +557,31 @@ model SalarySetting {
   @@unique([employeeId, effectiveMonth, revision])
   @@index([employeeId, effectiveMonth(sort: Desc), revision(sort: Desc)])
   @@index([createdById])
+}
+
+/// Current assignments and immutable creator ownership; identities detach only on account deletion.
+model OfficeWorkTask {
+  id String @id @default(cuid())
+  version Int @default(1)
+  requestId String @unique @db.Uuid
+  createPayloadHash String @db.VarChar(64)
+  title String @db.VarChar(200)
+  description String? @db.VarChar(10000)
+  status OfficeWorkStatus @default(PENDING)
+  priority OfficeWorkPriority @default(MEDIUM)
+  assigneeId String?
+  createdById String?
+  dueDate DateTime? @db.Date
+  startedAt DateTime?
+  completedAt DateTime?
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  assignee User? @relation("OfficeWorkAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("OfficeWorkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  @@index([assigneeId, archivedAt, status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([archivedAt, status, dueDate, id])
+  @@index([createdById, archivedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([archivedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([archivedAt, dueDate, id])
 }

@@ -308,7 +308,7 @@ export async function listRecords(
     case "audit": {
       const where: Prisma.AuditLogWhereInput = {
         ...(actor.role !== "SUPER_ADMIN"
-          ? { resource: { not: "salary-settings" } }
+          ? { resource: { notIn: ["salary-settings", "OfficeWorkTask"] } }
           : {}),
         ...(q
           ? {
@@ -429,8 +429,15 @@ export async function getRecord(actor: Actor, resource: Resource, id: string) {
       record = await db.systemSetting.findUnique({ where: { key: id } });
       break;
     case "audit":
-      record = await db.auditLog.findUnique({
-        where: { id },
+      // Office Work deliberately excludes the legacy ADMIN role, including
+      // this existing audit route. Apply its resource fence in the query.
+      record = await db.auditLog.findFirst({
+        where: {
+          id,
+          ...(actor.role !== "SUPER_ADMIN"
+            ? { resource: { not: "OfficeWorkTask" } }
+            : {}),
+        },
         include: { actor: { select: publicUserSelect } },
       });
       break;

@@ -8,6 +8,7 @@ import { useAppStore } from "@/store/hooks";
 import { clearWorkspaceData } from "@/store/make-store";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
 import { canManageDailyExpenses } from "@/modules/daily-expenses/permissions";
+import { canAccessOfficeWork } from "@/modules/office-work/permissions";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -173,11 +174,20 @@ export function AppShell({
             : []),
         ]),
     {
+      label: "officeWork",
+      href: "/office-work",
+      icon: ClipboardList,
+      canAccess: canAccessOfficeWork,
+    },
+    {
       label: "publicProfile",
       href: `/profile/${encodeURIComponent(user.profileSlug)}`,
       icon: Globe,
     },
-  ];
+  ].filter(
+    (item) =>
+      !("canAccess" in item) || !item.canAccess || item.canAccess(user.role),
+  );
   const navigationHref = (href: string) =>
     href.startsWith("/") ? href : `/${mode}/${href}`;
   const current = navigation.find(

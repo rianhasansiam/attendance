@@ -16,4 +16,5 @@ export const tagTypes = [
   "DailyExpensesSummary",
   "DailyExpensesTransactions",
   "DailyExpensesCategories",
+  "OfficeWork",
 ] as const;

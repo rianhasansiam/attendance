@@ -112,6 +112,7 @@ model User {
   salarySettingRevisions SalarySetting[]
   assignedOfficeWork OfficeWorkTask[] @relation("OfficeWorkAssignee")
   createdOfficeWork OfficeWorkTask[] @relation("OfficeWorkCreator")
+  workReports WorkReport[]
 }
 model Account {
   id String @id @default(cuid())
@@ -584,4 +585,22 @@ model OfficeWorkTask {
   @@index([createdById, archivedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([archivedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([archivedAt, dueDate, id])
+}
+
+/// Shared team reports; only their original author may edit or soft-delete.
+model WorkReport {
+  id String @id @default(cuid())
+  version Int @default(1)
+  requestId String @unique @db.Uuid
+  createPayloadHash String @db.VarChar(64)
+  authorId String?
+  title String? @db.VarChar(200)
+  content String @db.VarChar(10000)
+  workDate DateTime @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  @@index([deletedAt, workDate, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([authorId, deletedAt, workDate, createdAt(sort: Desc), id(sort: Desc)])
 }

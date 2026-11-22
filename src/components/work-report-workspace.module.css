@@ -1,0 +1,243 @@
+.workspace {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+  max-width: 1060px;
+}
+.workspace > :global(.page-heading) {
+  margin-bottom: 0;
+}
+.composer {
+  display: grid;
+  gap: 16px;
+}
+.composer textarea {
+  min-height: 145px;
+  resize: vertical;
+}
+.composer small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.caption {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.dateNotice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--xhyd-rose);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 12px;
+}
+.composerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.formFields {
+  display: grid;
+  gap: 15px;
+}
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.3fr);
+  gap: 14px;
+  align-items: start;
+}
+.filters > * {
+  min-width: 0;
+}
+.filters :is(input, select, textarea),
+.composer :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+.authorFilter {
+  display: grid;
+  gap: 7px;
+}
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-top: 15px;
+}
+.toolbarActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.feedHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.feedHeading h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.feedHeading p {
+  margin: 0;
+}
+.feed {
+  display: grid;
+  gap: 16px;
+}
+.report {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 23px 25px;
+  min-width: 0;
+}
+.reportHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.identity strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.identity small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+.avatar {
+  display: grid;
+  flex: 0 0 38px;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--xhyd-rose);
+  color: var(--xhyd-red-dark);
+  font-size: 11px;
+  font-weight: 600;
+  object-fit: cover;
+}
+.reportActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.report h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.9;
+  margin: 0;
+}
+.reportFooter {
+  display: flex;
+  gap: 7px 15px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 18px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+.emptyActions {
+  padding: 0 20px 26px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.reconcile {
+  border: 1px solid var(--xhyd-red);
+  background: var(--xhyd-rose);
+  color: var(--xhyd-red-dark);
+  padding: 13px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.reconcile p {
+  margin: 0 0 10px;
+}
+.pageSize {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 20px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pageSize select {
+  width: auto;
+}
+@media (max-width: 800px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .filters > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 520px) {
+  .workspace {
+    gap: 17px;
+  }
+  .filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .filters > :last-child {
+    grid-column: auto;
+  }
+  .report {
+    padding: 18px;
+  }
+  .reportHeader {
+    flex-wrap: wrap;
+    gap: 13px;
+  }
+  .reportActions {
+    justify-content: flex-start;
+  }
+  .composerFooter {
+    align-items: stretch;
+  }
+  .composerFooter > :global(.button) {
+    width: 100%;
+  }
+  .content {
+    font-size: 13px;
+  }
+}

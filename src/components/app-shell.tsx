@@ -12,6 +12,7 @@ import { useFreshness } from "@/store/freshness";
 import type { SidebarNotificationHref } from "@/modules/notifications/contracts";
 import { canManageDailyExpenses } from "@/modules/daily-expenses/permissions";
 import { canAccessOfficeWork } from "@/modules/office-work/permissions";
+import { canAccessWorkReport } from "@/modules/work-report/permissions";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -186,6 +187,12 @@ export function AppShell({
       href: "/office-work",
       icon: ClipboardList,
       canAccess: canAccessOfficeWork,
+    },
+    {
+      label: "workReport",
+      href: "/work-report",
+      icon: ClipboardList,
+      canAccess: canAccessWorkReport,
     },
     {
       label: "publicProfile",

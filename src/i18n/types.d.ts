@@ -7,6 +7,7 @@ import expenses from "../../messages/en/expenses.json";
 import reports from "../../messages/en/reports.json";
 import salary from "../../messages/en/salary.json";
 import officeWork from "../../messages/en/officeWork.json";
+import workReport from "../../messages/en/workReport.json";
 declare module "next-intl" {
   interface AppConfig {
     Messages: {
@@ -19,6 +20,7 @@ declare module "next-intl" {
       reports: typeof reports;
       salary: typeof salary;
       officeWork: typeof officeWork;
+      workReport: typeof workReport;
     };
   }
 }

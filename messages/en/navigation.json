@@ -44,5 +44,6 @@
   "companyMoney": "Company money",
   "overtimeRequests": "Overtime requests",
   "officeWork": "Office Work",
-  "pendingNotifications": "{count, plural, one {# pending item} other {# pending items}}"
+  "pendingNotifications": "{count, plural, one {# pending item} other {# pending items}}",
+  "workReport": "Work Report"
 }

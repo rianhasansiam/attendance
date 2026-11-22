@@ -44,5 +44,6 @@
   "companyMoney": "公司资金",
   "overtimeRequests": "加班申请",
   "officeWork": "办公任务",
-  "pendingNotifications": "{count} 项待处理"
+  "pendingNotifications": "{count} 项待处理",
+  "workReport": "工作汇报"
 }

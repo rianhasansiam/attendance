@@ -19,7 +19,8 @@
     "db:cleanup": "tsx scripts/cleanup.ts",
     "format": "prettier --write src tests scripts prisma/seed.ts *.ts *.mjs",
     "format:check": "prettier --check src tests scripts prisma/seed.ts *.ts *.mjs",
-    "test:office-work": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/office-work*.test.ts"
+    "test:office-work": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/office-work*.test.ts",
+    "test:work-report": "node --conditions react-server --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/work-report*.test.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

@@ -6,7 +6,7 @@ export async function FeatureMessages({
   children,
 }: {
   namespaces: Array<
-    "admin" | "employee" | "expenses" | "salary" | "officeWork"
+    "admin" | "employee" | "expenses" | "salary" | "officeWork" | "workReport"
   >;
   children: ReactNode;
 }) {

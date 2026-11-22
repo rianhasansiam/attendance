@@ -43,6 +43,7 @@ export async function loadMessages(preference: Locale) {
     "reports",
     "salary",
     "officeWork",
+    "workReport",
   ] as const;
   const messages: AbstractIntlMessages = {};
   for (const namespace of namespaces) {

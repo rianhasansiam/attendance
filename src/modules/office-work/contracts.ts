@@ -18,6 +18,7 @@ export type OfficeWorkPermissions = {
   canComplete: boolean;
   canReopen: boolean;
   canArchive: boolean;
+  canAddUpdate: boolean;
   requiresOverrideReason: boolean;
 };
 export type OfficeWorkTaskDTO = {
@@ -77,6 +78,7 @@ export type OfficeWorkActivityDTO = {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   reason: string | null;
+  update: string | null;
   createdAt: string;
 };
 export type OfficeWorkDetailDTO = {
@@ -144,6 +146,13 @@ export const officeWorkActionSchema = z.discriminatedUnion("action", [
     })
     .strict(),
   z.object({ action: z.literal("archive"), expectedVersion }).strict(),
+  z
+    .object({
+      action: z.literal("add-update"),
+      expectedVersion,
+      update: z.string().trim().min(1, "Enter a work update.").max(10000),
+    })
+    .strict(),
 ]);
 function pageNumber(max: number, fallback: number) {
   return z

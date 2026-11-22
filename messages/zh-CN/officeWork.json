@@ -155,5 +155,11 @@
   "emptyPage": "本页暂无任务",
   "emptyPageDescription": "任务列表已变化或此页超出结果范围。请返回第一页。",
   "firstPage": "转到第一页",
-  "assigneeEditHint": "请使用“重新分配”更改负责人。"
+  "assigneeEditHint": "请使用“重新分配”更改负责人。",
+  "workUpdate": "工作结果 / 进展",
+  "workUpdateLabel": "工作结果 / 进展（选填）",
+  "workUpdateHint": "填写工作进度、结果或交接说明。保存后将显示在活动记录中。",
+  "saveUpdate": "保存进展",
+  "updateSaved": "工作进展已保存。",
+  "activityUpdateAdded": "已添加工作进展"
 }

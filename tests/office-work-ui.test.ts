@@ -3,6 +3,7 @@ import { before, beforeEach, mock, test } from "node:test";
 import en from "../messages/en/officeWork.json";
 import type {
   OfficeWorkOverviewDTO,
+  OfficeWorkActivityDTO,
   OfficeWorkTaskDTO,
 } from "../src/modules/office-work/contracts";
 import { taskPermissions } from "../src/modules/office-work/permissions";
@@ -23,6 +24,8 @@ let search = new URLSearchParams();
 let overview: OfficeWorkOverviewDTO;
 let queryError: unknown;
 let taskReadError: unknown;
+let detailTask: OfficeWorkTaskDTO;
+let detailActivities: OfficeWorkActivityDTO[];
 let actionCalls: unknown[] = [];
 let completeWrite: (() => void) | undefined;
 let pendingWrite = false;
@@ -123,6 +126,7 @@ const base: OfficeWorkTaskDTO = {
     canComplete: false,
     canReopen: false,
     canArchive: false,
+    canAddUpdate: true,
     requiresOverrideReason: false,
   },
 };
@@ -230,8 +234,8 @@ before(async () => {
       useOfficeWorkTaskQuery: () =>
         result(
           {
-            task: base,
-            activities: [],
+            task: detailTask,
+            activities: detailActivities,
             activityPage: 1,
             activityPageSize: 20,
             activityTotal: 0,
@@ -282,6 +286,8 @@ beforeEach(() => {
   search = new URLSearchParams();
   queryError = undefined;
   taskReadError = undefined;
+  detailTask = base;
+  detailActivities = [];
   actionCalls = [];
   completeWrite = undefined;
   pendingWrite = false;
@@ -581,6 +587,7 @@ test("detail suppresses cached data after a denied or reassigned task read", () 
       onEdit: noop,
       onReassign: noop,
       onAction: noop,
+      onAddUpdate: async () => false,
       onRefreshed: noop,
     }),
   );
@@ -721,4 +728,217 @@ test("eligible-assignee control provides a labeled search and required bounded-r
       (node) => node.type === "option" && node.props.value === user.id,
     ),
   );
+});
+
+test("work update box is optional and visible for the current assignee including completed work", () => {
+  const props = {
+    id: base.id,
+    timezone: "Asia/Dhaka",
+    busy: false,
+    blocked: false,
+    error: "",
+    close: noop,
+    onEdit: noop,
+    onReassign: noop,
+    onAction: noop,
+    onAddUpdate: async () => true,
+    onRefreshed: noop,
+  };
+  for (const status of ["PENDING", "PROCESSING", "DONE"] as const) {
+    slots = [];
+    detailTask = {
+      ...base,
+      status,
+      permissions: taskPermissions(user, { ...base, status }),
+    };
+    const tree = render(() => detail.OfficeWorkDetail(props));
+    const textarea = nodes(tree).find(
+      (node) => node.props.id === "office-work-result",
+    );
+    assert.ok(textarea, status);
+    assert.equal(textarea.props.maxLength, 10000);
+    assert.equal(textarea.props.required, undefined);
+    assert.ok(
+      nodes(tree).some(
+        (node) =>
+          node.type === "label" &&
+          node.props.htmlFor === "office-work-result" &&
+          textContent(node) === en.workUpdateLabel,
+      ),
+    );
+    assert.equal(
+      buttons(tree).find((node) => textContent(node) === en.saveUpdate)?.props
+        .disabled,
+      true,
+    );
+  }
+  for (const actor of [manager, { id: "admin-1", role: "SUPER_ADMIN" }]) {
+    slots = [];
+    detailTask = { ...base, permissions: taskPermissions(actor, base) };
+    const tree = render(() => detail.OfficeWorkDetail(props));
+    assert.equal(
+      nodes(tree).some((node) => node.props.id === "office-work-result"),
+      false,
+      actor.role,
+    );
+  }
+  slots = [];
+  const archived = { ...base, archivedAt: "2026-11-22T00:00:00Z" };
+  detailTask = { ...archived, permissions: taskPermissions(user, archived) };
+  assert.equal(
+    nodes(render(() => detail.OfficeWorkDetail(props))).some(
+      (node) => node.props.id === "office-work-result",
+    ),
+    false,
+  );
+});
+
+test("work update draft survives unsuccessful saves and clears only after a confirmed save", async () => {
+  let succeed = false;
+  const updates: string[] = [];
+  const props = {
+    id: base.id,
+    timezone: "Asia/Dhaka",
+    busy: false,
+    blocked: false,
+    error: "",
+    close: noop,
+    onEdit: noop,
+    onReassign: noop,
+    onAction: noop,
+    onAddUpdate: async (_task: OfficeWorkTaskDTO, update: string) => {
+      updates.push(update);
+      return succeed;
+    },
+    onRefreshed: noop,
+  };
+  let tree = render(() => detail.OfficeWorkDetail(props));
+  const textarea = nodes(tree).find(
+    (node) => node.props.id === "office-work-result",
+  );
+  assert.ok(textarea);
+  (textarea.props.onChange as (event: { target: { value: string } }) => void)({
+    target: { value: "Completed checks; waiting for handover." },
+  });
+  tree = render(() => detail.OfficeWorkDetail(props));
+  let updateForm = nodes(tree).find((node) => node.type === "form");
+  assert.ok(updateForm);
+  await (
+    updateForm.props.onSubmit as (event: {
+      preventDefault: () => void;
+    }) => Promise<void>
+  )({ preventDefault: noop });
+  tree = render(() => detail.OfficeWorkDetail(props));
+  assert.equal(
+    nodes(tree).find((node) => node.props.id === "office-work-result")?.props
+      .value,
+    "Completed checks; waiting for handover.",
+  );
+  succeed = true;
+  updateForm = nodes(tree).find((node) => node.type === "form");
+  assert.ok(updateForm);
+  await (
+    updateForm.props.onSubmit as (event: {
+      preventDefault: () => void;
+    }) => Promise<void>
+  )({ preventDefault: noop });
+  tree = render(() => detail.OfficeWorkDetail(props));
+  assert.equal(
+    nodes(tree).find((node) => node.props.id === "office-work-result")?.props
+      .value,
+    "",
+  );
+  assert.equal(updates.length, 2);
+});
+
+test("saved work results render as plain activity text with actor and event timestamp", () => {
+  const update = "Report complete. <script>alert('plain text')</script>";
+  detailActivities = [
+    {
+      id: "activity-update",
+      action: "OFFICE_WORK_UPDATE_ADDED",
+      actor: user,
+      before: null,
+      after: null,
+      reason: null,
+      update,
+      createdAt: "2026-11-22T01:00:00.000Z",
+    },
+  ];
+  const props = {
+    id: base.id,
+    timezone: "Asia/Dhaka",
+    busy: false,
+    blocked: false,
+    error: "",
+    close: noop,
+    onEdit: noop,
+    onReassign: noop,
+    onAction: noop,
+    onAddUpdate: async () => false,
+    onRefreshed: noop,
+  };
+  const tree = render(() => detail.OfficeWorkDetail(props));
+  const activity = nodes(tree).find(
+    (node) => node.props.activity === detailActivities[0],
+  );
+  assert.ok(activity);
+  const rendered = (
+    activity.type as (props: Record<string, unknown>) => unknown
+  )(activity.props);
+  assert.ok(textContent(rendered).includes(update));
+  assert.ok(textContent(rendered).includes(en.activityUpdateAdded));
+  assert.ok(
+    nodes(rendered).some(
+      (node) =>
+        node.type === detail.OfficeWorkPersonLabel &&
+        node.props.person === user,
+    ),
+  );
+  assert.ok(
+    nodes(rendered).some(
+      (node) =>
+        node.type === "time" &&
+        node.props.dateTime === detailActivities[0].createdAt,
+    ),
+  );
+  assert.equal(
+    nodes(rendered).some((node) =>
+      Object.hasOwn(node.props, "dangerouslySetInnerHTML"),
+    ),
+    false,
+  );
+});
+
+test("saving a work update uses the shared single-submit/version gate and trims only the submitted update", async () => {
+  pendingWrite = true;
+  let tree = render(() => workspace.OfficeWorkWorkspace({ role: "EMPLOYEE" }));
+  click(tree, en.details);
+  tree = render(() => workspace.OfficeWorkWorkspace({ role: "EMPLOYEE" }));
+  const modal = nodes(tree).find(
+    (node) => node.type === detail.OfficeWorkDetail,
+  );
+  assert.ok(modal);
+  const save = modal.props.onAddUpdate as (
+    task: OfficeWorkTaskDTO,
+    update: string,
+  ) => Promise<boolean>;
+  const first = save(base, "  Reviewed report and sent the handover.  ");
+  const duplicate = await save(base, "Duplicate click");
+  assert.equal(duplicate, false);
+  assert.deepEqual(actionCalls, [
+    {
+      id: base.id,
+      input: {
+        action: "add-update",
+        expectedVersion: base.version,
+        update: "Reviewed report and sent the handover.",
+      },
+    },
+  ]);
+  completeWrite?.();
+  assert.equal(await first, true);
+  tree = render(() => workspace.OfficeWorkWorkspace({ role: "EMPLOYEE" }));
+  assert.ok(nodes(tree).some((node) => node.props.children === en.updateSaved));
+  assert.equal(base.description, "Keep descriptions as plain text.");
 });

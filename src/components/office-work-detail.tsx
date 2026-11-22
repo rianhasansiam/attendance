@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useOfficeWorkTaskQuery } from "@/store/features/office-work/api";
 import { useFreshness } from "@/store/freshness";
@@ -17,7 +17,7 @@ import styles from "./office-work-workspace.module.css";
 
 export type OfficeWorkAction = Exclude<
   OfficeWorkActionInput["action"],
-  "reassign"
+  "reassign" | "add-update"
 >;
 
 export function OfficeWorkPersonLabel({
@@ -164,6 +164,7 @@ function OfficeWorkActivity({
     COMPLETE: t("activityCompleted"),
     REOPEN: t("activityReopened"),
     ARCHIVE: t("activityArchived"),
+    UPDATE_ADDED: t("activityUpdateAdded"),
   };
   const fieldNames: Record<string, string> = {
     title: t("titleLabel"),
@@ -230,6 +231,12 @@ function OfficeWorkActivity({
         </time>
       </div>
       <OfficeWorkPersonLabel person={activity.actor} />
+      {activity.update && (
+        <p className={styles.description}>
+          <strong>{t("workUpdate")}: </strong>
+          {activity.update}
+        </p>
+      )}
       {activity.reason && (
         <p>
           <strong>{t("reason")}: </strong>
@@ -269,6 +276,7 @@ export function OfficeWorkDetail({
   onEdit,
   onReassign,
   onAction,
+  onAddUpdate,
   onRefreshed,
 }: {
   id: string;
@@ -280,11 +288,13 @@ export function OfficeWorkDetail({
   onEdit: (task: OfficeWorkTaskDTO) => void;
   onReassign: (task: OfficeWorkTaskDTO) => void;
   onAction: (task: OfficeWorkTaskDTO, action: OfficeWorkAction) => void;
+  onAddUpdate: (task: OfficeWorkTaskDTO, update: string) => Promise<boolean>;
   onRefreshed: () => void;
 }) {
   const t = useTranslations("officeWork");
   const locale = useLocale();
   const [page, setPage] = useState(1);
+  const [workUpdate, setWorkUpdate] = useState("");
   const result = useOfficeWorkTaskQuery(
     { id, page, pageSize: 20 },
     useFreshness(true),
@@ -293,6 +303,7 @@ export function OfficeWorkDetail({
   // Never retain a previous assignee's cached detail after an access/404 response.
   const data = result.error ? undefined : view.data;
   const task = data?.task;
+  const updateDisabled = busy || blocked || view.isFetching;
   const timestamp = (value: string | null) =>
     value
       ? new Date(value).toLocaleString(locale, { timeZone: timezone })
@@ -303,6 +314,17 @@ export function OfficeWorkDetail({
       onRefreshed();
     } catch {
       /* Keep mutation locks until an authoritative read succeeds. */
+    }
+  }
+  async function submitUpdate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!task?.permissions.canAddUpdate || updateDisabled || !workUpdate.trim())
+      return;
+    const submitted = workUpdate;
+    if (await onAddUpdate(task, submitted)) {
+      // A failed or uncertain write keeps the draft available for reconciliation.
+      setWorkUpdate((draft) => (draft === submitted ? "" : draft));
+      setPage(1);
     }
   }
   return (
@@ -385,6 +407,36 @@ export function OfficeWorkDetail({
                 </div>
               )}
             </dl>
+            {task.permissions.canAddUpdate && (
+              <form className={styles.form} onSubmit={submitUpdate}>
+                <div className="field">
+                  <label htmlFor="office-work-result">
+                    {t("workUpdateLabel")}
+                  </label>
+                  <textarea
+                    id="office-work-result"
+                    rows={5}
+                    maxLength={10000}
+                    value={workUpdate}
+                    disabled={updateDisabled}
+                    onChange={(event) => setWorkUpdate(event.target.value)}
+                    aria-describedby="office-work-result-hint"
+                  />
+                  <small id="office-work-result-hint" className={styles.subtle}>
+                    {t("workUpdateHint")}
+                  </small>
+                </div>
+                <div className="buttons">
+                  <button
+                    className="button"
+                    type="submit"
+                    disabled={updateDisabled || !workUpdate.trim()}
+                  >
+                    {busy ? t("saving") : t("saveUpdate")}
+                  </button>
+                </div>
+              </form>
+            )}
             <section aria-labelledby="office-work-activity">
               <h3 id="office-work-activity">{t("activity")}</h3>
               {data.activities.length ? (

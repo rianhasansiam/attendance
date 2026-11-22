@@ -29,6 +29,8 @@ Ordinary work progresses **Pending → Processing → Done**. Reopening requires
 
 Each write commits its activity in the same database transaction. Task mutations require the current `expectedVersion`; conflicts return HTTP 409 with a refresh message. Create requests carry a UUID `requestId` so retries cannot create duplicate tasks. Creator identity remains the original creator after reassignment. Current account roles/status are rechecked on the server; old assignees immediately lose task and activity access.
 
+The task detail dialog includes an optional **Work result / update** box for the current assignee. **Save Update** appends a plain-text entry of up to 10,000 characters to the activity timeline with its author and timestamp. Updates are available before and after completion, preserve the original task description and status, and are never required to start or complete work. Managers and super administrators can read updates on accessible tasks; writing requires being the current assignee. Archived tasks remain read-only. Updates reuse the existing transactional audit history and require no additional database migration.
+
 ## Filters and metrics
 
 Search, assignee, creator, priority, and due-date boundaries define the base dataset. Cards and workload summarize that dataset. Status, Overdue, Due Today, and High Priority selections narrow the list without zeroing unrelated cards. My Work scopes both the list and cards to the current user. Employees cannot use query parameters to widen their scope and receive neither global workload nor user-directory data.
@@ -39,15 +41,15 @@ Archived tasks are omitted by default and always omitted from dashboard metrics.
 
 All routes use the existing no-store success/error envelopes, persisted sessions, input validation, and same-origin mutation protection.
 
-| Method and route                    | Operation                                               |
-| ----------------------------------- | ------------------------------------------------------- |
-| `GET /api/office-work`              | Scoped list, dashboard, workload, and creator filters   |
-| `POST /api/office-work`             | Create a task                                           |
-| `GET /api/office-work/:id`          | Scoped task detail and paginated activity               |
-| `PATCH /api/office-work/:id`        | Edit allowed management fields                          |
-| `POST /api/office-work/:id/actions` | `start`, `complete`, `reopen`, `reassign`, or `archive` |
-| `GET /api/office-work/:id/activity` | Scoped paginated activity                               |
-| `GET /api/office-work/assignees`    | Eligible active assignment targets for task creators    |
+| Method and route                    | Operation                                                             |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| `GET /api/office-work`              | Scoped list, dashboard, workload, and creator filters                 |
+| `POST /api/office-work`             | Create a task                                                         |
+| `GET /api/office-work/:id`          | Scoped task detail and paginated activity                             |
+| `PATCH /api/office-work/:id`        | Edit allowed management fields                                        |
+| `POST /api/office-work/:id/actions` | `start`, `complete`, `reopen`, `reassign`, `archive`, or `add-update` |
+| `GET /api/office-work/:id/activity` | Scoped paginated activity                                             |
+| `GET /api/office-work/assignees`    | Eligible active assignment targets for task creators                  |
 
 ## Verification
 

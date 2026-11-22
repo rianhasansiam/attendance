@@ -43,5 +43,6 @@
   "footer": "让每个工作日更清晰。",
   "companyMoney": "公司资金",
   "overtimeRequests": "加班申请",
-  "officeWork": "办公任务"
+  "officeWork": "办公任务",
+  "pendingNotifications": "{count} 项待处理"
 }

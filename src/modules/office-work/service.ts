@@ -186,6 +186,7 @@ async function recordActivity(
   task: TaskRecord,
   before?: TaskRecord,
   reason?: string,
+  workUpdate?: string,
 ) {
   await writeAudit(
     actor.id,
@@ -193,7 +194,11 @@ async function recordActivity(
     "OfficeWorkTask",
     task.id,
     before ? snapshot(before) : undefined,
-    { ...snapshot(task), ...(reason ? { reason } : {}) },
+    {
+      ...snapshot(task),
+      ...(reason ? { reason } : {}),
+      ...(workUpdate ? { workUpdate } : {}),
+    },
     tx,
   );
 }
@@ -217,6 +222,7 @@ function activityDTO(
     before: jsonObject(record.previousState),
     after,
     reason: typeof after?.reason === "string" ? after.reason : null,
+    update: typeof after?.workUpdate === "string" ? after.workUpdate : null,
     createdAt: record.createdAt.toISOString(),
   };
 }
@@ -508,6 +514,7 @@ async function saveChange(
   data: Prisma.OfficeWorkTaskUncheckedUpdateManyInput,
   action: string,
   reason?: string,
+  workUpdate?: string,
 ) {
   const changed = await tx.officeWorkTask.updateMany({
     where: { id: before.id, version: before.version, archivedAt: null },
@@ -518,7 +525,7 @@ async function saveChange(
     where: { id: before.id },
     include: taskInclude,
   });
-  await recordActivity(tx, actor, action, after, before, reason);
+  await recordActivity(tx, actor, action, after, before, reason, workUpdate);
   return taskDTO(after, actor, todayInTimezone(officeWorkTimezone()));
 }
 export async function createOfficeWorkTask(
@@ -622,6 +629,23 @@ export async function mutateOfficeWorkTask(
     input = officeWorkActionSchema.parse(raw);
   return write(actor, async (tx, current) => {
     const before = await lockedTask(tx, current, id, input.expectedVersion);
+    if (input.action === "add-update") {
+      if (!taskPermissions(current, before).canAddUpdate)
+        throw new DomainError(
+          "FORBIDDEN",
+          "Only the current assignee can add work updates.",
+          403,
+        );
+      return saveChange(
+        tx,
+        current,
+        before,
+        {},
+        "OFFICE_WORK_UPDATE_ADDED",
+        undefined,
+        input.update,
+      );
+    }
     if (input.action === "reassign") {
       if (!taskPermissions(current, before).canReassign)
         throw new DomainError(

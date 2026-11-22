@@ -43,5 +43,6 @@
   "footer": "A little more clarity in every workday.",
   "companyMoney": "Company money",
   "overtimeRequests": "Overtime requests",
-  "officeWork": "Office Work"
+  "officeWork": "Office Work",
+  "pendingNotifications": "{count, plural, one {# pending item} other {# pending items}}"
 }

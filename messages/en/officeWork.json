@@ -155,5 +155,11 @@
   "emptyPage": "No tasks on this page",
   "emptyPageDescription": "The list changed or this page is beyond the last result. Return to the first page.",
   "firstPage": "Go to First Page",
-  "assigneeEditHint": "Use Reassign to change the assignee."
+  "assigneeEditHint": "Use Reassign to change the assignee.",
+  "workUpdate": "Work result / update",
+  "workUpdateLabel": "Work result / update (optional)",
+  "workUpdateHint": "Share progress, results, or handover notes. Saved updates appear in the activity history.",
+  "saveUpdate": "Save Update",
+  "updateSaved": "Work update saved.",
+  "activityUpdateAdded": "Work update added"
 }

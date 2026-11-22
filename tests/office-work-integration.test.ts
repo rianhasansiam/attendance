@@ -607,6 +607,11 @@ integration(
         ),
       );
       await assert.rejects(action(f.employee, pending, "start"));
+      await assert.rejects(
+        action(f.employee, pending, "add-update", {
+          update: "This update must roll back.",
+        }),
+      );
       const after = await getOfficeWorkTask(f.manager, pending.id);
       assert.equal(after.task.title, pending.title);
       assert.equal(after.task.status, "PENDING");
@@ -995,6 +1000,175 @@ integration(
     assert.equal(
       retained.activities.filter((event) => event.actor === null).length,
       3,
+    );
+  },
+);
+
+integration(
+  "assignees can append optional results without changing instructions, status or lifecycle facts",
+  async () => {
+    const f = await fixture();
+    let task = await create(f, f.manager, f.employee.id, {
+      description: "Original instructions: prepare the report.",
+      priority: "HIGH",
+      dueDate: "2026-11-21",
+    });
+    const original = task;
+    for (const status of ["PENDING", "PROCESSING", "DONE"]) {
+      const before = task;
+      const update = `Result while ${status}: draft complete.\n<script>plain text</script>`;
+      task = await action(f.employee, task, "add-update", {
+        update: `  ${update}  `,
+      });
+      assert.equal(task.version, before.version + 1);
+      assert.equal(task.status, status);
+      assert.equal(task.title, original.title);
+      assert.equal(task.description, original.description);
+      assert.equal(task.priority, original.priority);
+      assert.equal(task.dueDate, original.dueDate);
+      assert.equal(task.startedAt, before.startedAt);
+      assert.equal(task.completedAt, before.completedAt);
+      const detail = await getOfficeWorkTask(f.otherManager, task.id);
+      const event = detail.activities.find(
+        (activity) => activity.after?.version === task.version,
+      );
+      assert.ok(event);
+      assert.equal(event.action, "OFFICE_WORK_UPDATE_ADDED");
+      assert.equal(event.update, update);
+      assert.equal(event.actor?.id, f.employee.id);
+      assert.equal(event.after?.workUpdate, update);
+      assert.equal(event.after?.description, original.description);
+      assert.equal(event.before?.status, status);
+      assert.equal(event.after?.status, status);
+      if (status === "PENDING") task = await action(f.employee, task, "start");
+      else if (status === "PROCESSING")
+        task = await action(f.employee, task, "complete");
+    }
+    const detail = await getOfficeWorkTask(f.manager, task.id);
+    assert.equal(
+      detail.activities.filter(
+        (activity) => activity.action === "OFFICE_WORK_UPDATE_ADDED",
+      ).length,
+      3,
+    );
+    assert.ok(
+      detail.activities
+        .filter((activity) => activity.action !== "OFFICE_WORK_UPDATE_ADDED")
+        .every((activity) => activity.update === null),
+    );
+    const managerTask = await create(f, f.admin, f.manager.id);
+    const managerUpdate = await action(f.manager, managerTask, "add-update", {
+      update: "Manager's assigned result.",
+    });
+    assert.equal(managerUpdate.status, "PENDING");
+    assert.equal(managerUpdate.permissions.canEdit, false);
+    assert.equal(managerUpdate.permissions.canAddUpdate, true);
+  },
+);
+
+integration(
+  "work updates reject other actors, inactive or former assignees, archived tasks and stale retries without adding history",
+  async () => {
+    const f = await fixture();
+    const pending = await create(f);
+    for (const actor of [
+      f.admin,
+      f.manager,
+      f.otherManager,
+      f.otherEmployee,
+      f.legacyAdmin,
+    ])
+      await assert.rejects(
+        action(actor, pending, "add-update", { update: "Unauthorized" }),
+        denied(actor.id === f.otherEmployee.id ? 404 : 403),
+      );
+    await assert.rejects(
+      action(f.employee, pending, "add-update", { update: "   " }),
+    );
+    await db.user.update({
+      where: { id: f.employee.id },
+      data: { status: "INACTIVE" },
+    });
+    await assert.rejects(
+      action(f.employee, pending, "add-update", { update: "Inactive" }),
+      denied(403),
+    );
+    await db.user.update({
+      where: { id: f.employee.id },
+      data: { status: "ACTIVE" },
+    });
+    assert.equal(
+      (await getOfficeWorkTask(f.manager, pending.id)).activityTotal,
+      1,
+    );
+    const saved = await action(f.employee, pending, "add-update", {
+      update: "First result.",
+    });
+    await assert.rejects(
+      action(f.employee, pending, "add-update", { update: "First result." }),
+      denied(409, "TASK_CONFLICT"),
+    );
+    const reassigned = await action(f.manager, saved, "reassign", {
+      assigneeId: f.otherEmployee.id,
+    });
+    await assert.rejects(
+      action(f.employee, reassigned, "add-update", {
+        update: "Former assignee",
+      }),
+      denied(404),
+    );
+    const next = await action(f.otherEmployee, reassigned, "add-update", {
+      update: "New assignee result.",
+    });
+    const history = await getOfficeWorkTask(f.otherEmployee, next.id);
+    assert.equal(
+      history.activities.filter((activity) => activity.update !== null).length,
+      2,
+    );
+    assert.ok(
+      history.activities.some(
+        (activity) => activity.update === "First result.",
+      ),
+    );
+    const archived = await action(f.admin, next, "archive");
+    const count = (await getOfficeWorkTask(f.admin, archived.id)).activityTotal;
+    await assert.rejects(
+      action(f.otherEmployee, archived, "add-update", { update: "Archived" }),
+      denied(409, "TASK_ARCHIVED"),
+    );
+    const after = await getOfficeWorkTask(f.admin, archived.id);
+    assert.equal(after.task.version, archived.version);
+    assert.equal(after.activityTotal, count);
+  },
+);
+
+integration(
+  "concurrent work updates commit one note and one version while the stale request gets a refresh conflict",
+  async () => {
+    const f = await fixture();
+    const pending = await create(f);
+    const results = await Promise.allSettled([
+      action(f.employee, pending, "add-update", { update: "Result A" }),
+      action(f.employee, pending, "add-update", { update: "Result B" }),
+    ]);
+    assert.equal(
+      results.filter((result) => result.status === "fulfilled").length,
+      1,
+    );
+    assert.ok(
+      results.some(
+        (result) =>
+          result.status === "rejected" &&
+          denied(409, "TASK_CONFLICT")(result.reason),
+      ),
+    );
+    const after = await getOfficeWorkTask(f.manager, pending.id);
+    assert.equal(after.task.version, pending.version + 1);
+    assert.equal(after.task.status, "PENDING");
+    assert.equal(after.activityTotal, 2);
+    assert.equal(
+      after.activities.filter((activity) => activity.update !== null).length,
+      1,
     );
   },
 );

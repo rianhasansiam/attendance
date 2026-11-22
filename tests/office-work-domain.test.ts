@@ -167,6 +167,58 @@ test("actions have an explicit allowlist and reopening always requires a nonblan
   );
 });
 
+test("work updates are plain trimmed text with a bounded body and explicit concurrency version", () => {
+  assert.deepEqual(
+    officeWorkActionSchema.parse({
+      action: "add-update",
+      expectedVersion: 2,
+      update: "  Finished the draft.\nAwaiting the client reply.  ",
+    }),
+    {
+      action: "add-update",
+      expectedVersion: 2,
+      update: "Finished the draft.\nAwaiting the client reply.",
+    },
+  );
+  for (const update of [undefined, null, "", "  \n ", "x".repeat(10001), 123])
+    assert.equal(
+      officeWorkActionSchema.safeParse({
+        action: "add-update",
+        expectedVersion: 2,
+        update,
+      }).success,
+      false,
+    );
+  for (const input of [
+    { action: "add-update", update: "Done" },
+    { action: "add-update", expectedVersion: 0, update: "Done" },
+    {
+      action: "add-update",
+      expectedVersion: 2,
+      update: "Done",
+      actorId: "someone-else",
+    },
+    {
+      action: "add-update",
+      expectedVersion: 2,
+      update: "Done",
+      description: "Overwrite the instructions",
+    },
+    {
+      action: "add-update",
+      expectedVersion: 2,
+      update: "Done",
+      status: "DONE",
+    },
+  ])
+    assert.equal(officeWorkActionSchema.safeParse(input).success, false);
+  assert.equal(
+    officeWorkActionSchema.safeParse({ action: "complete", expectedVersion: 2 })
+      .success,
+    true,
+  );
+});
+
 test("list defaults and bounded paging reject unsafe or unsupported filters", () => {
   const defaults = officeWorkListSchema.parse({});
   assert.equal(defaults.page, 1);

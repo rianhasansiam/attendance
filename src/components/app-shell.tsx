@@ -1,12 +1,15 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useAppStore } from "@/store/hooks";
 import { clearWorkspaceData } from "@/store/make-store";
 import { workspaceClosed } from "@/store/features/workspace-ui/slice";
+import { useSidebarNotificationsQuery } from "@/store/features/notifications/api";
+import { useFreshness } from "@/store/freshness";
+import type { SidebarNotificationHref } from "@/modules/notifications/contracts";
 import { canManageDailyExpenses } from "@/modules/daily-expenses/permissions";
 import { canAccessOfficeWork } from "@/modules/office-work/permissions";
 import Image from "next/image";
@@ -119,6 +122,11 @@ export function AppShell({
   const t = useTranslations("navigation");
   const common = useTranslations("common");
   const auth = useTranslations("auth");
+  const format = useFormatter();
+  const notifications = useSidebarNotificationsQuery(
+    undefined,
+    useFreshness(true),
+  );
   const store = useAppStore();
   const pathname = usePathname();
   async function signOutAction() {
@@ -213,25 +221,44 @@ export function AppShell({
           {mode === "admin" ? t("workspace") : t("personalWorkspace")}
         </div>
         <nav aria-label={t("mainNavigation")}>
-          {navigation.map(({ label, href, icon: Icon }) => (
-            <Link
-              onClick={() => setOpen(false)}
-              key={href}
-              href={navigationHref(href)}
-              prefetch={href.startsWith("/profile/") ? false : undefined}
-              className={`nav-item ${pathname === navigationHref(href) ? "active" : ""}`}
-              aria-current={
-                pathname === navigationHref(href) ? "page" : undefined
-              }
-            >
-              <Icon size={18} />
-              <span>
-                {t(
-                  label as keyof typeof import("../../messages/en/navigation.json"),
+          {navigation.map(({ label, href, icon: Icon }) => {
+            const destination = navigationHref(href);
+            const count = notifications.isError
+              ? 0
+              : (notifications.currentData?.[
+                  destination as SidebarNotificationHref
+                ] ?? 0);
+            return (
+              <Link
+                onClick={() => setOpen(false)}
+                key={href}
+                href={destination}
+                prefetch={href.startsWith("/profile/") ? false : undefined}
+                className={`nav-item ${pathname === destination ? "active" : ""}`}
+                aria-current={pathname === destination ? "page" : undefined}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span className="nav-label">
+                  {t(
+                    label as keyof typeof import("../../messages/en/navigation.json"),
+                  )}
+                </span>
+                {count > 0 && (
+                  <span
+                    className="nav-notification"
+                    title={t("pendingNotifications", { count })}
+                  >
+                    <span aria-hidden="true">
+                      {count > 99 ? "99+" : format.number(count)}
+                    </span>
+                    <span className="sr-only">
+                      {t("pendingNotifications", { count })}
+                    </span>
+                  </span>
                 )}
-              </span>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </nav>
         <div className="sidebar-bottom">
           <div className="secure-workspace">

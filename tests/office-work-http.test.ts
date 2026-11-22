@@ -303,6 +303,56 @@ test("actions require expectedVersion and cannot expose a generic status setter"
   assert.deepEqual(mutate.mock.calls[0].arguments, [actor(), "task-1", input]);
 });
 
+test("assignee work updates validate plain text and retain the authenticated actor", async () => {
+  state.role = "EMPLOYEE";
+  const response = await actions.POST(
+    request("/api/office-work/task-1/actions", "POST", {
+      action: "add-update",
+      expectedVersion: 3,
+      update: "  Finished the report. Waiting for the revised figures.  ",
+    }),
+    context(),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(mutate.mock.calls[0].arguments, [
+    actor(),
+    "task-1",
+    {
+      action: "add-update",
+      expectedVersion: 3,
+      update: "Finished the report. Waiting for the revised figures.",
+    },
+  ]);
+  for (const input of [
+    { action: "add-update", expectedVersion: 3, update: " " },
+    { action: "add-update", expectedVersion: 3, update: "x".repeat(10001) },
+    { action: "add-update", update: "Result" },
+    {
+      action: "add-update",
+      expectedVersion: 3,
+      update: "Result",
+      actorId: "forged",
+    },
+    {
+      action: "add-update",
+      expectedVersion: 3,
+      update: "Result",
+      status: "DONE",
+    },
+  ]) {
+    await expectError(
+      await actions.POST(
+        request("/api/office-work/task-1/actions", "POST", input),
+        context(),
+      ),
+      400,
+      "VALIDATION_ERROR",
+    );
+  }
+  assert.equal(mutate.mock.callCount(), 1);
+});
+
 test("detail and activity validate route IDs and activity scope before reaching services", async () => {
   await expectError(
     await task.GET(request("/api/office-work/task-1"), context("../forged")),

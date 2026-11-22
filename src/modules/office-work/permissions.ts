@@ -75,6 +75,7 @@ export function taskPermissions(
     canComplete: work && task.status === "PROCESSING",
     canReopen: management && task.status === "DONE",
     canArchive: writable && actor.role === "SUPER_ADMIN",
+    canAddUpdate: writable && task.assigneeId === actor.id,
     requiresOverrideReason:
       writable && actor.role === "SUPER_ADMIN" && task.assigneeId !== actor.id,
   };

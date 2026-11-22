@@ -306,6 +306,43 @@ export function OfficeWorkWorkspace({
       }
     }
   }
+  async function addWorkUpdate(
+    task: OfficeWorkTaskDTO,
+    text: string,
+  ): Promise<boolean> {
+    const update = text.trim();
+    if (
+      submitting.current ||
+      disabled ||
+      !task.permissions.canAddUpdate ||
+      !update ||
+      update.length > 10000
+    )
+      return false;
+    submitting.current = true;
+    setBusy(true);
+    setActionError("");
+    setMessage("");
+    const started = generation.current;
+    const current = () => active.current && started === generation.current;
+    try {
+      await actOnTask({
+        id: task.id,
+        input: { action: "add-update", expectedVersion: task.version, update },
+      }).unwrap();
+      if (!current()) return false;
+      setMessage(t("updateSaved"));
+      return true;
+    } catch (error) {
+      if (current()) fail(error);
+      return false;
+    } finally {
+      if (current()) {
+        submitting.current = false;
+        setBusy(false);
+      }
+    }
+  }
   async function save(values: OfficeWorkFormValues, requestId: string) {
     if (submitting.current || !editor || blocked) return;
     submitting.current = true;
@@ -1031,6 +1068,7 @@ export function OfficeWorkWorkspace({
           onEdit={onEdit}
           onReassign={onReassign}
           onAction={(task, action) => void perform(task, action)}
+          onAddUpdate={addWorkUpdate}
           onRefreshed={() => {
             setBlocked(false);
             setActionError("");

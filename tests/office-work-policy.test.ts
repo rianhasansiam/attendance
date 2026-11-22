@@ -134,6 +134,37 @@ test("employee permissions disappear immediately after reassignment and archived
   }
 });
 
+test("only the current assignee can add optional work updates in any unarchived status", () => {
+  for (const status of ["PENDING", "PROCESSING", "DONE"] as const) {
+    assert.equal(
+      taskPermissions(employee, { ...task, status }).canAddUpdate,
+      true,
+    );
+    assert.equal(
+      taskPermissions(manager, { ...task, status }).canAddUpdate,
+      false,
+    );
+    assert.equal(
+      taskPermissions(admin, { ...task, status }).canAddUpdate,
+      false,
+    );
+    assert.equal(
+      taskPermissions(manager, {
+        ...task,
+        status,
+        assigneeId: manager.id,
+        assignee: { role: manager.role },
+      }).canAddUpdate,
+      true,
+    );
+    assert.equal(
+      taskPermissions(employee, { ...task, status, archivedAt: new Date() })
+        .canAddUpdate,
+      false,
+    );
+  }
+});
+
 test("ordinary lifecycle requires the current assignee and progresses pending to processing to done", () => {
   const startedAt = new Date("2026-11-21T01:00:00Z");
   const completedAt = new Date("2026-11-21T02:00:00Z");
